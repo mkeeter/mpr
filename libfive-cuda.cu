@@ -381,6 +381,15 @@ int main(int argc, char **argv) {
 
     dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
     dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
+
+    {   // CUDA, help me pick magic numbers:
+        int min_grid_size;
+        int block_size;
+        cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size,
+            processTiles);
+        printf("Min grid size: %i\tBlock size: %i\n", min_grid_size, block_size);
+    }
+
     processTiles <<< grid, threads >>>(Tape {},
         nullptr /* regs */, 0 /* num_regs */,
         nullptr /* csg_choices */, 0 /* num_csg_choices */,
