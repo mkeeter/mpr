@@ -29,8 +29,9 @@ struct Tape {
 };
 
 __device__ void walk(const Tape tape,
-                     Interval* __restrict__ regs,
-                     bool* __restrict__ choices)
+                     const Interval X, const Interval Y,
+                     Interval* const __restrict__ regs,
+                     uint8_t* const __restrict__ choices)
 {
     uint32_t choice_index = 0;
     for (uint32_t i=0; i < tape.tape_length; ++i) {
@@ -41,6 +42,9 @@ __device__ void walk(const Tape tape,
                                                      tape.constants[c.rhs]}))
         using namespace libfive::Opcode;
         switch (c.opcode) {
+            case VAR_X: regs[c.out] = X; break;
+            case VAR_Y: regs[c.out] = Y; break;
+
             case OP_SQUARE: regs[c.out] = LHS.square(); break;
             case OP_SQRT: regs[c.out] = LHS.sqrt(); break;
             case OP_NEG: regs[c.out] = -LHS; break;
@@ -98,18 +102,28 @@ const static uint32_t NUM_BLOCKS = 16;
 const static uint32_t THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
 
 __global__ void processTiles(const Tape tape,
-        Interval* __restrict__ regs, uint32_t num_regs,
-        uint8_t* __restrict__ csg_choices, uint32_t num_csg_choices,
-        Output* __restrict__ const out)
+        // Flat array for all pseudoregisters
+        Interval* const __restrict__ regs_,
+        const uint32_t num_regs,
+
+        // Flat array for all CSG choices
+        uint8_t* const __restrict__ csg_choices_,
+        const uint32_t num_csg_choices,
+
+        // Output data
+        Output* const __restrict__ out)
 {
     const float x = blockIdx.x * THREADS_PER_BLOCK + threadIdx.x;
     const float y = blockIdx.y * THREADS_PER_BLOCK + threadIdx.y;
 
-    const float xmin = x / TILE_COUNT;
-    const float xmax = (x + 1) / TILE_COUNT;
-    const float ymin = y / TILE_COUNT;
-    const float ymax = (y + 1) / TILE_COUNT;
-    printf("[%f, %f, %f, %f],\n", xmin, xmax, ymin, ymax);
+    const Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
+    const Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
+
+    // Unpack a 1D offset into the data arrays
+    const uint32_t index = x * TILE_COUNT + y;
+    Interval* __restrict__ const regs = regs_ + index * num_regs;
+    uint8_t* __restrict__ const csg_choices = csg_choices_ + index * num_csg_choices;
+    walk(tape, X, Y, regs, csg_choices);
 }
 
 /**
