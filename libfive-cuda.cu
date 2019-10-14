@@ -124,6 +124,12 @@ __global__ void processTiles(const Tape tape,
     Interval* __restrict__ const regs = regs_ + index * num_regs;
     uint8_t* __restrict__ const csg_choices = csg_choices_ + index * num_csg_choices;
     walk(tape, X, Y, regs, csg_choices);
+
+    const Interval result = regs[tape.tape[tape.tape_length - 1].out];
+    printf("[%f %f][%f %f]: [%f %f]\n",
+            X.lower, X.upper,
+            Y.lower, Y.upper,
+            result.lower, result.upper);
 }
 
 /**
