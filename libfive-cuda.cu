@@ -15,17 +15,17 @@
 #include "gpu_interval.hpp"
 
 struct Clause {
-    uint8_t opcode;
-    uint8_t banks;
-    uint16_t out;
-    uint16_t lhs;
-    uint16_t rhs;
+    const uint8_t opcode;
+    const uint8_t banks;
+    const uint16_t out;
+    const uint16_t lhs;
+    const uint16_t rhs;
 };
 
 struct Tape {
-    const Clause* __restrict__ tape;
+    const Clause* const __restrict__ tape;
     const uint32_t tape_length;
-    const float* __restrict__ constants;
+    const float* const __restrict__ constants;
 };
 
 __device__ void walk(const Tape tape,
@@ -82,6 +82,35 @@ __device__ void walk(const Tape tape,
 #undef RHS
 }
 
+struct Output {
+    uint32_t* const __restrict__ tiles;
+    const uint32_t tiles_length;
+
+    uint32_t num_active;
+    uint32_t num_filled;
+};
+
+const static uint32_t IMAGE_SIZE_PX = 256;
+const static uint32_t TILE_SIZE_PX = 16;
+const static uint32_t TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
+
+const static uint32_t NUM_BLOCKS = 16;
+const static uint32_t THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
+
+__global__ void processTiles(const Tape tape,
+        Interval* __restrict__ regs, uint32_t num_regs,
+        uint8_t* __restrict__ csg_choices, uint32_t num_csg_choices,
+        Output* __restrict__ const out)
+{
+    const float x = blockIdx.x * THREADS_PER_BLOCK + threadIdx.x;
+    const float y = blockIdx.y * THREADS_PER_BLOCK + threadIdx.y;
+
+    const float xmin = x / TILE_COUNT;
+    const float xmax = (x + 1) / TILE_COUNT;
+    const float ymin = y / TILE_COUNT;
+    const float ymax = (y + 1) / TILE_COUNT;
+    printf("[%f, %f, %f, %f],\n", xmin, xmax, ymin, ymax);
+}
 
 /**
  * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
@@ -335,6 +364,14 @@ int MatrixMultiply(int argc, char **argv,
  * Program main
  */
 int main(int argc, char **argv) {
+
+    dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
+    dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
+    processTiles <<< grid, threads >>>(Tape {},
+        nullptr /* regs */, 0 /* num_regs */,
+        nullptr /* csg_choices */, 0 /* num_csg_choices */,
+        nullptr /* out */);
+
     printf("[Matrix Multiply Using CUDA] - Starting...\n");
 
     if (checkCmdLineFlag(argc, (const char **)argv, "help") ||
