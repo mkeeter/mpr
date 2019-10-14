@@ -1,3 +1,33 @@
+
+// System includes
+#include <stdio.h>
+#include <assert.h>
+
+// CUDA runtime
+#include <cuda_runtime.h>
+#include <math_constants.h>
+
+// Helper functions and utilities to work with CUDA
+#include <helper_functions.h>
+#include <helper_cuda.h>
+
+// Our Interval arithmetic class
+#include "gpu_interval.hpp"
+
+struct Clause {
+    uint8_t opcode;
+    uint8_t banks;
+    uint16_t lhs;
+    uint16_t rhs;
+};
+
+struct Tape {
+    Clause* tape;
+    uint32_t length;
+    float* constants;
+};
+
+
 /**
  * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
  *
@@ -8,31 +38,6 @@
  * is strictly prohibited.
  *
  */
-
-/**
- * Matrix multiplication: C = A * B.
- * Host code.
- *
- * This sample implements matrix multiplication which makes use of shared memory
- * to ensure data reuse, the matrix multiplication is done using tiling approach.
- * It has been written for clarity of exposition to illustrate various CUDA programming
- * principles, not with the goal of providing the most performant generic kernel for matrix multiplication.
- * See also:
- * V. Volkov and J. Demmel, "Benchmarking GPUs to tune dense linear algebra,"
- * in Proc. 2008 ACM/IEEE Conf. on Supercomputing (SC '08),
- * Piscataway, NJ: IEEE Press, 2008, pp. Art. 31:1-11.
- */
-
-// System includes
-#include <stdio.h>
-#include <assert.h>
-
-// CUDA runtime
-#include <cuda_runtime.h>
-
-// Helper functions and utilities to work with CUDA
-#include <helper_functions.h>
-#include <helper_cuda.h>
 
 /**
  * Matrix multiplication (CUDA Kernel) on the device: C = A * B
