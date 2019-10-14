@@ -1,7 +1,7 @@
-
 // System includes
 #include <stdio.h>
 #include <assert.h>
+#include <libfive/tree/opcode.hpp>
 
 // CUDA runtime
 #include <cuda_runtime.h>
@@ -17,15 +17,70 @@
 struct Clause {
     uint8_t opcode;
     uint8_t banks;
+    uint16_t out;
     uint16_t lhs;
     uint16_t rhs;
 };
 
 struct Tape {
-    Clause* tape;
-    uint32_t length;
-    float* constants;
+    const Clause* __restrict__ tape;
+    const uint32_t tape_length;
+    const float* __restrict__ constants;
 };
+
+__device__ void walk(const Tape tape,
+                     Interval* __restrict__ regs,
+                     bool* __restrict__ choices)
+{
+    uint32_t choice_index = 0;
+    for (uint32_t i=0; i < tape.tape_length; ++i) {
+        const Clause c = tape.tape[i];
+#define LHS (((c.banks & 1) ? regs[c.lhs] : Interval{tape.constants[c.lhs], \
+                                                     tape.constants[c.lhs]}))
+#define RHS (((c.banks & 1) ? regs[c.rhs] : Interval{tape.constants[c.rhs], \
+                                                     tape.constants[c.rhs]}))
+        using namespace libfive::Opcode;
+        switch (c.opcode) {
+            case OP_SQUARE: regs[c.out] = LHS.square(); break;
+            case OP_SQRT: regs[c.out] = LHS.sqrt(); break;
+            case OP_NEG: regs[c.out] = -LHS; break;
+            // Skipping transcendental functions for now
+
+            case OP_ADD: regs[c.out] = LHS + RHS; break;
+            case OP_MUL: regs[c.out] = LHS * RHS; break;
+            case OP_MIN: if (LHS.upper < RHS.lower) {
+                             choices[choice_index] = 1;
+                             regs[c.out] = LHS;
+                         } else if (RHS.upper < LHS.lower) {
+                             choices[choice_index] = 2;
+                             regs[c.out] = RHS;
+                         } else {
+                             choices[choice_index] = 0;
+                             regs[c.out] = LHS.min(RHS);
+                         }
+                         choice_index++;
+                         break;
+            case OP_MAX: if (LHS.lower > RHS.upper) {
+                             choices[choice_index] = 1;
+                             regs[c.out] = LHS;
+                         } else if (RHS.lower > LHS.upper) {
+                             choices[choice_index] = 2;
+                             regs[c.out] = RHS;
+                         } else {
+                             choices[choice_index] = 0;
+                             regs[c.out] = LHS.max(RHS);
+                         }
+                         choice_index++;
+                         break;
+            case OP_SUB: regs[c.out] = LHS - RHS; break;
+
+            // Skipping various hard functions here
+            default: break;
+        }
+    }
+#undef LHS
+#undef RHS
+}
 
 
 /**
