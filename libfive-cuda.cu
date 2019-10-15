@@ -504,14 +504,32 @@ int MatrixMultiply(int argc, char **argv,
     }
 }
 
+void callProcessTiles(Tape tape) {
+    Interval* d_regs;
+    checkCudaErrors(cudaMalloc(
+                reinterpret_cast<void **>(&d_regs),
+                sizeof(Interval) * tape.num_regs));
+
+    uint8_t* d_csg_choices;
+    checkCudaErrors(cudaMalloc(
+                reinterpret_cast<void **>(&d_csg_choices),
+                sizeof(uint8_t) * tape.num_csg_choices));
+
+    printf("calling processTiles %u %u", tape.num_regs, tape.num_csg_choices);
+    printf("calling processTiles %p %p\n", d_regs, d_csg_choices);
+
+    dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
+    dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
+    processTiles <<< grid, threads >>>(tape,
+        d_regs, d_csg_choices,
+        nullptr  /* out */);
+    cudaDeviceSynchronize();
+}
 
 /**
  * Program main
  */
 int main(int argc, char **argv) {
-
-    dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
-    dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
 
     {   // CUDA, help me pick magic numbers:
         int min_grid_size;
@@ -525,14 +543,10 @@ int main(int argc, char **argv) {
         auto X = libfive::Tree::X();
         auto Y = libfive::Tree::Y();
         auto circle = sqrt(X*X + Y*Y) - 1.0;
-        prepareTape(circle);
+        auto tape = prepareTape(circle);
+        callProcessTiles(tape);
     }
     return 0;
-
-    processTiles <<< grid, threads >>>(Tape {},
-        nullptr, /* regs */
-        nullptr, /* csg_choices */
-        nullptr  /* out */);
 
     printf("[Matrix Multiply Using CUDA] - Starting...\n");
 
