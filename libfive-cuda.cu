@@ -103,7 +103,6 @@ struct Output {
     uint32_t num_filled;
 };
 
-template <unsigned TILE_COUNT, unsigned THREADS_PER_BLOCK>
 __global__ void processTiles(const Tape tape,
         // Flat array for all pseudoregisters
         Interval* const __restrict__ regs_,
@@ -114,8 +113,10 @@ __global__ void processTiles(const Tape tape,
         // Output data
         Output* const __restrict__ out)
 {
-    const float x = blockIdx.x * THREADS_PER_BLOCK + threadIdx.x;
-    const float y = blockIdx.y * THREADS_PER_BLOCK + threadIdx.y;
+    const float x = blockIdx.x * blockDim.x + threadIdx.x;
+    const float y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    const uint32_t TILE_COUNT = gridDim.x * blockDim.x;
 
     const Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
     const Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
@@ -127,19 +128,30 @@ __global__ void processTiles(const Tape tape,
     walk(tape, X, Y, regs, csg_choices);
 
     const Interval result = regs[tape.tape[tape.tape_length - 1].out];
-    if (result.lower <= 0.0f && result.upper >= 0.0f) {
-        printf("[%f %f][%f %f]: [%f %f]\n",
-                X.lower, X.upper,
-                Y.lower, Y.upper,
-                result.lower, result.upper);
-    }
-
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper < 0.0f) {
         uint32_t i = atomicAdd(&out->num_filled, 1);
         out->tiles[out->tiles_length - 1 - i] = index;
     }
+    // If the tile is ambiguous, then record it as needing further refinement
+    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        uint32_t i = atomicAdd(&out->num_active, 2);
+        out->tiles[i] = index;
+        out->tiles[i + 1] = 0; // This will eventually be a subtape pointer
+        printf("[%f %f][%f %f]: [%f %f]\n",
+                X.lower, X.upper,
+                Y.lower, Y.upper,
+                result.lower, result.upper);
+    }
+}
+
+template <unsigned TILE_COUNT, unsigned THREADS_PER_BLOCK>
+__global__ void fillTiles(Output* const __restrict__ out,
+                          uint8_t* __restrict__ image)
+{
+    const uint32_t x = threadIdx.x;
+    const uint32_t y = threadIdx.y;
 }
 
 Tape prepareTape(libfive::Tree tree) {
@@ -238,25 +250,21 @@ Tape prepareTape(libfive::Tree tree) {
         }
     }
 
-    Clause* d_flat_tape;
-    checkCudaErrors(cudaMalloc(
-                reinterpret_cast<void **>(&d_flat_tape),
+    Clause* d_tape;
+    checkCudaErrors(cudaMallocManaged(
+                reinterpret_cast<void **>(&d_tape),
                 sizeof(Clause) * flat.size()));
-    checkCudaErrors(cudaMemcpy(d_flat_tape, flat.data(),
-                sizeof(Clause) * flat.size(),
-                cudaMemcpyHostToDevice));
+    memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());
 
     float* d_flat_constants;
-    checkCudaErrors(cudaMalloc(
+    checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_flat_constants),
                 sizeof(float) * constant_data.size()));
-    checkCudaErrors(cudaMemcpy(
-                d_flat_constants, constant_data.data(),
-                sizeof(float) * constant_data.size(),
-                cudaMemcpyHostToDevice));
+    memcpy(d_flat_constants, constant_data.data(),
+           sizeof(float) * constant_data.size());
 
     return Tape {
-        d_flat_tape,
+        d_tape,
         static_cast<uint32_t>(flat.size()),
         num_registers,
         num_csg_choices,
@@ -269,39 +277,36 @@ Output* callProcessTiles(Tape tape) {
     constexpr unsigned TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
     constexpr unsigned TOTAL_TILES = TILE_COUNT * TILE_COUNT;
 
-    constexpr unsigned NUM_BLOCKS = 128;
+    constexpr unsigned NUM_BLOCKS = 8;
     constexpr unsigned THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
+    printf("threads per block: %u\n", THREADS_PER_BLOCK);
 
     Interval* d_regs;
-    checkCudaErrors(cudaMalloc(
+    checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_regs),
                 sizeof(Interval) * tape.num_regs * TOTAL_TILES));
 
     uint8_t* d_csg_choices;
-    checkCudaErrors(cudaMalloc(
+    checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_csg_choices),
-                sizeof(uint8_t) * tape.num_csg_choices * TOTAL_TILES));
+                max(1, tape.num_csg_choices) * TOTAL_TILES));
 
     uint32_t* d_tiles;
-    checkCudaErrors(cudaMalloc(
+    checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_tiles),
                 sizeof(uint32_t) * 2 * TOTAL_TILES));
 
-    Output out {
-        d_tiles,
-        TOTAL_TILES * 2,
-        0, 0
-    };
     Output* d_out;
-    checkCudaErrors(cudaMalloc(
+    checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_out),
                 sizeof(Output)));
-    checkCudaErrors(cudaMemcpy(
-                d_out, &out, sizeof(Output), cudaMemcpyHostToDevice));
+    new (d_out) Output { d_tiles, TOTAL_TILES * 2, 0, 0 };
 
-    dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
     dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
-    processTiles<TILE_COUNT, THREADS_PER_BLOCK> <<< grid, threads >>>(
+    dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
+    printf("threads per block: %u\tnumber of blocks: %u\n",
+            THREADS_PER_BLOCK, NUM_BLOCKS);
+    processTiles <<< grid, threads >>>(
             tape, d_regs, d_csg_choices, d_out);
     const auto code = cudaGetLastError();
     if (code != cudaSuccess) {
