@@ -133,6 +133,13 @@ __global__ void processTiles(const Tape tape,
                 Y.lower, Y.upper,
                 result.lower, result.upper);
     }
+
+    // If this tile is unambiguously filled, then mark it at the end
+    // of the tiles list
+    if (result.upper < 0.0f) {
+        uint32_t i = atomicAdd(&out->num_filled, 1);
+        out->tiles[out->tiles_length - 1 - i] = index;
+    }
 }
 
 Tape prepareTape(libfive::Tree tree) {
@@ -258,7 +265,7 @@ Tape prepareTape(libfive::Tree tree) {
 }
 
 template <unsigned IMAGE_SIZE_PX=4096, unsigned TILE_SIZE_PX=16>
-void callProcessTiles(Tape tape) {
+Output* callProcessTiles(Tape tape) {
     constexpr unsigned TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
     constexpr unsigned TOTAL_TILES = TILE_COUNT * TILE_COUNT;
 
@@ -275,16 +282,33 @@ void callProcessTiles(Tape tape) {
                 reinterpret_cast<void **>(&d_csg_choices),
                 sizeof(uint8_t) * tape.num_csg_choices * TOTAL_TILES));
 
+    uint32_t* d_tiles;
+    checkCudaErrors(cudaMalloc(
+                reinterpret_cast<void **>(&d_tiles),
+                sizeof(uint32_t) * 2 * TOTAL_TILES));
+
+    Output out {
+        d_tiles,
+        TOTAL_TILES * 2,
+        0, 0
+    };
+    Output* d_out;
+    checkCudaErrors(cudaMalloc(
+                reinterpret_cast<void **>(&d_out),
+                sizeof(Output)));
+    checkCudaErrors(cudaMemcpy(
+                d_out, &out, sizeof(Output), cudaMemcpyHostToDevice));
+
     dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
     dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
-    processTiles<TILE_COUNT, THREADS_PER_BLOCK> <<< grid, threads >>>(tape,
-        d_regs, d_csg_choices,
-        nullptr  /* out */);
+    processTiles<TILE_COUNT, THREADS_PER_BLOCK> <<< grid, threads >>>(
+            tape, d_regs, d_csg_choices, d_out);
     const auto code = cudaGetLastError();
     if (code != cudaSuccess) {
         fprintf(stderr, "Failed to launch: %s\n",
                 cudaGetErrorString(code));
     }
+    return d_out;
 }
 
 /**
@@ -297,8 +321,11 @@ int main(int argc, char **argv)
     auto circle = sqrt(X*X + Y*Y) - 1.0;
     auto tape = prepareTape(circle);
 
-    callProcessTiles(tape);
+    auto d_out = callProcessTiles(tape);
     cudaDeviceSynchronize();
+    Output out {0};
+    checkCudaErrors(cudaMemcpy(&out, d_out, sizeof(Output), cudaMemcpyDeviceToHost));
+    printf("%u %u\n", out.num_active, out.num_filled);
 
     return 0;
 }
