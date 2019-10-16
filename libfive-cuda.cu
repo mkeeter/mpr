@@ -103,12 +103,12 @@ struct Output {
     uint32_t num_filled;
 };
 
-const static uint32_t IMAGE_SIZE_PX = 256;
+const static uint32_t IMAGE_SIZE_PX = 65535;
 const static uint32_t TILE_SIZE_PX = 16;
 const static uint32_t TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
 const static uint32_t TOTAL_TILES = TILE_COUNT * TILE_COUNT;
 
-const static uint32_t NUM_BLOCKS = 16;
+const static uint32_t NUM_BLOCKS = 128;
 const static uint32_t THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
 
 __global__ void processTiles(const Tape tape,
@@ -134,10 +134,12 @@ __global__ void processTiles(const Tape tape,
     walk(tape, X, Y, regs, csg_choices);
 
     const Interval result = regs[tape.tape[tape.tape_length - 1].out];
-    printf("[%f %f][%f %f]: [%f %f]\n",
-            X.lower, X.upper,
-            Y.lower, Y.upper,
-            result.lower, result.upper);
+    if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        printf("[%f %f][%f %f]: [%f %f]\n",
+                X.lower, X.upper,
+                Y.lower, Y.upper,
+                result.lower, result.upper);
+    }
 }
 
 Tape prepareTape(libfive::Tree tree) {
@@ -269,14 +271,16 @@ void callProcessTiles(Tape tape) {
                 reinterpret_cast<void **>(&d_csg_choices),
                 sizeof(uint8_t) * tape.num_csg_choices * TOTAL_TILES));
 
-    printf("calling processTiles %u %u", tape.num_regs, tape.num_csg_choices);
-    printf("calling processTiles %p %p\n", d_regs, d_csg_choices);
-
     dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
     dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
     processTiles <<< grid, threads >>>(tape,
         d_regs, d_csg_choices,
         nullptr  /* out */);
+    const auto code = cudaGetLastError();
+    if (code != cudaSuccess) {
+        fprintf(stderr, "Failed to launch: %s\n",
+                cudaGetErrorString(code));
+    }
     cudaDeviceSynchronize();
 }
 
@@ -301,7 +305,7 @@ int main(int argc, char **argv)
         auto X = libfive::Tree::X();
         auto Y = libfive::Tree::Y();
         auto circle = sqrt(X*X + Y*Y) - 1.0;
-        auto tape = prepareTape(X * X);
+        auto tape = prepareTape(circle);
         callProcessTiles(tape);
     }
     return 0;
