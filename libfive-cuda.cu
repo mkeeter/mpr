@@ -103,14 +103,7 @@ struct Output {
     uint32_t num_filled;
 };
 
-const static uint32_t IMAGE_SIZE_PX = 65535;
-const static uint32_t TILE_SIZE_PX = 16;
-const static uint32_t TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
-const static uint32_t TOTAL_TILES = TILE_COUNT * TILE_COUNT;
-
-const static uint32_t NUM_BLOCKS = 128;
-const static uint32_t THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
-
+template <unsigned TILE_COUNT, unsigned THREADS_PER_BLOCK>
 __global__ void processTiles(const Tape tape,
         // Flat array for all pseudoregisters
         Interval* const __restrict__ regs_,
@@ -152,6 +145,9 @@ Tape prepareTape(libfive::Tree tree) {
     for (auto& c : ordered) {
         if (c->op == libfive::Opcode::CONSTANT) {
             // Store constants in a separate list
+            if (constant_data.size() == UINT16_MAX) {
+                fprintf(stderr, "Ran out of constants!\n");
+            }
             constants.insert({c.id(), constant_data.size()});
             constant_data.push_back(c->value);
         } else {
@@ -207,7 +203,7 @@ Tape prepareTape(libfive::Tree tree) {
                 if (itr != bound_registers.end()) {
                     return itr->second;
                 } else {
-                    fprintf(stderr, "Could not LHS?");
+                    fprintf(stderr, "Could not find bound register");
                     return static_cast<uint16_t>(0);
                 }
             }
@@ -220,7 +216,8 @@ Tape prepareTape(libfive::Tree tree) {
 
         std::cout << libfive::Opcode::toString(c->op) << " "
                   << ((banks & 1) ? constant_data[lhs] : lhs) << " "
-                  << ((banks & 2) ? constant_data[rhs] : rhs) << " -> " << out << "\n";
+                  << ((banks & 2) ? constant_data[rhs] : rhs) << " -> "
+                  << out << "\n";
 
         // Release registers if this was their last use
         for (auto& h : {c.lhs().id(), c.rhs().id()}) {
@@ -260,7 +257,14 @@ Tape prepareTape(libfive::Tree tree) {
     };
 }
 
+template <unsigned IMAGE_SIZE_PX=4096, unsigned TILE_SIZE_PX=16>
 void callProcessTiles(Tape tape) {
+    constexpr unsigned TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
+    constexpr unsigned TOTAL_TILES = TILE_COUNT * TILE_COUNT;
+
+    constexpr unsigned NUM_BLOCKS = 128;
+    constexpr unsigned THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
+
     Interval* d_regs;
     checkCudaErrors(cudaMalloc(
                 reinterpret_cast<void **>(&d_regs),
@@ -273,7 +277,7 @@ void callProcessTiles(Tape tape) {
 
     dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
     dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
-    processTiles <<< grid, threads >>>(tape,
+    processTiles<TILE_COUNT, THREADS_PER_BLOCK> <<< grid, threads >>>(tape,
         d_regs, d_csg_choices,
         nullptr  /* out */);
     const auto code = cudaGetLastError();
@@ -281,7 +285,6 @@ void callProcessTiles(Tape tape) {
         fprintf(stderr, "Failed to launch: %s\n",
                 cudaGetErrorString(code));
     }
-    cudaDeviceSynchronize();
 }
 
 /**
@@ -289,24 +292,13 @@ void callProcessTiles(Tape tape) {
  */
 int main(int argc, char **argv)
 {
-    // This will pick the best possible CUDA capable device, otherwise
-    // override the device ID based on input provided at the command line
-    int dev = findCudaDevice(argc, (const char **)argv);
+    auto X = libfive::Tree::X();
+    auto Y = libfive::Tree::Y();
+    auto circle = sqrt(X*X + Y*Y) - 1.0;
+    auto tape = prepareTape(circle);
 
-    {   // CUDA, help me pick magic numbers:
-        int min_grid_size;
-        int block_size;
-        cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size,
-            processTiles);
-        printf("Min grid size: %i\tBlock size: %i\n", min_grid_size, block_size);
-    }
+    callProcessTiles(tape);
+    cudaDeviceSynchronize();
 
-    {
-        auto X = libfive::Tree::X();
-        auto Y = libfive::Tree::Y();
-        auto circle = sqrt(X*X + Y*Y) - 1.0;
-        auto tape = prepareTape(circle);
-        callProcessTiles(tape);
-    }
     return 0;
 }
