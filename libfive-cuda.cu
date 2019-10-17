@@ -147,8 +147,7 @@ __global__ void processTiles(const Tape tape,
 
 template <unsigned TILE_COUNT>
 __global__ void fillTiles(Output* const __restrict__ out,
-                          uint8_t* __restrict__ image,
-                          uint32_t* __restrict__ index)
+                          uint8_t* __restrict__ image)
 {
     // We assume one thread per pixel in a tile
     const uint32_t TILE_SIZE_PX = blockDim.x;
@@ -340,19 +339,12 @@ Output* callProcessTiles(Tape tape) {
     {
         dim3 threads(TILE_SIZE_PX, TILE_SIZE_PX);
 
-        uint32_t* d_index;
-        checkCudaErrors(cudaMallocManaged(
-                    (void**)&d_index, sizeof(uint32_t)));
-
         uint8_t* d_image;
         checkCudaErrors(cudaMallocManaged(
                     (void**)&d_image, IMAGE_SIZE_PX * IMAGE_SIZE_PX));
         checkCudaErrors(cudaDeviceSynchronize());
 
-        *d_index = 0;
-        memset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
-
-        fillTiles<TILE_COUNT> <<< 1024, threads >>>(d_out, d_image, d_index);
+        fillTiles<TILE_COUNT> <<< 1024, threads >>>(d_out, d_image);
         const auto code = cudaGetLastError();
         if (code != cudaSuccess) {
             fprintf(stderr, "Failed to launch: %s\n",
