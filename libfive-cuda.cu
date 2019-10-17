@@ -161,7 +161,7 @@ __global__ void fillTiles(Output* const __restrict__ out,
     const uint32_t dx = threadIdx.x;
     const uint32_t dy = threadIdx.y;
 
-    const uint32_t num_active = out->num_active;
+    const uint32_t num_filled = out->num_filled;
     while (1) {
         // The 0th thread in the block gets to pick out the index of
         // the target tile from the master list.
@@ -170,7 +170,7 @@ __global__ void fillTiles(Output* const __restrict__ out,
             i = atomicAdd(index, 1);
         }
         __syncthreads();
-        if (i >= num_active) {
+        if (i >= num_filled) {
             break;
         }
 
@@ -381,6 +381,7 @@ Output* callProcessTiles(Tape tape) {
                 printf("\n");
             }
         }
+        printf("\n");
     }
     return d_out;
 }
