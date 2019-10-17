@@ -142,10 +142,6 @@ __global__ void processTiles(const Tape tape,
         uint32_t i = atomicAdd(&out->num_active, 2);
         out->tiles[i] = index;
         out->tiles[i + 1] = 0; // This will eventually be a subtape pointer
-        printf("[%f %f][%f %f]: [%f %f]\n",
-                X.lower, X.upper,
-                Y.lower, Y.upper,
-                result.lower, result.upper);
     }
 }
 
@@ -156,24 +152,14 @@ __global__ void fillTiles(Output* const __restrict__ out,
 {
     // We assume one thread per pixel in a tile
     const uint32_t TILE_SIZE_PX = blockDim.x;
-    assert(blockDim.x == blockDim.y);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
 
     const uint32_t dx = threadIdx.x;
     const uint32_t dy = threadIdx.y;
 
     const uint32_t num_filled = out->num_filled;
-    while (1) {
-        // The 0th thread in the block gets to pick out the index of
-        // the target tile from the master list.
-        __shared__ int i;
-        if (threadIdx.x == 0 && threadIdx.y == 0) {
-            i = atomicAdd(index, 1);
-        }
-        __syncthreads();
-        if (i >= num_filled) {
-            break;
-        }
-
+    for (uint32_t i=blockIdx.x; i < num_filled; i += gridDim.x) {
         // Pick a tile from the list
         const uint32_t tile = out->tiles[out->tiles_length - i - 1];
 
@@ -305,7 +291,7 @@ Tape prepareTape(libfive::Tree tree) {
     };
 }
 
-template <unsigned IMAGE_SIZE_PX=256, unsigned TILE_SIZE_PX=16>
+template <unsigned IMAGE_SIZE_PX=4096, unsigned TILE_SIZE_PX=16>
 Output* callProcessTiles(Tape tape) {
     constexpr unsigned TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
     constexpr unsigned TOTAL_TILES = TILE_COUNT * TILE_COUNT;
@@ -353,7 +339,6 @@ Output* callProcessTiles(Tape tape) {
 
     {
         dim3 threads(TILE_SIZE_PX, TILE_SIZE_PX);
-        dim3 grid(16, 16);
 
         uint32_t* d_index;
         checkCudaErrors(cudaMallocManaged(
@@ -367,21 +352,13 @@ Output* callProcessTiles(Tape tape) {
         *d_index = 0;
         memset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
 
-        fillTiles<TILE_COUNT> <<< grid, threads >>>(d_out, d_image, d_index);
+        fillTiles<TILE_COUNT> <<< 1024, threads >>>(d_out, d_image, d_index);
         const auto code = cudaGetLastError();
         if (code != cudaSuccess) {
             fprintf(stderr, "Failed to launch: %s\n",
                     cudaGetErrorString(code));
         }
         checkCudaErrors(cudaDeviceSynchronize());
-        for (unsigned i=0; i < IMAGE_SIZE_PX * IMAGE_SIZE_PX; ++i) {
-            const char c = d_image[i] ? ('0' + (i%10)) : ' ';
-            printf("%c", c);
-            if (i && !(i % IMAGE_SIZE_PX)) {
-                printf("\n");
-            }
-        }
-        printf("\n");
     }
     return d_out;
 }
