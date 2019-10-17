@@ -113,6 +113,9 @@ __global__ void processTiles(const Tape tape,
         // Output data
         Output* const __restrict__ out)
 {
+    assert(blockDim.x == blockDim.y);
+    assert(gridDim.x == gridDim.y);
+
     const float x = blockIdx.x * blockDim.x + threadIdx.x;
     const float y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -146,12 +149,40 @@ __global__ void processTiles(const Tape tape,
     }
 }
 
-template <unsigned TILE_COUNT, unsigned THREADS_PER_BLOCK>
+template <unsigned TILE_COUNT>
 __global__ void fillTiles(Output* const __restrict__ out,
-                          uint8_t* __restrict__ image)
+                          uint8_t* __restrict__ image,
+                          uint32_t* __restrict__ index)
 {
-    const uint32_t x = threadIdx.x;
-    const uint32_t y = threadIdx.y;
+    // We assume one thread per pixel in a tile
+    const uint32_t TILE_SIZE_PX = blockDim.x;
+    assert(blockDim.x == blockDim.y);
+
+    const uint32_t dx = threadIdx.x;
+    const uint32_t dy = threadIdx.y;
+
+    const uint32_t num_active = out->num_active;
+    while (1) {
+        // The 0th thread in the block gets to pick out the index of
+        // the target tile from the master list.
+        __shared__ int i;
+        if (threadIdx.x == 0 && threadIdx.y == 0) {
+            i = atomicAdd(index, 1);
+        }
+        __syncthreads();
+        if (i >= num_active) {
+            break;
+        }
+
+        // Pick a tile from the list
+        const uint32_t tile = out->tiles[out->tiles_length - i - 1];
+
+        // Convert from tile position to pixels
+        const uint32_t px = (tile / TILE_COUNT) * TILE_SIZE_PX + dx;
+        const uint32_t py = (tile % TILE_COUNT) * TILE_SIZE_PX + dy;
+
+        image[px + py * TILE_SIZE_PX * TILE_COUNT] = 1;
+    }
 }
 
 Tape prepareTape(libfive::Tree tree) {
@@ -254,12 +285,14 @@ Tape prepareTape(libfive::Tree tree) {
     checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_tape),
                 sizeof(Clause) * flat.size()));
-    memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());
 
     float* d_flat_constants;
     checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_flat_constants),
                 sizeof(float) * constant_data.size()));
+
+    checkCudaErrors(cudaDeviceSynchronize());
+    memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());
     memcpy(d_flat_constants, constant_data.data(),
            sizeof(float) * constant_data.size());
 
@@ -272,7 +305,7 @@ Tape prepareTape(libfive::Tree tree) {
     };
 }
 
-template <unsigned IMAGE_SIZE_PX=4096, unsigned TILE_SIZE_PX=16>
+template <unsigned IMAGE_SIZE_PX=256, unsigned TILE_SIZE_PX=16>
 Output* callProcessTiles(Tape tape) {
     constexpr unsigned TILE_COUNT = IMAGE_SIZE_PX / TILE_SIZE_PX;
     constexpr unsigned TOTAL_TILES = TILE_COUNT * TILE_COUNT;
@@ -300,18 +333,54 @@ Output* callProcessTiles(Tape tape) {
     checkCudaErrors(cudaMallocManaged(
                 reinterpret_cast<void **>(&d_out),
                 sizeof(Output)));
+
+    checkCudaErrors(cudaDeviceSynchronize());
     new (d_out) Output { d_tiles, TOTAL_TILES * 2, 0, 0 };
 
-    dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
-    dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
-    printf("threads per block: %u\tnumber of blocks: %u\n",
-            THREADS_PER_BLOCK, NUM_BLOCKS);
-    processTiles <<< grid, threads >>>(
-            tape, d_regs, d_csg_choices, d_out);
-    const auto code = cudaGetLastError();
-    if (code != cudaSuccess) {
-        fprintf(stderr, "Failed to launch: %s\n",
-                cudaGetErrorString(code));
+    {
+        dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
+        dim3 threads(THREADS_PER_BLOCK, THREADS_PER_BLOCK);
+        printf("threads per block: %u\tnumber of blocks: %u\n",
+                THREADS_PER_BLOCK, NUM_BLOCKS);
+
+        processTiles <<< grid, threads >>>(tape, d_regs, d_csg_choices, d_out);
+        const auto code = cudaGetLastError();
+        if (code != cudaSuccess) {
+            fprintf(stderr, "Failed to launch: %s\n",
+                    cudaGetErrorString(code));
+        }
+    }
+
+    {
+        dim3 threads(TILE_SIZE_PX, TILE_SIZE_PX);
+        dim3 grid(16, 16);
+
+        uint32_t* d_index;
+        checkCudaErrors(cudaMallocManaged(
+                    (void**)&d_index, sizeof(uint32_t)));
+
+        uint8_t* d_image;
+        checkCudaErrors(cudaMallocManaged(
+                    (void**)&d_image, IMAGE_SIZE_PX * IMAGE_SIZE_PX));
+        checkCudaErrors(cudaDeviceSynchronize());
+
+        *d_index = 0;
+        memset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
+
+        fillTiles<TILE_COUNT> <<< grid, threads >>>(d_out, d_image, d_index);
+        const auto code = cudaGetLastError();
+        if (code != cudaSuccess) {
+            fprintf(stderr, "Failed to launch: %s\n",
+                    cudaGetErrorString(code));
+        }
+        checkCudaErrors(cudaDeviceSynchronize());
+        for (unsigned i=0; i < IMAGE_SIZE_PX * IMAGE_SIZE_PX; ++i) {
+            const char c = d_image[i] ? ('0' + (i%10)) : ' ';
+            printf("%c", c);
+            if (i && !(i % IMAGE_SIZE_PX)) {
+                printf("\n");
+            }
+        }
     }
     return d_out;
 }
