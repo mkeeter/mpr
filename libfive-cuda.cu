@@ -95,12 +95,22 @@ __device__ void walk(const Tape tape,
 #undef RHS
 }
 
+struct Subtape {
+    uint32_t next;
+    uint32_t size;
+    uint32_t subtape[256 - 2];
+};
+
 struct Output {
     uint32_t* const __restrict__ tiles;
     const uint32_t tiles_length;
 
     uint32_t num_active;
     uint32_t num_filled;
+
+    Subtape* const __restrict__ subtapes;
+    const uint32_t subtapes_length;
+    uint32_t num_subtapes;
 };
 
 __global__ void processTiles(const Tape tape,
@@ -137,11 +147,75 @@ __global__ void processTiles(const Tape tape,
         uint32_t i = atomicAdd(&out->num_filled, 1);
         out->tiles[out->tiles_length - 1 - i] = index;
     }
+
     // If the tile is ambiguous, then record it as needing further refinement
     else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        // Reuse the registers array to track activeness
+        bool* __restrict__ active = reinterpret_cast<bool*>(regs);
+        for (uint32_t i=0; i < tape.num_regs; ++i) {
+            active[i] = false;
+        }
+        // Mark the root of the tree as true
+        uint32_t t = tape.tape_length;
+        active[tape.tape[t - 1].out] = true;
+
+        // Begin walking down CSG choices
+        uint32_t c = tape.num_csg_choices;
+
+        // Claim a subtape to populate
+        uint32_t subtape_index = atomicAdd(&out->num_subtapes, 1);
+        assert(subtape_index < out->subtapes_length);
+
+        // Since we're reversing the tape, this is going to be the
+        // end of the linked list (i.e. next = 0)
+        Subtape* subtape = &out->subtapes[subtape_index];
+        subtape->next = 0;
+        const uint32_t SUBTAPE_LENGTH = sizeof( subtape->subtape) /
+                                        sizeof(*subtape->subtape);
+        uint32_t s = 0;
+
+        // Walk from the root of the tape downwards
+        while (t--) {
+            if (active[tape.tape[t].out]) {
+                using namespace libfive::Opcode;
+                uint32_t mask = 0;
+                if (tape.tape[t].opcode == OP_MIN ||
+                    tape.tape[t].opcode == OP_MAX)
+                {
+                    uint8_t choice = csg_choices[--c];
+                    if (choice == 1) {
+                        active[tape.tape[t].lhs] = true;
+                        active[tape.tape[t].rhs] = false;
+                    } else if (choice == 2) {
+                        active[tape.tape[t].lhs] = false;
+                        active[tape.tape[t].rhs] = true;
+                    }
+                    mask = (choice << 30);
+                } else {
+                    active[tape.tape[t].lhs] = true;
+                    active[tape.tape[t].rhs] = true;
+                }
+
+                if (s == SUBTAPE_LENGTH) {
+                    auto next_subtape_index = atomicAdd(&out->num_subtapes, 1);
+                    auto next_subtape = &out->subtapes[next_subtape_index];
+                    subtape->size = SUBTAPE_LENGTH;
+                    next_subtape->next = subtape_index;
+
+                    subtape_index = next_subtape_index;
+                    subtape = next_subtape;
+                    s = 0;
+                }
+                subtape->subtape[s++] = (t | mask);
+            }
+        }
+        // The last subtape may not be completely filled
+        subtape->size = s;
+
+        // Store the linked list of subtapes into the active tiles list
         uint32_t i = atomicAdd(&out->num_active, 2);
         out->tiles[i] = index;
-        out->tiles[i + 1] = 0; // This will eventually be a subtape pointer
+        out->tiles[i + 1] = subtape_index;
     }
 }
 
@@ -244,8 +318,10 @@ Tape prepareTape(libfive::Tree tree) {
             }
         };
 
+        // If this is a unary opcode, then store the LHS in the RHS slot too,
+        // so that things like register activity checking work out correctly.
         const uint16_t lhs = f(c.lhs().id(), 1);
-        const uint16_t rhs = f(c.rhs().id(), 2);
+        const uint16_t rhs = c.rhs().id() ? f(c.rhs().id(), 2) : lhs;
 
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
 
@@ -319,8 +395,20 @@ Output* callProcessTiles(Tape tape) {
                 reinterpret_cast<void **>(&d_out),
                 sizeof(Output)));
 
+    Subtape* d_subtapes;
+    const static uint32_t subtapes_length = 65535;
+    checkCudaErrors(cudaMallocManaged(
+                reinterpret_cast<void **>(&d_subtapes),
+                sizeof(Subtape) * subtapes_length));
+
     checkCudaErrors(cudaDeviceSynchronize());
-    new (d_out) Output { d_tiles, TOTAL_TILES * 2, 0, 0 };
+    new (d_out) Output { d_tiles, TOTAL_TILES * 2,
+        0, /* num_active */
+        0, /* num_filled */
+        d_subtapes,
+        subtapes_length,
+        1 /* We start at subtape 1, to use 0 as a list terminator */
+    };
 
     {
         dim3 grid(NUM_BLOCKS, NUM_BLOCKS);
@@ -351,6 +439,14 @@ Output* callProcessTiles(Tape tape) {
                     cudaGetErrorString(code));
         }
         checkCudaErrors(cudaDeviceSynchronize());
+        printf("Got %u subtapes\n", d_out->num_subtapes);
+        printf("subtape 1 next: %u\n", d_out->subtapes[1].next);
+        printf("subtape 1 size: %u\n", d_out->subtapes[1].size);
+        printf("subtape 1 values:\n");
+        for (unsigned i=0; i < d_out->subtapes[1].size; ++i) {
+            printf("%u ", d_out->subtapes[1].subtape[i]);
+        }
+        printf("\n");
     }
     return d_out;
 }
@@ -367,9 +463,7 @@ int main(int argc, char **argv)
 
     auto d_out = callProcessTiles(tape);
     cudaDeviceSynchronize();
-    Output out {0};
-    checkCudaErrors(cudaMemcpy(&out, d_out, sizeof(Output), cudaMemcpyDeviceToHost));
-    printf("%u %u\n", out.num_active, out.num_filled);
+    printf("%u %u\n", d_out->num_active, d_out->num_filled);
 
     return 0;
 }
