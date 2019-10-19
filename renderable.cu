@@ -18,7 +18,7 @@ Renderable::Renderable(libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
             uint32_t num_interval_blocks, uint32_t num_fill_blocks,
             uint32_t num_subtapes)
-    : tape(Tape::build(tree)),
+    : tape(std::move(Tape::build(tree))),
 
       IMAGE_SIZE_PX(image_size_px),
       TILE_SIZE_PX(tile_size_px),
@@ -56,7 +56,7 @@ Renderable::Renderable(libfive::Tree tree,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void walkI(const Tape tape,
+__device__ void walkI(const Tape& tape,
                       const Interval X, const Interval Y,
                       Interval* const __restrict__ regs,
                       uint8_t* const __restrict__ choices)
@@ -64,10 +64,10 @@ __device__ void walkI(const Tape tape,
     uint32_t choice_index = 0;
     for (uint32_t i=0; i < tape.tape_length; ++i) {
         const Clause c = tape[i];
-#define LHS ((!(c.banks & 1) ? regs[c.lhs] : Interval{tape.constants[c.lhs], \
-                                                     tape.constants[c.lhs]}))
-#define RHS ((!(c.banks & 2) ? regs[c.rhs] : Interval{tape.constants[c.rhs], \
-                                                     tape.constants[c.rhs]}))
+#define LHS ((!(c.banks & 1) ? regs[c.lhs] : Interval{tape.constant(c.lhs), \
+                                                      tape.constant(c.lhs)}))
+#define RHS ((!(c.banks & 2) ? regs[c.rhs] : Interval{tape.constant(c.rhs), \
+                                                      tape.constant(c.rhs)}))
         using namespace libfive::Opcode;
         switch (c.opcode) {
             case VAR_X: regs[c.out] = X; break;
@@ -246,7 +246,7 @@ __device__ void Renderable::drawFilledTiles()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ float walkF(const Tape tape,
+__device__ float walkF(const Tape& tape,
                        const Subtape* const subtapes,
                        uint32_t subtape_index,
                        const float x, const float y,
@@ -271,8 +271,8 @@ __device__ float walkF(const Tape tape,
 
         const Clause c = tape[subtapes[subtape_index].subtape[s]];
 
-#define LHS (!(c.banks & 1) ? regs[c.lhs] : tape.constants[c.lhs])
-#define RHS (!(c.banks & 2) ? regs[c.rhs] : tape.constants[c.rhs])
+#define LHS (!(c.banks & 1) ? regs[c.lhs] : tape.constant(c.lhs))
+#define RHS (!(c.banks & 2) ? regs[c.rhs] : tape.constant(c.rhs))
         using namespace libfive::Opcode;
         switch (c.opcode) {
             case VAR_X: regs[c.out] = x; break;
