@@ -22,7 +22,6 @@ struct Tape {
     const uint16_t num_regs;
     const uint16_t num_csg_choices;
 
-
 private:
     Tape(const Clause* data, uint32_t tape_length,
          uint16_t num_regs, uint16_t num_csg_choices,
