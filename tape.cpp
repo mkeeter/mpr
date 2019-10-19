@@ -97,8 +97,8 @@ Tape Tape::build(libfive::Tree tree) {
         }
     }
 
-    auto d_tape = cudaMallocManagedChecked<Clause>(flat.size());
-    auto d_constants = cudaMallocManagedChecked<float>(constant_data.size());
+    auto d_tape = CUDA_MALLOC(Clause, flat.size());
+    auto d_constants = CUDA_MALLOC(float, constant_data.size());
 
     CHECK(cudaDeviceSynchronize());
     memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());

@@ -15,12 +15,7 @@
 #include "clause.hpp"
 #include "check.hpp"
 #include "tape.hpp"
-
-struct Subtape {
-    uint32_t next;
-    uint32_t size;
-    uint32_t subtape[256 - 2];
-};
+#include "subtape.hpp"
 
 __device__ void walkI(const Tape tape,
                       const Interval X, const Interval Y,
