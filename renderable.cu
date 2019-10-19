@@ -277,22 +277,26 @@ __device__ float walkF(const Tape& tape,
 {
     assert(subtape_index != 0);
     uint32_t s = subtapes[subtape_index].size;
+    uint32_t target;
     while (true) {
         if (s == 0) {
             if (subtapes[subtape_index].next) {
                 subtape_index = subtapes[subtape_index].next;
                 s = subtapes[subtape_index].size;
             } else {
-                return regs[tape[subtapes[subtape_index].subtape[0]].out];
+                return regs[tape[target].out];
             }
         }
         s -= 1;
 
-        // Mask out choice bits
-        const uint8_t choice = (s >> 30);
-        s &= (1 << 30) - 1;
+        // Pick the target, which is an offset into the original tape
+        target = subtapes[subtape_index].subtape[s];
 
-        const Clause c = tape[subtapes[subtape_index].subtape[s]];
+        // Mask out choice bits
+        const uint8_t choice = (target >> 30);
+        target &= (1 << 30) - 1;
+
+        const Clause c = tape[target];
 
 #define LHS (!(c.banks & 1) ? regs[c.lhs] : tape.constant(c.lhs))
 #define RHS (!(c.banks & 2) ? regs[c.rhs] : tape.constant(c.rhs))
