@@ -30,17 +30,22 @@ public:
     // [regs_i, csg_choices] and regs_f are both stored in scratch, to reduce
     // total memory usage (since we're only using one or the other)
     uint8_t* const scratch;
-    Interval* const regs_i;
-    uint8_t* const csg_choices;
-    float* const regs_f;
+    Interval* __restrict__ const regs_i;
+    uint8_t* __restrict__ const csg_choices;
+    float* __restrict__ const regs_f;
 
-    uint32_t* const tiles;
+    uint32_t* __restrict__ const tiles;
     uint32_t active_tiles;
     uint32_t filled_tiles;
 
-    Subtape* const subtapes;
+    Subtape* __restrict__ const subtapes;
     uint32_t active_subtapes;
 
+    uint8_t* __restrict__ const image;
+
+    __device__ void processTiles();
+    __device__ void drawFilledTiles();
+    __device__ void drawAmbiguousTiles();
 protected:
     Renderable(libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
