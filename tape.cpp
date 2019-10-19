@@ -97,19 +97,12 @@ Tape Tape::build(libfive::Tree tree) {
         }
     }
 
-    Clause* d_tape;
-    CHECK(cudaMallocManaged(
-          reinterpret_cast<void **>(&d_tape),
-          sizeof(Clause) * flat.size()));
-
-    float* d_flat_constants;
-    CHECK(cudaMallocManaged(
-          reinterpret_cast<void **>(&d_flat_constants),
-          sizeof(float) * constant_data.size()));
+    auto d_tape = cudaMallocManagedChecked<Clause>(flat.size());
+    auto d_constants = cudaMallocManagedChecked<float>(constant_data.size());
 
     CHECK(cudaDeviceSynchronize());
     memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());
-    memcpy(d_flat_constants, constant_data.data(),
+    memcpy(d_constants, constant_data.data(),
            sizeof(float) * constant_data.size());
 
     return Tape {
@@ -117,6 +110,6 @@ Tape Tape::build(libfive::Tree tree) {
         static_cast<uint32_t>(flat.size()),
         num_registers,
         num_csg_choices,
-        d_flat_constants
+        d_constants
     };
 }

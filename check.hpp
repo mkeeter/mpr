@@ -8,3 +8,10 @@ inline void gpuCheck(cudaError_t code, const char *file, int line) {
         exit(code);
     }
 }
+
+template <typename T>
+inline T* cudaMallocManagedChecked(size_t count) {
+    void* ptr;
+    CHECK(cudaMallocManaged(&ptr, sizeof(T) * count));
+    return static_cast<T*>(ptr);
+}
