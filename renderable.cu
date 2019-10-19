@@ -50,6 +50,8 @@ Renderable::Renderable(libfive::Tree tree,
       image(CUDA_MALLOC(uint8_t, IMAGE_SIZE_PX * IMAGE_SIZE_PX))
 {
     cudaMemset(image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
+    CHECK(cudaStreamCreate(&streams[0]));
+    CHECK(cudaStreamCreate(&streams[1]));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -361,13 +363,17 @@ void Renderable::run()
     dim3 grid_p(NUM_FILL_BLOCKS);
     dim3 threads_p(TILE_SIZE_PX, TILE_SIZE_PX);
 
-    ::processTiles<<<grid_i, threads_i>>>(this);
+    cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
+
+    ::processTiles<<<grid_i, threads_i, 0, streams[0]>>>(this);
+    CHECK(cudaGetLastError());
+    CHECK(cudaStreamSynchronize(streams[0]));
+
+    // Drawing filled and ambiguous tiles can happen simultaneously,
+    // so we assign each one to a separate stream.
+    ::drawFilledTiles<<<grid_p, threads_p, 0, streams[0]>>>(this);
     CHECK(cudaGetLastError());
 
-    ::drawFilledTiles<<<grid_p, threads_p>>>(this);
-    CHECK(cudaGetLastError());
-
-    ::drawAmbiguousTiles<<<grid_p, threads_p>>>(this);
+    ::drawAmbiguousTiles<<<grid_p, threads_p, 0, streams[1]>>>(this);
     CHECK(cudaGetLastError());
 }
-

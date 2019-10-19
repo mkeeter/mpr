@@ -17,7 +17,7 @@ int main(int argc, char **argv)
     auto X = libfive::Tree::X();
     auto Y = libfive::Tree::Y();
     auto circle = sqrt(X*X + Y*Y) - 1.0;
-    auto r = Renderable::build(circle, 256, 16);
+    auto r = Renderable::build(circle, 4096, 16);
     r->run();
     cudaDeviceSynchronize();
 

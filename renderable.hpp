@@ -47,6 +47,8 @@ public:
     __device__ void processTiles();
     __device__ void drawFilledTiles();
     __device__ void drawAmbiguousTiles();
+
+    cudaStream_t streams[2];
 protected:
     Renderable(libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
