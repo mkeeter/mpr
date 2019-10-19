@@ -384,6 +384,7 @@ void Renderable::run(const View& view)
     dim3 grid_p(LIBFIVE_CUDA_NUM_FILL_BLOCKS);
     dim3 threads_p(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
 
+    dim3 grid_a(LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS);
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
     // Reset our counter variables
@@ -400,6 +401,6 @@ void Renderable::run(const View& view)
     ::drawFilledTiles<<<grid_p, threads_p, 0, streams[0]>>>(this, view);
     CHECK(cudaGetLastError());
 
-    ::drawAmbiguousTiles<<<grid_p, threads_p, 0, streams[1]>>>(this, view);
+    ::drawAmbiguousTiles<<<grid_a, threads_p, 0, streams[1]>>>(this, view);
     CHECK(cudaGetLastError());
 }
