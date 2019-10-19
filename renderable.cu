@@ -397,6 +397,11 @@ void Renderable::run(const View& view)
 
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
+    // Reset our counter variables
+    active_tiles = 0;
+    filled_tiles = 0;
+    active_subtapes = 1;
+
     ::processTiles<<<grid_i, threads_i, 0, streams[0]>>>(this, view);
     CHECK(cudaGetLastError());
     CHECK(cudaStreamSynchronize(streams[0]));
