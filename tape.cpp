@@ -19,8 +19,8 @@ Tape Tape::build(libfive::Tree tree) {
         } else {
             // Very simple tracking of active spans, without clause reordering
             // or any other cleverness.
-            last_used.insert({c.lhs().id(), c.id()});
-            last_used.insert({c.rhs().id(), c.id()});
+            last_used[c.lhs().id()] = c.id();
+            last_used[c.rhs().id()] = c.id();
 
             num_csg_choices += (c->op == libfive::Opcode::OP_MIN ||
                                 c->op == libfive::Opcode::OP_MAX);
@@ -50,8 +50,7 @@ Tape Tape::build(libfive::Tree tree) {
                 fprintf(stderr, "Ran out of registers!\n");
             }
         }
-        bound_registers.insert({c.id(), out});
-
+        bound_registers[c.id()] = out;
         uint8_t banks = 0;
         auto f = [&](libfive::Tree::Id id, uint8_t mask) {
             if (id == nullptr) {
@@ -80,10 +79,18 @@ Tape Tape::build(libfive::Tree tree) {
 
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
 
-        std::cout << libfive::Opcode::toString(c->op) << " "
-                  << ((banks & 1) ? constant_data[lhs] : lhs) << " "
-                  << ((banks & 2) ? constant_data[rhs] : rhs) << " -> "
-                  << out << "\n";
+        std::cout << libfive::Opcode::toString(c->op) << " ";
+        if (banks & 1) {
+            std::cout << constant_data[lhs] << "f ";
+        } else {
+            std::cout << lhs << " ";
+        }
+        if (banks & 2) {
+            std::cout << constant_data[rhs] << "f ";
+        } else {
+            std::cout << rhs << " ";
+        }
+        std::cout << " -> " << out << "\n";
 
         // Release registers if this was their last use
         for (auto& h : {c.lhs().id(), c.rhs().id()}) {
