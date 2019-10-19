@@ -203,6 +203,9 @@ void Renderable::processTiles(const View& v)
                     } else if (choice == 2) {
                         active[tape[t].lhs] = false;
                         active[tape[t].rhs] = true;
+                    } else {
+                        active[tape[t].lhs] = true;
+                        active[tape[t].rhs] = true;
                     }
                     mask = (choice << 30);
                 } else {
