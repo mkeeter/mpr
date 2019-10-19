@@ -547,7 +547,7 @@ Output* callProcessTiles(Tape tape) {
         checkCudaErrors(cudaMallocManaged(
                     (void**)&d_image, IMAGE_SIZE_PX * IMAGE_SIZE_PX));
         checkCudaErrors(cudaDeviceSynchronize());
-        memset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
+        cudaMemset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
 
         fillTiles<TILE_COUNT> <<< FILL_BLOCKS, threads >>>(d_out, d_image);
         auto code = cudaGetLastError();
