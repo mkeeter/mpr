@@ -29,7 +29,7 @@ Tape Tape::build(libfive::Tree tree) {
 
     std::list<uint16_t> free_registers;
     std::map<libfive::Tree::Id, uint16_t> bound_registers;
-    uint16_t num_registers = 0;
+    uint16_t num_registers = 1; // Use register 0 as the empty register
     std::vector<Clause> flat;
     for (auto& c : ordered) {
         // Constants are not inserted into the tape, because they
@@ -75,10 +75,8 @@ Tape Tape::build(libfive::Tree tree) {
             }
         };
 
-        // If this is a unary opcode, then store the LHS in the RHS slot too,
-        // so that things like register activity checking work out correctly.
         const uint16_t lhs = f(c.lhs().id(), 1);
-        const uint16_t rhs = c.rhs().id() ? f(c.rhs().id(), 2) : lhs;
+        const uint16_t rhs = f(c.rhs().id(), 2);
 
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
 
