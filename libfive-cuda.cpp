@@ -16,10 +16,13 @@ int main(int argc, char **argv)
 {
     auto X = libfive::Tree::X();
     auto Y = libfive::Tree::Y();
-    auto circle = sqrt(X*X + Y*Y) - 1.0;
-    auto r = Renderable::build(circle, 256, 16);
-    r->run({{0, 0}, 2});
-    cudaDeviceSynchronize();
+    auto circle = min(sqrt((X + 1.5)*(X + 1.5)+ Y*Y) - 1.0,
+        sqrt((X - 1.5)*(X - 1.5) + Y*Y) - 1.0);
+    auto r = Renderable::build(circle, 4096);
+    for (unsigned i=0; i < 10; ++i) {
+        r->run({{0, 0}, 2});
+        cudaDeviceSynchronize();
+    }
 
     if (r->IMAGE_SIZE_PX == 256) {
         for (unsigned i=0; i < r->IMAGE_SIZE_PX; ++i) {
