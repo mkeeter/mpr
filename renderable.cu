@@ -133,7 +133,7 @@ __device__ void walkI(const Tape& tape,
 }
 
 __device__
-void Renderable::processTiles()
+void Renderable::processTiles(const View& v)
 {
     assert(blockDim.x == blockDim.y);
     assert(gridDim.x == gridDim.y);
@@ -141,8 +141,13 @@ void Renderable::processTiles()
     const float x = blockIdx.x * blockDim.x + threadIdx.x;
     const float y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    const Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
-    const Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
+    Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
+    X.lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
+    X.upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+
+    Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
+    Y.lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
+    Y.upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
 
     // Unpack a 1D offset into the data arrays
     const uint32_t index = x * TILE_COUNT + y;
@@ -228,17 +233,17 @@ void Renderable::processTiles()
     }
 }
 
-__global__ void processTiles(Renderable* r) {
-    r->processTiles();
+__global__ void processTiles(Renderable* r, Renderable::View v) {
+    r->processTiles(v);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void drawFilledTiles(Renderable* r) {
-    r->drawFilledTiles();
+__global__ void drawFilledTiles(Renderable* r, Renderable::View v) {
+    r->drawFilledTiles(v);
 }
 
-__device__ void Renderable::drawFilledTiles()
+__device__ void Renderable::drawFilledTiles(const View& v)
 {
     // We assume one thread per pixel in a tile
     assert(blockDim.x == TILE_SIZE_PX);
@@ -331,7 +336,7 @@ __device__ float walkF(const Tape& tape,
     return 0.0f;
 }
 
-__device__ void Renderable::drawAmbiguousTiles()
+__device__ void Renderable::drawAmbiguousTiles(const View& v)
 {
     // We assume one thread per pixel in a tile
     assert(blockDim.x == TILE_SIZE_PX);
@@ -356,21 +361,23 @@ __device__ void Renderable::drawAmbiguousTiles()
         const uint32_t px = (tile / TILE_COUNT) * TILE_SIZE_PX + dx;
         const uint32_t py = (tile % TILE_COUNT) * TILE_SIZE_PX + dy;
 
-        const float x = px / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
-        const float y = py / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
+        float x = px / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
+        float y = py / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
+        x = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
+        y = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
         const float f = walkF(tape, subtapes, subtape_index, x, y, regs);
 
         image[px + py * TILE_SIZE_PX * TILE_COUNT] = (f < 0.0f) ? 255 : 0;
     }
 }
 
-__global__ void drawAmbiguousTiles(Renderable* r) {
-    r->drawAmbiguousTiles();
+__global__ void drawAmbiguousTiles(Renderable* r, Renderable::View v) {
+    r->drawAmbiguousTiles(v);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void Renderable::run()
+void Renderable::run(const View& view)
 {
     // We construct all of these variables first, because the 'this' pointer
     // is allocated in unified memory, so we can't use it after starting
@@ -383,15 +390,15 @@ void Renderable::run()
 
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
-    ::processTiles<<<grid_i, threads_i, 0, streams[0]>>>(this);
+    ::processTiles<<<grid_i, threads_i, 0, streams[0]>>>(this, view);
     CHECK(cudaGetLastError());
     CHECK(cudaStreamSynchronize(streams[0]));
 
     // Drawing filled and ambiguous tiles can happen simultaneously,
     // so we assign each one to a separate stream.
-    ::drawFilledTiles<<<grid_p, threads_p, 0, streams[0]>>>(this);
+    ::drawFilledTiles<<<grid_p, threads_p, 0, streams[0]>>>(this, view);
     CHECK(cudaGetLastError());
 
-    ::drawAmbiguousTiles<<<grid_p, threads_p, 0, streams[1]>>>(this);
+    ::drawAmbiguousTiles<<<grid_p, threads_p, 0, streams[1]>>>(this, view);
     CHECK(cudaGetLastError());
 }
