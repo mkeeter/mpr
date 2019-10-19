@@ -37,10 +37,16 @@ struct Tape {
     const float* const __restrict__ constants;
 };
 
-__device__ void walk(const Tape tape,
-                     const Interval X, const Interval Y,
-                     Interval* const __restrict__ regs,
-                     uint8_t* const __restrict__ choices)
+struct Subtape {
+    uint32_t next;
+    uint32_t size;
+    uint32_t subtape[256 - 2];
+};
+
+__device__ void walkI(const Tape tape,
+                      const Interval X, const Interval Y,
+                      Interval* const __restrict__ regs,
+                      uint8_t* const __restrict__ choices)
 {
     uint32_t choice_index = 0;
     for (uint32_t i=0; i < tape.tape_length; ++i) {
@@ -95,11 +101,72 @@ __device__ void walk(const Tape tape,
 #undef RHS
 }
 
-struct Subtape {
-    uint32_t next;
-    uint32_t size;
-    uint32_t subtape[256 - 2];
-};
+__device__ float walkF(const Tape tape,
+                      const Subtape* const subtapes,
+                      uint32_t subtape_index,
+                      const float x, const float y,
+                      float* const __restrict__ regs)
+{
+    assert(subtape_index != 0);
+    uint32_t s = subtapes[subtape_index].size;
+    while (true) {
+        if (s == 0) {
+            if (subtapes[subtape_index].next) {
+                subtape_index = subtapes[subtape_index].next;
+                s = subtapes[subtape_index].size;
+            } else {
+                return regs[tape.tape[subtapes[subtape_index].subtape[0]].out];
+            }
+        }
+        s -= 1;
+
+        // Mask out choice bits
+        const uint8_t choice = (s >> 30);
+        s &= (1 << 30) - 1;
+
+        const Clause c = tape.tape[subtapes[subtape_index].subtape[s]];
+
+#define LHS (!(c.banks & 1) ? regs[c.lhs] : tape.constants[c.lhs])
+#define RHS (!(c.banks & 2) ? regs[c.rhs] : tape.constants[c.rhs])
+        using namespace libfive::Opcode;
+        switch (c.opcode) {
+            case VAR_X: regs[c.out] = x; break;
+            case VAR_Y: regs[c.out] = y; break;
+
+            case OP_SQUARE: regs[c.out] = LHS * LHS; break;
+            case OP_SQRT: regs[c.out] = sqrtf(LHS); break;
+            case OP_NEG: regs[c.out] = -LHS; break;
+            // Skipping transcendental functions for now
+
+            case OP_ADD: regs[c.out] = LHS + RHS; break;
+            case OP_MUL: regs[c.out] = LHS * RHS; break;
+            case OP_MIN: if (choice == 1) {
+                            regs[c.out] = LHS;
+                        } else if (choice == 2) {
+                            regs[c.out] = RHS;
+                        } else {
+                            regs[c.out] = fminf(LHS, RHS);
+                        }
+                        break;
+            case OP_MAX: if (choice == 1) {
+                           regs[c.out] = LHS;
+                        } else if (choice == 2) {
+                           regs[c.out] = RHS;
+                        } else {
+                           regs[c.out] = fmaxf(LHS, RHS);
+                        }
+                        break;
+            case OP_SUB: regs[c.out] = LHS - RHS; break;
+
+            // Skipping various hard functions here
+            default: break;
+        }
+    }
+#undef LHS
+#undef RHS
+    assert(false);
+    return 0.0f;
+}
 
 struct Output {
     uint32_t* const __restrict__ tiles;
@@ -138,7 +205,7 @@ __global__ void processTiles(const Tape tape,
     const uint32_t index = x * TILE_COUNT + y;
     auto regs = regs_ + index * tape.num_regs;
     auto csg_choices = csg_choices_ + index * tape.num_csg_choices;
-    walk(tape, X, Y, regs, csg_choices);
+    walkI(tape, X, Y, regs, csg_choices);
 
     const Interval result = regs[tape.tape[tape.tape_length - 1].out];
     // If this tile is unambiguously filled, then mark it at the end
@@ -213,9 +280,9 @@ __global__ void processTiles(const Tape tape,
         subtape->size = s;
 
         // Store the linked list of subtapes into the active tiles list
-        uint32_t i = atomicAdd(&out->num_active, 2);
-        out->tiles[i] = index;
-        out->tiles[i + 1] = subtape_index;
+        uint32_t i = atomicAdd(&out->num_active, 1);
+        out->tiles[2 * i] = index;
+        out->tiles[2 * i + 1] = subtape_index;
     }
 }
 
@@ -225,6 +292,7 @@ __global__ void fillTiles(Output* const __restrict__ out,
 {
     // We assume one thread per pixel in a tile
     const uint32_t TILE_SIZE_PX = blockDim.x;
+    assert(blockDim.x == blockDim.y);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
@@ -233,7 +301,7 @@ __global__ void fillTiles(Output* const __restrict__ out,
 
     const uint32_t num_filled = out->num_filled;
     for (uint32_t i=blockIdx.x; i < num_filled; i += gridDim.x) {
-        // Pick a tile from the list
+        // Pick a filled tile from the list
         const uint32_t tile = out->tiles[out->tiles_length - i - 1];
 
         // Convert from tile position to pixels
@@ -241,6 +309,46 @@ __global__ void fillTiles(Output* const __restrict__ out,
         const uint32_t py = (tile % TILE_COUNT) * TILE_SIZE_PX + dy;
 
         image[px + py * TILE_SIZE_PX * TILE_COUNT] = 1;
+    }
+}
+
+template <unsigned TILE_COUNT>
+__global__ void renderTiles(const Tape tape,
+                            const Output* const __restrict__ out,
+
+                            // Flat array for all pseudoregisters
+                            float* const __restrict__ regs_,
+
+                            uint8_t* __restrict__ image)
+{
+    // We assume one thread per pixel in a tile
+    const uint32_t TILE_SIZE_PX = blockDim.x;
+    assert(blockDim.x == blockDim.y);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    const uint32_t dx = threadIdx.x;
+    const uint32_t dy = threadIdx.y;
+
+    // Pick an index into the register array
+    uint32_t offset = (blockIdx.x * TILE_SIZE_PX + dx) * TILE_SIZE_PX + dy;
+    float* const __restrict__ regs = regs_ + offset * tape.num_regs;
+
+    const uint32_t num_active = out->num_active;
+    for (uint32_t i=blockIdx.x; i < num_active; i += gridDim.x) {
+        // Pick an active tile from the list
+        const uint32_t tile = out->tiles[i * 2];
+        const uint32_t subtape_index = out->tiles[i * 2 + 1];
+
+        // Convert from tile position to pixels
+        const uint32_t px = (tile / TILE_COUNT) * TILE_SIZE_PX + dx;
+        const uint32_t py = (tile % TILE_COUNT) * TILE_SIZE_PX + dy;
+
+        const float x = px / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
+        const float y = py / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
+        const float f = walkF(tape, out->subtapes, subtape_index, x, y, regs);
+
+        image[px + py * TILE_SIZE_PX * TILE_COUNT] = (f < 0.0f) ? 255 : 0;
     }
 }
 
@@ -373,12 +481,20 @@ Output* callProcessTiles(Tape tape) {
 
     constexpr unsigned NUM_BLOCKS = 8;
     constexpr unsigned THREADS_PER_BLOCK = TILE_COUNT / NUM_BLOCKS;
+
+    const unsigned FILL_BLOCKS = 1024;
     printf("threads per block: %u\n", THREADS_PER_BLOCK);
 
-    Interval* d_regs;
+    Interval* d_regs_i;
     checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_regs),
+                reinterpret_cast<void **>(&d_regs_i),
                 sizeof(Interval) * tape.num_regs * TOTAL_TILES));
+
+    float* d_regs_f;
+    checkCudaErrors(cudaMallocManaged(
+                reinterpret_cast<void **>(&d_regs_f),
+                sizeof(float) * tape.num_regs * FILL_BLOCKS
+                              * TILE_SIZE_PX * TILE_SIZE_PX));
 
     uint8_t* d_csg_choices;
     checkCudaErrors(cudaMallocManaged(
@@ -416,7 +532,7 @@ Output* callProcessTiles(Tape tape) {
         printf("threads per block: %u\tnumber of blocks: %u\n",
                 THREADS_PER_BLOCK, NUM_BLOCKS);
 
-        processTiles <<< grid, threads >>>(tape, d_regs, d_csg_choices, d_out);
+        processTiles <<< grid, threads >>>(tape, d_regs_i, d_csg_choices, d_out);
         const auto code = cudaGetLastError();
         if (code != cudaSuccess) {
             fprintf(stderr, "Failed to launch: %s\n",
@@ -431,13 +547,23 @@ Output* callProcessTiles(Tape tape) {
         checkCudaErrors(cudaMallocManaged(
                     (void**)&d_image, IMAGE_SIZE_PX * IMAGE_SIZE_PX));
         checkCudaErrors(cudaDeviceSynchronize());
+        memset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
 
-        fillTiles<TILE_COUNT> <<< 1024, threads >>>(d_out, d_image);
-        const auto code = cudaGetLastError();
+        fillTiles<TILE_COUNT> <<< FILL_BLOCKS, threads >>>(d_out, d_image);
+        auto code = cudaGetLastError();
         if (code != cudaSuccess) {
             fprintf(stderr, "Failed to launch: %s\n",
                     cudaGetErrorString(code));
         }
+
+        renderTiles<TILE_COUNT> <<< FILL_BLOCKS, threads >>>(tape, d_out,
+                d_regs_f, d_image);
+        code = cudaGetLastError();
+        if (code != cudaSuccess) {
+            fprintf(stderr, "Failed to launch: %s\n",
+                    cudaGetErrorString(code));
+        }
+
         checkCudaErrors(cudaDeviceSynchronize());
         printf("Got %u subtapes\n", d_out->num_subtapes);
         printf("subtape 1 next: %u\n", d_out->subtapes[1].next);
@@ -447,6 +573,17 @@ Output* callProcessTiles(Tape tape) {
             printf("%u ", d_out->subtapes[1].subtape[i]);
         }
         printf("\n");
+
+#if 0
+        for (unsigned i=0; i < IMAGE_SIZE_PX * IMAGE_SIZE_PX; ++i) {
+            if (i && !(i % IMAGE_SIZE_PX)) {
+                printf("\n");
+            }
+            const char c = d_image[i] ? ('0' + (i%10)) : ' ';
+            printf("%c", c);
+        }
+        printf("\n");
+#endif
     }
     return d_out;
 }
