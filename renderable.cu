@@ -8,7 +8,7 @@ Renderable* Renderable::build(libfive::Tree tree,
             uint32_t num_subtapes)
 {
     auto out = CUDA_MALLOC(Renderable, 1);
-    new (out) Renderable(
+    new (out) Renderable(tree,
             image_size_px, tile_size_px,
             num_interval_blocks, num_fill_blocks, num_subtapes);
     return out;
@@ -51,6 +51,7 @@ Renderable::Renderable(libfive::Tree tree,
 {
     // lol
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ void walkI(const Tape tape,
@@ -231,7 +232,7 @@ __device__ void Renderable::drawFilledTiles()
     const uint32_t num_filled = filled_tiles;
     for (uint32_t i=blockIdx.x; i < num_filled; i += gridDim.x) {
         // Pick a filled tile from the list
-        const uint32_t tile = tiles[TOTAL_TILES - i - 1];
+        const uint32_t tile = tiles[TOTAL_TILES*2 - i - 1];
 
         // Convert from tile position to pixels
         const uint32_t px = (tile / TILE_COUNT) * TILE_SIZE_PX + dx;
@@ -346,3 +347,23 @@ __device__ void Renderable::drawAmbiguousTiles()
 __global__ void drawAmbiguousTiles(Renderable* r) {
     r->drawAmbiguousTiles();
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+void Renderable::run()
+{
+    dim3 grid_i(NUM_INTERVAL_BLOCKS, NUM_INTERVAL_BLOCKS);
+    dim3 threads_i(THREADS_PER_INTERVAL_BLOCK, THREADS_PER_INTERVAL_BLOCK);
+    ::processTiles<<<grid_i, threads_i>>>(this);
+    CHECK(cudaGetLastError());
+    CHECK(cudaDeviceSynchronize());
+
+    dim3 threads_p(TILE_SIZE_PX, TILE_SIZE_PX);
+    ::drawFilledTiles<<<NUM_FILL_BLOCKS, threads_p>>>(this);
+    CHECK(cudaGetLastError());
+    CHECK(cudaDeviceSynchronize());
+
+    ::drawAmbiguousTiles<<<NUM_FILL_BLOCKS, threads_p>>>(this);
+    CHECK(cudaGetLastError());
+}
+

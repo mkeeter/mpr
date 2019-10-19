@@ -9,10 +9,11 @@ struct Interval;
 class Renderable {
 public:
     // Returns a GPU-allocated Renderable struct
-    Renderable* build(libfive::Tree tree,
+    static Renderable* build(libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
             uint32_t num_interval_blocks=8, uint32_t num_fill_blocks=1024,
             uint32_t num_subtapes=65536);
+    void run(void);
 
     Tape tape;
 
@@ -49,6 +50,6 @@ public:
 protected:
     Renderable(libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
-            uint32_t num_interval_blocks=8, uint32_t num_fill_blocks=1024,
-            uint32_t NUM_SUBTAPES=65536);
+            uint32_t num_interval_blocks, uint32_t num_fill_blocks,
+            uint32_t num_subtapes);
 };
