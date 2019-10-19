@@ -18,12 +18,10 @@ public:
         float scale;
     };
 
+    using Handle = std::unique_ptr<Renderable, Deleter>;
+
     // Returns a GPU-allocated Renderable struct
-    static std::unique_ptr<Renderable, Deleter> build(
-            libfive::Tree tree,
-            uint32_t image_size_px, uint32_t tile_size_px,
-            uint32_t num_interval_blocks=8, uint32_t num_fill_blocks=1024,
-            uint32_t num_subtapes=65536);
+    static Handle build(libfive::Tree tree, uint32_t image_size_px);
     ~Renderable();
     void run(const View& v);
 
@@ -31,14 +29,8 @@ public:
 
     // Render parameters
     const uint32_t IMAGE_SIZE_PX;
-    const uint32_t TILE_SIZE_PX;
     const uint32_t TILE_COUNT;
     const uint32_t TOTAL_TILES;
-    const uint32_t NUM_INTERVAL_BLOCKS;
-    const uint32_t THREADS_PER_INTERVAL_BLOCK;
-
-    const uint32_t NUM_FILL_BLOCKS;
-    const uint32_t NUM_SUBTAPES;
 
     // [regs_i, csg_choices] and regs_f are both stored in scratch, to reduce
     // total memory usage (since we're only using one or the other)
@@ -62,10 +54,7 @@ public:
 
     cudaStream_t streams[2];
 protected:
-    Renderable(libfive::Tree tree,
-            uint32_t image_size_px, uint32_t tile_size_px,
-            uint32_t num_interval_blocks, uint32_t num_fill_blocks,
-            uint32_t num_subtapes);
+    Renderable(libfive::Tree tree, uint32_t image_size_px);
 
     Renderable(const Renderable& other)=delete;
     Renderable& operator=(const Renderable& other)=delete;

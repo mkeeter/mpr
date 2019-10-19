@@ -1,6 +1,7 @@
 #include "check.hpp"
 #include "renderable.hpp"
 #include "gpu_interval.hpp"
+#include "parameters.hpp"
 
 void Renderable::Deleter::operator()(Renderable* r)
 {
@@ -19,41 +20,26 @@ Renderable::~Renderable()
     }
 }
 
-std::unique_ptr<Renderable, Renderable::Deleter> Renderable::build(
-            libfive::Tree tree,
-            uint32_t image_size_px, uint32_t tile_size_px,
-            uint32_t num_interval_blocks, uint32_t num_fill_blocks,
-            uint32_t num_subtapes)
+Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px)
 {
     auto out = CUDA_MALLOC(Renderable, 1);
-    new (out) Renderable(tree,
-            image_size_px, tile_size_px,
-            num_interval_blocks, num_fill_blocks, num_subtapes);
+    new (out) Renderable(tree, image_size_px);
     return std::unique_ptr<Renderable, Deleter>(out);
 }
 
-Renderable::Renderable(libfive::Tree tree,
-            uint32_t image_size_px, uint32_t tile_size_px,
-            uint32_t num_interval_blocks, uint32_t num_fill_blocks,
-            uint32_t num_subtapes)
+Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
     : tape(std::move(Tape::build(tree))),
 
       IMAGE_SIZE_PX(image_size_px),
-      TILE_SIZE_PX(tile_size_px),
-      TILE_COUNT(IMAGE_SIZE_PX / TILE_SIZE_PX),
+      TILE_COUNT(IMAGE_SIZE_PX / LIBFIVE_CUDA_TILE_SIZE_PX),
       TOTAL_TILES(TILE_COUNT * TILE_COUNT),
-
-      NUM_INTERVAL_BLOCKS(num_interval_blocks),
-      THREADS_PER_INTERVAL_BLOCK(TILE_COUNT / NUM_INTERVAL_BLOCKS),
-
-      NUM_FILL_BLOCKS(num_fill_blocks),
-      NUM_SUBTAPES(num_subtapes),
 
       scratch(CUDA_MALLOC(uint8_t,
           std::max(TOTAL_TILES * (sizeof(Interval) * tape.num_regs +
                                   max(1, tape.num_csg_choices)),
-                   sizeof(float) * tape.num_regs * NUM_FILL_BLOCKS *
-                       TILE_SIZE_PX * TILE_SIZE_PX))),
+                   sizeof(float) * tape.num_regs * LIBFIVE_CUDA_NUM_FILL_BLOCKS
+                                 * LIBFIVE_CUDA_TILE_SIZE_PX
+                                 * LIBFIVE_CUDA_TILE_SIZE_PX))),
       regs_i(reinterpret_cast<Interval*>(scratch)),
       csg_choices(scratch + TOTAL_TILES * sizeof(Interval) * tape.num_regs),
       regs_f(reinterpret_cast<float*>(scratch)),
@@ -62,7 +48,7 @@ Renderable::Renderable(libfive::Tree tree,
       active_tiles(0),
       filled_tiles(0),
 
-      subtapes(CUDA_MALLOC(Subtape, NUM_SUBTAPES)),
+      subtapes(CUDA_MALLOC(Subtape, LIBFIVE_CUDA_NUM_SUBTAPES)),
       active_subtapes(1),
 
       image(CUDA_MALLOC(uint8_t, IMAGE_SIZE_PX * IMAGE_SIZE_PX))
@@ -179,7 +165,7 @@ void Renderable::processTiles(const View& v)
 
         // Claim a subtape to populate
         uint32_t subtape_index = atomicAdd(&active_subtapes, 1);
-        assert(subtape_index < NUM_SUBTAPES);
+        assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
 
         // Since we're reversing the tape, this is going to be the
         // end of the linked list (i.e. next = 0)
@@ -249,8 +235,8 @@ __global__ void drawFilledTiles(Renderable* r, Renderable::View v) {
 __device__ void Renderable::drawFilledTiles(const View& v)
 {
     // We assume one thread per pixel in a tile
-    assert(blockDim.x == TILE_SIZE_PX);
-    assert(blockDim.x == blockDim.y);
+    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
+    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
@@ -263,10 +249,10 @@ __device__ void Renderable::drawFilledTiles(const View& v)
         const uint32_t tile = tiles[TOTAL_TILES*2 - i - 1];
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile / TILE_COUNT) * TILE_SIZE_PX + dx;
-        const uint32_t py = (tile % TILE_COUNT) * TILE_SIZE_PX + dy;
+        const uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
+        const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
 
-        image[px + py * TILE_SIZE_PX * TILE_COUNT] = 1;
+        image[px + py * LIBFIVE_CUDA_TILE_SIZE_PX * TILE_COUNT] = 1;
     }
 }
 
@@ -346,8 +332,8 @@ __device__ float walkF(const Tape& tape,
 __device__ void Renderable::drawAmbiguousTiles(const View& v)
 {
     // We assume one thread per pixel in a tile
-    assert(blockDim.x == TILE_SIZE_PX);
-    assert(blockDim.x == blockDim.y);
+    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
+    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
@@ -355,7 +341,8 @@ __device__ void Renderable::drawAmbiguousTiles(const View& v)
     const uint32_t dy = threadIdx.y;
 
     // Pick an index into the register array
-    uint32_t offset = (blockIdx.x * TILE_SIZE_PX + dx) * TILE_SIZE_PX + dy;
+    uint32_t offset = (blockIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + dx) *
+                      LIBFIVE_CUDA_TILE_SIZE_PX + dy;
     float* const __restrict__ regs = regs_f + offset * tape.num_regs;
 
     const uint32_t num_active = active_tiles;
@@ -365,16 +352,16 @@ __device__ void Renderable::drawAmbiguousTiles(const View& v)
         const uint32_t subtape_index = tiles[i * 2 + 1];
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile / TILE_COUNT) * TILE_SIZE_PX + dx;
-        const uint32_t py = (tile % TILE_COUNT) * TILE_SIZE_PX + dy;
+        uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
+        uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
 
-        float x = px / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
-        float y = py / (TILE_SIZE_PX * TILE_COUNT - 1.0f);
+        float x = px / (IMAGE_SIZE_PX - 1.0f);
+        float y = py / (IMAGE_SIZE_PX - 1.0f);
         x = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
         y = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
         const float f = walkF(tape, subtapes, subtape_index, x, y, regs);
 
-        image[px + py * TILE_SIZE_PX * TILE_COUNT] = (f < 0.0f) ? 255 : 0;
+        image[px + py * IMAGE_SIZE_PX] = (f < 0.0f) ? 255 : 0;
     }
 }
 
@@ -389,11 +376,13 @@ void Renderable::run(const View& view)
     // We construct all of these variables first, because the 'this' pointer
     // is allocated in unified memory, so we can't use it after starting
     // kernels (until we call cudaDeviceSynchronize).
-    dim3 grid_i(NUM_INTERVAL_BLOCKS, NUM_INTERVAL_BLOCKS);
-    dim3 threads_i(THREADS_PER_INTERVAL_BLOCK, THREADS_PER_INTERVAL_BLOCK);
+    const uint32_t N = TILE_COUNT / LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK;
+    dim3 grid_i(N, N);
+    dim3 threads_i(LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK,
+                   LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK);
 
-    dim3 grid_p(NUM_FILL_BLOCKS);
-    dim3 threads_p(TILE_SIZE_PX, TILE_SIZE_PX);
+    dim3 grid_p(LIBFIVE_CUDA_NUM_FILL_BLOCKS);
+    dim3 threads_p(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
 
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
