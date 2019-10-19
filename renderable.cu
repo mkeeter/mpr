@@ -2,7 +2,25 @@
 #include "renderable.hpp"
 #include "gpu_interval.hpp"
 
-Renderable* Renderable::build(libfive::Tree tree,
+void Renderable::Deleter::operator()(Renderable* r)
+{
+    r->~Renderable();
+    CHECK(cudaFree(r));
+}
+
+Renderable::~Renderable()
+{
+    CHECK(cudaFree(scratch));
+    CHECK(cudaFree(tiles));
+    CHECK(cudaFree(subtapes));
+    CHECK(cudaFree(image));
+    for (auto& s : streams) {
+        CHECK(cudaStreamDestroy(s));
+    }
+}
+
+std::unique_ptr<Renderable, Renderable::Deleter> Renderable::build(
+            libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
             uint32_t num_interval_blocks, uint32_t num_fill_blocks,
             uint32_t num_subtapes)
@@ -11,7 +29,7 @@ Renderable* Renderable::build(libfive::Tree tree,
     new (out) Renderable(tree,
             image_size_px, tile_size_px,
             num_interval_blocks, num_fill_blocks, num_subtapes);
-    return out;
+    return std::unique_ptr<Renderable, Deleter>(out);
 }
 
 Renderable::Renderable(libfive::Tree tree,

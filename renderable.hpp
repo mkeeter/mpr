@@ -8,11 +8,18 @@ struct Interval;
 
 class Renderable {
 public:
+    class Deleter {
+    public:
+        void operator()(Renderable* r);
+    };
+
     // Returns a GPU-allocated Renderable struct
-    static Renderable* build(libfive::Tree tree,
+    static std::unique_ptr<Renderable, Deleter> build(
+            libfive::Tree tree,
             uint32_t image_size_px, uint32_t tile_size_px,
             uint32_t num_interval_blocks=8, uint32_t num_fill_blocks=1024,
             uint32_t num_subtapes=65536);
+    ~Renderable();
     void run(void);
 
     Tape tape;
@@ -54,4 +61,7 @@ protected:
             uint32_t image_size_px, uint32_t tile_size_px,
             uint32_t num_interval_blocks, uint32_t num_fill_blocks,
             uint32_t num_subtapes);
+
+    Renderable(const Renderable& other)=delete;
+    Renderable& operator=(const Renderable& other)=delete;
 };
