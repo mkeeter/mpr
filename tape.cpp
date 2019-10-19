@@ -1,5 +1,3 @@
-#include <helper_functions.h>
-#include <helper_cuda.h>
 #include "tape.hpp"
 #include "check.hpp"
 
