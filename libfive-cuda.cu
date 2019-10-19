@@ -6,163 +6,15 @@
 #include <cuda_runtime.h>
 #include <math_constants.h>
 
-// Helper functions and utilities to work with CUDA
-#include <helper_functions.h>
-#include <helper_cuda.h>
-
 // libfive
 #include <libfive/tree/opcode.hpp>
 #include <libfive/tree/tree.hpp>
 
 // Our Interval arithmetic class
 #include "gpu_interval.hpp"
-
-struct Clause {
-    const uint8_t opcode;
-    const uint8_t banks;
-    const uint16_t out;
-    const uint16_t lhs;
-    const uint16_t rhs;
-};
-
-// The Tape is an on-device representation, so the pointers
-// are returned from cudaMalloc.
-struct Tape {
-    __host__ __device__
-    const Clause& operator[](uint32_t i) const { return data[i]; }
-
-    static Tape build(libfive::Tree tree);
-    const Clause* const __restrict__ data;
-    const uint32_t tape_length;
-
-    const uint16_t num_regs;
-    const uint16_t num_csg_choices;
-
-    const float* const __restrict__ constants;
-};
-
-Tape Tape::build(libfive::Tree tree) {
-    auto ordered = tree.ordered();
-
-    std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
-    std::vector<float> constant_data;
-    std::map<libfive::Tree::Id, uint16_t> constants;
-    uint16_t num_csg_choices = 0;
-    for (auto& c : ordered) {
-        if (c->op == libfive::Opcode::CONSTANT) {
-            // Store constants in a separate list
-            if (constant_data.size() == UINT16_MAX) {
-                fprintf(stderr, "Ran out of constants!\n");
-            }
-            constants.insert({c.id(), constant_data.size()});
-            constant_data.push_back(c->value);
-        } else {
-            // Very simple tracking of active spans, without clause reordering
-            // or any other cleverness.
-            last_used.insert({c.lhs().id(), c.id()});
-            last_used.insert({c.rhs().id(), c.id()});
-
-            num_csg_choices += (c->op == libfive::Opcode::OP_MIN ||
-                                c->op == libfive::Opcode::OP_MAX);
-        }
-    }
-
-    std::list<uint16_t> free_registers;
-    std::map<libfive::Tree::Id, uint16_t> bound_registers;
-    uint16_t num_registers = 0;
-    std::vector<Clause> flat;
-    for (auto& c : ordered) {
-        // Constants are not inserted into the tape, because they
-        // live in a separate data array addressed with flags in
-        // the 'banks' argument of a Clause.
-        if (constants.find(c.id()) != constants.end()) {
-            continue;
-        }
-
-        // Pick a registers for the output of this opcode
-        uint16_t out;
-        if (free_registers.size()) {
-            out = free_registers.back();
-            free_registers.pop_back();
-        } else {
-            out = num_registers++;
-            if (num_registers == UINT16_MAX) {
-                fprintf(stderr, "Ran out of registers!\n");
-            }
-        }
-        bound_registers.insert({c.id(), out});
-
-        uint8_t banks = 0;
-        auto f = [&](libfive::Tree::Id id, uint8_t mask) {
-            if (id == nullptr) {
-                return static_cast<uint16_t>(0);
-            }
-            {   // Check whether this is a constant
-                auto itr = constants.find(id);
-                if (itr != constants.end()) {
-                    banks |= mask;
-                    return itr->second;
-                }
-            }
-            {   // Otherwise, it must be a bound register
-                auto itr = bound_registers.find(id);
-                if (itr != bound_registers.end()) {
-                    return itr->second;
-                } else {
-                    fprintf(stderr, "Could not find bound register");
-                    return static_cast<uint16_t>(0);
-                }
-            }
-        };
-
-        // If this is a unary opcode, then store the LHS in the RHS slot too,
-        // so that things like register activity checking work out correctly.
-        const uint16_t lhs = f(c.lhs().id(), 1);
-        const uint16_t rhs = c.rhs().id() ? f(c.rhs().id(), 2) : lhs;
-
-        flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
-
-        std::cout << libfive::Opcode::toString(c->op) << " "
-                  << ((banks & 1) ? constant_data[lhs] : lhs) << " "
-                  << ((banks & 2) ? constant_data[rhs] : rhs) << " -> "
-                  << out << "\n";
-
-        // Release registers if this was their last use
-        for (auto& h : {c.lhs().id(), c.rhs().id()}) {
-            if (h != nullptr && h->op != libfive::Opcode::CONSTANT &&
-                last_used[h] == c.id())
-            {
-                auto itr = bound_registers.find(h);
-                free_registers.push_back(itr->second);
-                bound_registers.erase(itr);
-            }
-        }
-    }
-
-    Clause* d_tape;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_tape),
-                sizeof(Clause) * flat.size()));
-
-    float* d_flat_constants;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_flat_constants),
-                sizeof(float) * constant_data.size()));
-
-    checkCudaErrors(cudaDeviceSynchronize());
-    memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());
-    memcpy(d_flat_constants, constant_data.data(),
-           sizeof(float) * constant_data.size());
-
-    return Tape {
-        d_tape,
-        static_cast<uint32_t>(flat.size()),
-        num_registers,
-        num_csg_choices,
-        d_flat_constants
-    };
-
-}
+#include "clause.hpp"
+#include "check.hpp"
+#include "tape.hpp"
 
 struct Subtape {
     uint32_t next;
@@ -490,38 +342,38 @@ Output* callProcessTiles(Tape tape) {
     printf("threads per block: %u\n", THREADS_PER_BLOCK);
 
     Interval* d_regs_i;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_regs_i),
-                sizeof(Interval) * tape.num_regs * TOTAL_TILES));
+    CHECK(cudaMallocManaged(
+          reinterpret_cast<void **>(&d_regs_i),
+          sizeof(Interval) * tape.num_regs * TOTAL_TILES));
 
     float* d_regs_f;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_regs_f),
-                sizeof(float) * tape.num_regs * FILL_BLOCKS
-                              * TILE_SIZE_PX * TILE_SIZE_PX));
+    CHECK(cudaMallocManaged(
+          reinterpret_cast<void **>(&d_regs_f),
+          sizeof(float) * tape.num_regs * FILL_BLOCKS
+                        * TILE_SIZE_PX * TILE_SIZE_PX));
 
     uint8_t* d_csg_choices;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_csg_choices),
-                max(1, tape.num_csg_choices) * TOTAL_TILES));
+    CHECK(cudaMallocManaged(
+          reinterpret_cast<void **>(&d_csg_choices),
+          max(1, tape.num_csg_choices) * TOTAL_TILES));
 
     uint32_t* d_tiles;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_tiles),
-                sizeof(uint32_t) * 2 * TOTAL_TILES));
+    CHECK(cudaMallocManaged(
+          reinterpret_cast<void **>(&d_tiles),
+          sizeof(uint32_t) * 2 * TOTAL_TILES));
 
     Output* d_out;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_out),
-                sizeof(Output)));
+    CHECK(cudaMallocManaged(
+          reinterpret_cast<void **>(&d_out),
+          sizeof(Output)));
 
     Subtape* d_subtapes;
     const static uint32_t subtapes_length = 65535;
-    checkCudaErrors(cudaMallocManaged(
-                reinterpret_cast<void **>(&d_subtapes),
-                sizeof(Subtape) * subtapes_length));
+    CHECK(cudaMallocManaged(
+          reinterpret_cast<void **>(&d_subtapes),
+          sizeof(Subtape) * subtapes_length));
 
-    checkCudaErrors(cudaDeviceSynchronize());
+    CHECK(cudaDeviceSynchronize());
     new (d_out) Output { d_tiles, TOTAL_TILES * 2,
         0, /* num_active */
         0, /* num_filled */
@@ -548,9 +400,9 @@ Output* callProcessTiles(Tape tape) {
         dim3 threads(TILE_SIZE_PX, TILE_SIZE_PX);
 
         uint8_t* d_image;
-        checkCudaErrors(cudaMallocManaged(
-                    (void**)&d_image, IMAGE_SIZE_PX * IMAGE_SIZE_PX));
-        checkCudaErrors(cudaDeviceSynchronize());
+        CHECK(cudaMallocManaged(
+              (void**)&d_image, IMAGE_SIZE_PX * IMAGE_SIZE_PX));
+        CHECK(cudaDeviceSynchronize());
         cudaMemset(d_image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
 
         fillTiles<TILE_COUNT> <<< FILL_BLOCKS, threads >>>(d_out, d_image);
@@ -568,7 +420,7 @@ Output* callProcessTiles(Tape tape) {
                     cudaGetErrorString(code));
         }
 
-        checkCudaErrors(cudaDeviceSynchronize());
+        CHECK(cudaDeviceSynchronize());
         printf("Got %u subtapes\n", d_out->num_subtapes);
         printf("subtape 1 next: %u\n", d_out->subtapes[1].next);
         printf("subtape 1 size: %u\n", d_out->subtapes[1].size);
