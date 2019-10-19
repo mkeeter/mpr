@@ -45,11 +45,11 @@ Renderable::Renderable(libfive::Tree tree,
       filled_tiles(0),
 
       subtapes(CUDA_MALLOC(Subtape, NUM_SUBTAPES)),
-      active_subtapes(0),
+      active_subtapes(1),
 
       image(CUDA_MALLOC(uint8_t, IMAGE_SIZE_PX * IMAGE_SIZE_PX))
 {
-    // lol
+    cudaMemset(image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -352,18 +352,22 @@ __global__ void drawAmbiguousTiles(Renderable* r) {
 
 void Renderable::run()
 {
+    // We construct all of these variables first, because the 'this' pointer
+    // is allocated in unified memory, so we can't use it after starting
+    // kernels (until we call cudaDeviceSynchronize).
     dim3 grid_i(NUM_INTERVAL_BLOCKS, NUM_INTERVAL_BLOCKS);
     dim3 threads_i(THREADS_PER_INTERVAL_BLOCK, THREADS_PER_INTERVAL_BLOCK);
+
+    dim3 grid_p(NUM_FILL_BLOCKS);
+    dim3 threads_p(TILE_SIZE_PX, TILE_SIZE_PX);
+
     ::processTiles<<<grid_i, threads_i>>>(this);
     CHECK(cudaGetLastError());
-    CHECK(cudaDeviceSynchronize());
 
-    dim3 threads_p(TILE_SIZE_PX, TILE_SIZE_PX);
-    ::drawFilledTiles<<<NUM_FILL_BLOCKS, threads_p>>>(this);
+    ::drawFilledTiles<<<grid_p, threads_p>>>(this);
     CHECK(cudaGetLastError());
-    CHECK(cudaDeviceSynchronize());
 
-    ::drawAmbiguousTiles<<<NUM_FILL_BLOCKS, threads_p>>>(this);
+    ::drawAmbiguousTiles<<<grid_p, threads_p>>>(this);
     CHECK(cudaGetLastError());
 }
 

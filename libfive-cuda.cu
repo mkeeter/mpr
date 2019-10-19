@@ -19,10 +19,20 @@ int main(int argc, char **argv)
     auto circle = sqrt(X*X + Y*Y) - 1.0;
     auto r = Renderable::build(circle, 256, 16);
     r->run();
-
-    //auto d_out = callProcessTiles(tape);
     cudaDeviceSynchronize();
-    //printf("%u %u\n", d_out->num_active, d_out->num_filled);
+
+    if (r->IMAGE_SIZE_PX == 256) {
+        for (unsigned i=0; i < r->IMAGE_SIZE_PX; ++i) {
+            for (unsigned j=0; j < r->IMAGE_SIZE_PX; ++j) {
+                switch (r->image[i * r->IMAGE_SIZE_PX + j]) {
+                    case 0:     printf(" "); break;
+                    case 1:     printf("."); break;
+                    default:    printf("X"); break;
+                }
+            }
+            printf("\n");
+        }
+    }
 
     return 0;
 }
