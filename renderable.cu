@@ -278,7 +278,6 @@ __device__ void Renderable::drawFilledTiles(const View& v)
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t offset = blockDim.x * gridDim.x;
     for (uint32_t i=start; i < num_filled; i += offset) {
-        const uint32_t index = tiles[2 * i];
         const uint32_t tile = tiles[TOTAL_TILES*2 - i - 1];
 
         // Convert from tile position to pixels
