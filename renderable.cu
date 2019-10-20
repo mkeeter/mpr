@@ -171,8 +171,6 @@ void Renderable::processTiles(const View& v)
         // end of the linked list (i.e. next = 0)
         Subtape* subtape = &subtapes[subtape_index];
         subtape->next = 0;
-        const uint32_t SUBTAPE_LENGTH = sizeof( subtape->subtape) /
-                                        sizeof(*subtape->subtape);
         uint32_t s = 0;
 
         // Walk from the root of the tape downwards
@@ -199,17 +197,17 @@ void Renderable::processTiles(const View& v)
                     active[tape[t].rhs] = true;
                 }
 
-                if (s == SUBTAPE_LENGTH) {
+                if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
                     auto next_subtape_index = atomicAdd(&active_subtapes, 1);
                     auto next_subtape = &subtapes[next_subtape_index];
-                    subtape->size = SUBTAPE_LENGTH;
+                    subtape->size = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
                     next_subtape->next = subtape_index;
 
                     subtape_index = next_subtape_index;
                     subtape = next_subtape;
                     s = 0;
                 }
-                subtape->subtape[s++] = (t | mask);
+                (*subtape)[s++] = (t | mask);
             }
         }
         // The last subtape may not be completely filled
@@ -279,7 +277,7 @@ __device__ float walkF(const Tape& tape,
         s -= 1;
 
         // Pick the target, which is an offset into the original tape
-        target = subtapes[subtape_index].subtape[s];
+        target = subtapes[subtape_index][s];
 
         // Mask out choice bits
         const uint8_t choice = (target >> 30);
