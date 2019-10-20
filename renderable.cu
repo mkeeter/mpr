@@ -357,8 +357,9 @@ __device__ void Renderable::drawAmbiguousTiles(const View& v)
         x = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
         y = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
         const float f = walkF(tape, subtapes, subtape_index, x, y, regs);
-
-        image[px + py * IMAGE_SIZE_PX] = (f < 0.0f) ? 255 : 0;
+        if (f < 0.0f) {
+            image[px + py * IMAGE_SIZE_PX] = 255;
+        }
     }
 }
 

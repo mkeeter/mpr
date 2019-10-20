@@ -15,7 +15,7 @@
 
 /*  Evaluating ambiguous tiles is done with a
  *  LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS grid (1D)  */
-#define LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS 1024
+#define LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS 64
 
 /*  This is the number of subtapes allocated.  Each subtape has room for some
  *  number of clauses, defined in the Subtape struct */
