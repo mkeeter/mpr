@@ -37,7 +37,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       scratch(CUDA_MALLOC(uint8_t,
           std::max(TOTAL_TILES * (sizeof(Interval) * tape.num_regs +
                                   max(1, tape.num_csg_choices)),
-                   sizeof(float) * tape.num_regs * LIBFIVE_CUDA_NUM_FILL_BLOCKS
+                   sizeof(float) * tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS
                                  * LIBFIVE_CUDA_TILE_SIZE_PX
                                  * LIBFIVE_CUDA_TILE_SIZE_PX))),
       regs_i(reinterpret_cast<Interval*>(scratch)),
@@ -414,18 +414,7 @@ __global__ void drawAmbiguousTiles(Renderable* r, Renderable::View v) {
 
 void Renderable::run(const View& view)
 {
-    // We construct all of these variables first, because the 'this' pointer
-    // is allocated in unified memory, so we can't use it after starting
-    // kernels (until we call cudaDeviceSynchronize).
-    const uint32_t N = TILE_COUNT / LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK;
-    dim3 grid_i(N, N);
-    dim3 threads_i(LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK,
-                   LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK);
-
-    dim3 grid_p(LIBFIVE_CUDA_NUM_FILL_BLOCKS);
     dim3 threads_p(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
-
-    dim3 grid_a(LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS);
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
     // Reset our counter variables
@@ -433,18 +422,27 @@ void Renderable::run(const View& view)
     filled_tiles = 0;
     active_subtapes = 1;
 
-    ::processTiles<<<16, 256, 0, streams[0]>>>(this, view);
-    CHECK(cudaGetLastError());
-    CHECK(cudaStreamSynchronize(streams[0]));
+    {   // Do per-tile evaluation to get filled / ambiguous tiles
+        const dim3 B(LIBFIVE_CUDA_TILE_BLOCKS);
+        const dim3 T(LIBFIVE_CUDA_TILE_THREADS);
 
-    // Drawing filled and ambiguous tiles can happen simultaneously,
-    // so we assign each one to a separate stream.
-    ::drawFilledTiles<<<16, 256, 0, streams[1]>>>(this, view);
-    CHECK(cudaGetLastError());
+        ::processTiles<<<B, T, 0, streams[0]>>>(this, view);
+        CHECK(cudaGetLastError());
+        CHECK(cudaStreamSynchronize(streams[0]));
 
-    ::buildSubtapes<<<16, 256, 0, streams[0]>>>(this);
-    CHECK(cudaGetLastError());
+        // Drawing filled and ambiguous tiles can happen simultaneously,
+        // so we assign each one to a separate stream.
+        ::drawFilledTiles<<<B, T, 0, streams[1]>>>(this, view);
+        CHECK(cudaGetLastError());
 
-    ::drawAmbiguousTiles<<<grid_a, threads_p, 0, streams[0]>>>(this, view);
-    CHECK(cudaGetLastError());
+        ::buildSubtapes<<<B, T, 0, streams[0]>>>(this);
+        CHECK(cudaGetLastError());
+    }
+
+    {   // Do pixel-by-pixel rendering for ambiguous tiles
+        const dim3 B(LIBFIVE_CUDA_RENDER_BLOCKS);
+        const dim3 T(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
+        ::drawAmbiguousTiles<<<B, T, 0, streams[0]>>>(this, view);
+        CHECK(cudaGetLastError());
+    }
 }

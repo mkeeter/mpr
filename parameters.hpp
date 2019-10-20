@@ -3,19 +3,14 @@
 /*  Defines how many pixels are on the side of each tile */
 #define LIBFIVE_CUDA_TILE_SIZE_PX 16
 
-/*  Interval evaluation is done with 2D blocks
- *      LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK
- *  threads per side.
- *
- *  The number of blocks is calculated based on image size */
-#define LIBFIVE_CUDA_THREADS_PER_INTERVAL_BLOCK 8
+/*  All tile operations are done with this many blocks and threads,
+ *  looping to consume all available tiles */
+#define LIBFIVE_CUDA_TILE_BLOCKS 16
+#define LIBFIVE_CUDA_TILE_THREADS 256
 
-/*  Filling is done with a LIBFIVE_CUDA_NUM_FILL_BLOCKS grid (1D)  */
-#define LIBFIVE_CUDA_NUM_FILL_BLOCKS 1024
-
-/*  Evaluating ambiguous tiles is done with a
- *  LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS grid (1D)  */
-#define LIBFIVE_CUDA_NUM_AMBIGUOUS_BLOCKS 64
+/*  Rendering is done with this many blogs, and TILE_SIZE_PX^2 threads
+ *  (one per pixel in each tile) */
+#define LIBFIVE_CUDA_RENDER_BLOCKS 32
 
 /*  This is the number of subtapes allocated.  Each subtape has room for some
  *  number of clauses, defined in the Subtape struct */
