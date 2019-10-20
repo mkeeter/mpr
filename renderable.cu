@@ -172,7 +172,8 @@ void Renderable::buildSubtapes()
 
     const uint32_t num_active = active_tiles;
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    for (uint32_t i=start; i < num_active; i += blockDim.x * gridDim.x) {
+    const uint32_t offset = blockDim.x * gridDim.x;
+    for (uint32_t i=start; i < num_active; i += offset) {
         const uint32_t index = tiles[2 * i];
 
         // Reuse the registers array to track activeness
@@ -260,25 +261,32 @@ __global__ void drawFilledTiles(Renderable* r, Renderable::View v) {
 
 __device__ void Renderable::drawFilledTiles(const View& v)
 {
-    // We assume one thread per pixel in a tile
-    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
-    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
+    // Each thread picks a block and fills in the whole thing
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t dx = threadIdx.x;
-    const uint32_t dy = threadIdx.y;
-
     const uint32_t num_filled = filled_tiles;
-    for (uint32_t i=blockIdx.x; i < num_filled; i += gridDim.x) {
-        // Pick a filled tile from the list
+    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint32_t offset = blockDim.x * gridDim.x;
+    for (uint32_t i=start; i < num_filled; i += offset) {
+        const uint32_t index = tiles[2 * i];
         const uint32_t tile = tiles[TOTAL_TILES*2 - i - 1];
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
-        const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
+        const uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
+        const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
 
-        image[px + py * LIBFIVE_CUDA_TILE_SIZE_PX * TILE_COUNT] = 1;
+        uint4* pix = reinterpret_cast<uint4*>(&image[px + py * IMAGE_SIZE_PX]);
+        const uint4 fill = make_uint4(0x01010101, 0x01010101, 0x01010101, 0x01010101);
+        for (unsigned y=0; y < LIBFIVE_CUDA_TILE_SIZE_PX; y++) {
+            for (unsigned x=0; x < LIBFIVE_CUDA_TILE_SIZE_PX; x += 16) {
+                *pix = fill;
+                pix++;
+            }
+            pix += (IMAGE_SIZE_PX - LIBFIVE_CUDA_TILE_SIZE_PX) / 16;
+        }
     }
 }
 
@@ -425,7 +433,7 @@ void Renderable::run(const View& view)
 
     // Drawing filled and ambiguous tiles can happen simultaneously,
     // so we assign each one to a separate stream.
-    ::drawFilledTiles<<<grid_p, threads_p, 0, streams[1]>>>(this, view);
+    ::drawFilledTiles<<<16, 256, 0, streams[1]>>>(this, view);
     CHECK(cudaGetLastError());
 
     ::buildSubtapes<<<16, 256, 0, streams[0]>>>(this);
