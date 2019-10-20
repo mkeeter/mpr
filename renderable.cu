@@ -176,6 +176,7 @@ void Renderable::processTiles(const View& v)
         // Walk from the root of the tape downwards
         while (t--) {
             if (active[tape[t].out]) {
+                active[tape[t].out] = false;
                 using namespace libfive::Opcode;
                 uint32_t mask = 0;
                 if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX)
@@ -183,9 +184,7 @@ void Renderable::processTiles(const View& v)
                     uint8_t choice = csg_choices[--c];
                     if (choice == 1) {
                         active[tape[t].lhs] = true;
-                        active[tape[t].rhs] = false;
                     } else if (choice == 2) {
-                        active[tape[t].lhs] = false;
                         active[tape[t].rhs] = true;
                     } else {
                         active[tape[t].lhs] = true;
