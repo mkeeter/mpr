@@ -35,13 +35,15 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       TOTAL_TILES(TILE_COUNT * TILE_COUNT),
 
       scratch(CUDA_MALLOC(uint8_t,
-          std::max(TOTAL_TILES * (sizeof(Interval) * tape.num_regs +
-                                  max(1, tape.num_csg_choices)),
+          std::max(LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS *
+                           sizeof(Interval) * tape.num_regs
+                       + TOTAL_TILES * max(1, tape.num_csg_choices),
                    sizeof(float) * tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS
                                  * LIBFIVE_CUDA_TILE_SIZE_PX
                                  * LIBFIVE_CUDA_TILE_SIZE_PX))),
       regs_i(reinterpret_cast<Interval*>(scratch)),
-      csg_choices(scratch + TOTAL_TILES * sizeof(Interval) * tape.num_regs),
+      csg_choices(scratch + LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS
+                            * sizeof(Interval) * tape.num_regs),
       regs_f(reinterpret_cast<float*>(scratch)),
 
       tiles(CUDA_MALLOC(uint32_t, 2 * TOTAL_TILES)),
@@ -129,6 +131,7 @@ void Renderable::processTiles(const View& v)
 
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t offset = blockDim.x * gridDim.x;
+    auto regs = regs_i + start * tape.num_regs;
 
     for (uint32_t index=start; index < TOTAL_TILES; index += offset) {
         const float x = index / TILE_COUNT;
@@ -143,7 +146,6 @@ void Renderable::processTiles(const View& v)
         Y.upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
 
         // Unpack a 1D offset into the data arrays
-        auto regs = regs_i + index * tape.num_regs;
         auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
         walkI(tape, X, Y, regs, csg_choices);
 
@@ -180,11 +182,12 @@ void Renderable::buildSubtapes()
     const uint32_t num_active = active_tiles;
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t offset = blockDim.x * gridDim.x;
+
+    // Reuse the registers array to track activeness
+    auto regs = regs_i + start * tape.num_regs;
     for (uint32_t i=start; i < num_active; i += offset) {
         const uint32_t index = tiles[2 * i];
 
-        // Reuse the registers array to track activeness
-        auto regs = regs_i + index * tape.num_regs;
         bool* __restrict__ active = reinterpret_cast<bool*>(regs);
         for (uint32_t j=0; j < tape.num_regs; ++j) {
             active[i] = false;
