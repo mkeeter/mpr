@@ -5,7 +5,7 @@ Tape Tape::build(libfive::Tree tree) {
     auto ordered = tree.ordered();
 
     std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
-    std::vector<float> constant_data;
+    std::vector<float> constant_data = {0};
     std::map<libfive::Tree::Id, uint16_t> constants;
     uint16_t num_csg_choices = 0;
     for (auto& c : ordered) {
