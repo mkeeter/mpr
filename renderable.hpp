@@ -51,6 +51,7 @@ public:
     __device__ void processTiles(const View& v);
     __device__ void drawFilledTiles(const View& v);
     __device__ void drawAmbiguousTiles(const View& v);
+    __device__ void buildSubtapes();
 
     cudaStream_t streams[2];
 protected:

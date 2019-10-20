@@ -151,11 +151,40 @@ void Renderable::processTiles(const View& v)
 
     // If the tile is ambiguous, then record it as needing further refinement
     else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        // Store the linked list of subtapes into the active tiles list
+        uint32_t i = atomicAdd(&active_tiles, 1);
+        tiles[2 * i] = index;
+    }
+}
+
+__global__ void processTiles(Renderable* r, Renderable::View v) {
+    r->processTiles(v);
+}
+
+__device__
+void Renderable::buildSubtapes()
+{
+    // This is a 1D kernel which consumes tiles and writes out their tapes
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    const uint32_t num_active = active_tiles;
+    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
+    for (uint32_t i=start; i < num_active; i += blockDim.x * gridDim.x) {
+        const uint32_t index = tiles[2 * i];
+
         // Reuse the registers array to track activeness
+        auto regs = regs_i + index * tape.num_regs;
         bool* __restrict__ active = reinterpret_cast<bool*>(regs);
-        for (uint32_t i=0; i < tape.num_regs; ++i) {
+        for (uint32_t j=0; j < tape.num_regs; ++j) {
             active[i] = false;
         }
+
+        // Pick an offset CSG choices array
+        auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
+
         // Mark the root of the tree as true
         uint32_t t = tape.tape_length;
         active[tape[t - 1].out] = true;
@@ -186,9 +215,11 @@ void Renderable::processTiles(const View& v)
                         active[tape[t].lhs] = true;
                     } else if (choice == 2) {
                         active[tape[t].rhs] = true;
-                    } else {
+                    } else if (choice == 0) {
                         active[tape[t].lhs] = true;
                         active[tape[t].rhs] = true;
+                    } else {
+                        assert(false);
                     }
                     mask = (choice << 30);
                 } else {
@@ -213,14 +244,12 @@ void Renderable::processTiles(const View& v)
         subtape->size = s;
 
         // Store the linked list of subtapes into the active tiles list
-        uint32_t i = atomicAdd(&active_tiles, 1);
-        tiles[2 * i] = index;
         tiles[2 * i + 1] = subtape_index;
     }
 }
 
-__global__ void processTiles(Renderable* r, Renderable::View v) {
-    r->processTiles(v);
+__global__ void buildSubtapes(Renderable* r) {
+    r->buildSubtapes();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -396,9 +425,12 @@ void Renderable::run(const View& view)
 
     // Drawing filled and ambiguous tiles can happen simultaneously,
     // so we assign each one to a separate stream.
-    ::drawFilledTiles<<<grid_p, threads_p, 0, streams[0]>>>(this, view);
+    ::drawFilledTiles<<<grid_p, threads_p, 0, streams[1]>>>(this, view);
     CHECK(cudaGetLastError());
 
-    ::drawAmbiguousTiles<<<grid_a, threads_p, 0, streams[1]>>>(this, view);
+    ::buildSubtapes<<<16, 256, 0, streams[0]>>>(this);
+    CHECK(cudaGetLastError());
+
+    ::drawAmbiguousTiles<<<grid_a, threads_p, 0, streams[0]>>>(this, view);
     CHECK(cudaGetLastError());
 }
