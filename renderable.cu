@@ -219,23 +219,31 @@ void Renderable::buildSubtapes()
                 active[tape[t].out] = false;
                 using namespace libfive::Opcode;
                 uint32_t mask = 0;
+                const uint32_t lhs = (tape[t].banks & 1) ? 0 : tape[t].lhs;
+                const uint32_t rhs = (tape[t].banks & 2) ? 0 : tape[t].rhs;
                 if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX)
                 {
                     uint8_t choice = csg_choices[--c];
                     if (choice == 1) {
-                        active[tape[t].lhs] = true;
+                        active[lhs] = true;
+                        if (lhs == tape[t].out) {
+                            continue;
+                        }
                     } else if (choice == 2) {
-                        active[tape[t].rhs] = true;
+                        active[rhs] = true;
+                        if (rhs == tape[t].out) {
+                            continue;
+                        }
                     } else if (choice == 0) {
-                        active[tape[t].lhs] = true;
-                        active[tape[t].rhs] = true;
+                        active[lhs] = true;
+                        active[rhs] = true;
                     } else {
                         assert(false);
                     }
                     mask = (choice << 30);
                 } else {
-                    active[tape[t].lhs] = true;
-                    active[tape[t].rhs] = true;
+                    active[lhs] = true;
+                    active[rhs] = true;
                 }
 
                 if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {

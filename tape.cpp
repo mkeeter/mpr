@@ -39,18 +39,6 @@ Tape Tape::build(libfive::Tree tree) {
             continue;
         }
 
-        // Pick a registers for the output of this opcode
-        uint16_t out;
-        if (free_registers.size()) {
-            out = free_registers.back();
-            free_registers.pop_back();
-        } else {
-            out = num_registers++;
-            if (num_registers == UINT16_MAX) {
-                fprintf(stderr, "Ran out of registers!\n");
-            }
-        }
-        bound_registers[c.id()] = out;
         uint8_t banks = 0;
         auto f = [&](libfive::Tree::Id id, uint8_t mask) {
             if (id == nullptr) {
@@ -77,6 +65,31 @@ Tape Tape::build(libfive::Tree tree) {
         const uint16_t lhs = f(c.lhs().id(), 1);
         const uint16_t rhs = f(c.rhs().id(), 2);
 
+        // Release registers if this was their last use.  We do this now so
+        // that one of them can be reused for the output register below.
+        for (auto& h : {c.lhs().id(), c.rhs().id()}) {
+            if (h != nullptr && h->op != libfive::Opcode::CONSTANT &&
+                last_used[h] == c.id())
+            {
+                auto itr = bound_registers.find(h);
+                free_registers.push_back(itr->second);
+                bound_registers.erase(itr);
+            }
+        }
+
+        // Pick a registers for the output of this opcode
+        uint16_t out;
+        if (free_registers.size()) {
+            out = free_registers.back();
+            free_registers.pop_back();
+        } else {
+            out = num_registers++;
+            if (num_registers == UINT16_MAX) {
+                fprintf(stderr, "Ran out of registers!\n");
+            }
+        }
+        bound_registers[c.id()] = out;
+
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
 
         std::cout << libfive::Opcode::toString(c->op) << " ";
@@ -91,17 +104,6 @@ Tape Tape::build(libfive::Tree tree) {
             std::cout << rhs << " ";
         }
         std::cout << " -> " << out << "\n";
-
-        // Release registers if this was their last use
-        for (auto& h : {c.lhs().id(), c.rhs().id()}) {
-            if (h != nullptr && h->op != libfive::Opcode::CONSTANT &&
-                last_used[h] == c.id())
-            {
-                auto itr = bound_registers.find(h);
-                free_registers.push_back(itr->second);
-                bound_registers.erase(itr);
-            }
-        }
     }
 
     auto d_tape = CUDA_MALLOC(Clause, flat.size());
