@@ -121,7 +121,7 @@ __device__ void walkI(const Tape& tape,
 }
 
 __device__
-void Renderable::processTiles(const View& v)
+void Renderable::processTiles(const uint32_t offset, const View& v)
 {
     // This should be a 1D kernel
     assert(blockDim.y == 1);
@@ -130,44 +130,45 @@ void Renderable::processTiles(const View& v)
     assert(gridDim.z == 1);
 
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t offset = blockDim.x * gridDim.x;
     auto regs = regs_i + start * tape.num_regs;
 
-    for (uint32_t index=start; index < TOTAL_TILES; index += offset) {
-        const float x = index / TILE_COUNT;
-        const float y = index % TILE_COUNT;
+    const uint32_t index = start + offset;
+    if (index >= TOTAL_TILES) {
+        return;
+    }
+    const float x = index / TILE_COUNT;
+    const float y = index % TILE_COUNT;
 
-        Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
-        X.lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
-        X.upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+    Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
+    X.lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
+    X.upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
 
-        Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
-        Y.lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
-        Y.upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
+    Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
+    Y.lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
+    Y.upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
 
-        // Unpack a 1D offset into the data arrays
-        auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
-        walkI(tape, X, Y, regs, csg_choices);
+    // Unpack a 1D offset into the data arrays
+    auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
+    walkI(tape, X, Y, regs, csg_choices);
 
-        const Interval result = regs[tape[tape.tape_length - 1].out];
-        // If this tile is unambiguously filled, then mark it at the end
-        // of the tiles list
-        if (result.upper < 0.0f) {
-            const uint32_t i = atomicAdd(&filled_tiles, 1);
-            tiles[TOTAL_TILES*2 - 1 - i] = index;
-        }
+    const Interval result = regs[tape[tape.tape_length - 1].out];
+    // If this tile is unambiguously filled, then mark it at the end
+    // of the tiles list
+    if (result.upper < 0.0f) {
+        const uint32_t i = atomicAdd(&filled_tiles, 1);
+        tiles[TOTAL_TILES*2 - 1 - i] = index;
+    }
 
-        // If the tile is ambiguous, then record it as needing further refinement
-        else if (result.lower <= 0.0f && result.upper >= 0.0f) {
-            // Store the linked list of subtapes into the active tiles list
-            const uint32_t i = atomicAdd(&active_tiles, 1);
-            tiles[2 * i] = index;
-        }
+    // If the tile is ambiguous, then record it as needing further refinement
+    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        // Store the linked list of subtapes into the active tiles list
+        const uint32_t i = atomicAdd(&active_tiles, 1);
+        tiles[2 * i] = index;
     }
 }
 
-__global__ void processTiles(Renderable* r, Renderable::View v) {
-    r->processTiles(v);
+__global__ void processTiles(Renderable* r, const uint32_t offset, Renderable::View v) {
+    r->processTiles(offset, v);
 }
 
 __device__
@@ -296,7 +297,7 @@ __device__ void Renderable::drawFilledTiles(const View& v)
         const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
 
         uint4* pix = reinterpret_cast<uint4*>(&image[px + py * IMAGE_SIZE_PX]);
-        const uint4 fill = make_uint4(0x01010101, 0x01010101, 0x01010101, 0x01010101);
+        const uint4 fill = make_uint4(0xF0F0F0F0, 0xF0F0F0F0, 0xF0F0F0F0, 0xF0F0F0F0);
         for (unsigned y=0; y < LIBFIVE_CUDA_TILE_SIZE_PX; y++) {
             for (unsigned x=0; x < LIBFIVE_CUDA_TILE_SIZE_PX; x += 16) {
                 *pix = fill;
@@ -433,12 +434,16 @@ void Renderable::run(const View& view)
     filled_tiles = 0;
     active_subtapes = 1;
 
+    const uint32_t total_tiles = TOTAL_TILES;
+
     {   // Do per-tile evaluation to get filled / ambiguous tiles
         const dim3 B(LIBFIVE_CUDA_TILE_BLOCKS);
         const dim3 T(LIBFIVE_CUDA_TILE_THREADS);
 
-        ::processTiles<<<B, T, 0, streams[0]>>>(this, view);
-        CHECK(cudaGetLastError());
+        for (unsigned i=0; i < total_tiles; i += LIBFIVE_CUDA_TILE_THREADS * LIBFIVE_CUDA_TILE_BLOCKS) {
+            ::processTiles<<<B, T, 0, streams[0]>>>(this, i, view);
+            CHECK(cudaGetLastError());
+        }
         CHECK(cudaStreamSynchronize(streams[0]));
 
         // Drawing filled and ambiguous tiles can happen simultaneously,

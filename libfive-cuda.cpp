@@ -9,6 +9,7 @@
 // libfive
 #include <libfive/tree/tree.hpp>
 #include <libfive/tree/archive.hpp>
+#include <libfive/render/discrete/heightmap.hpp>
 
 #include "renderable.hpp"
 
@@ -31,18 +32,27 @@ int main(int argc, char **argv)
         t= min(sqrt((X + 1.5)*(X + 1.5)+ Y*Y) - 1.0,
                sqrt((X - 1.5)*(X - 1.5) + Y*Y) - 1.0);
     }
-    auto r = Renderable::build(t, 256);
+    auto r = Renderable::build(t, 4096);
     for (unsigned i=0; i < 10; ++i) {
         r->run({{0, 0}, 2});
         cudaDeviceSynchronize();
     }
+
+    // Save the image using libfive::Heightmap
+    libfive::Heightmap out(r->IMAGE_SIZE_PX, r->IMAGE_SIZE_PX);
+    for (unsigned x=0; x < r->IMAGE_SIZE_PX; ++x) {
+        for (unsigned y=0; y < r->IMAGE_SIZE_PX; ++y) {
+            out.depth(y, x) = r->image[x + y * r->IMAGE_SIZE_PX] << 16;
+        }
+    }
+    out.savePNG("out.png");
 
     if (r->IMAGE_SIZE_PX == 256) {
         for (unsigned i=0; i < r->IMAGE_SIZE_PX; ++i) {
             for (unsigned j=0; j < r->IMAGE_SIZE_PX; ++j) {
                 switch (r->image[i * r->IMAGE_SIZE_PX + j]) {
                     case 0:     printf(" "); break;
-                    case 1:     printf("."); break;
+                    case 0xF0:  printf("."); break;
                     default:    printf("X"); break;
                 }
             }

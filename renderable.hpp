@@ -48,7 +48,7 @@ public:
 
     uint8_t* __restrict__ const image;
 
-    __device__ void processTiles(const View& v);
+    __device__ void processTiles(const uint32_t offset, const View& v);
     __device__ void drawFilledTiles(const View& v);
     __device__ void drawAmbiguousTiles(const View& v);
     __device__ void buildSubtapes();
