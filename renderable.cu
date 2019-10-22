@@ -78,6 +78,7 @@ __device__ void walkI(const Tape& tape,
         switch (c.opcode) {
             case VAR_X: regs[c.out] = X; break;
             case VAR_Y: regs[c.out] = Y; break;
+            case VAR_Z: regs[c.out] = Interval{0.0f, 0.0f}; break;
 
             case OP_SQUARE: regs[c.out] = LHS.square(); break;
             case OP_SQRT: regs[c.out] = LHS.sqrt(); break;
@@ -348,6 +349,7 @@ __device__ float walkF(const Tape& tape,
         switch (c.opcode) {
             case VAR_X: regs[c.out] = x; break;
             case VAR_Y: regs[c.out] = y; break;
+            case VAR_Z: regs[c.out] = 0.0f; break;
 
             case OP_SQUARE: regs[c.out] = LHS * LHS; break;
             case OP_SQRT: regs[c.out] = sqrtf(LHS); break;
