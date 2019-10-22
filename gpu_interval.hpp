@@ -74,11 +74,11 @@ struct Interval {
     }
 
     __device__ Interval min(const Interval& other) {
-        return {fminf(lower, other.lower), fmaxf(upper, other.upper)};
+        return {fminf(lower, other.lower), fminf(upper, other.upper)};
     }
 
     __device__ Interval max(const Interval& other) {
-        return {fmaxf(lower, other.lower), fminf(upper, other.upper)};
+        return {fmaxf(lower, other.lower), fmaxf(upper, other.upper)};
     }
 
     __device__ Interval operator-(const Interval& other) {
