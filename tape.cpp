@@ -2,7 +2,7 @@
 #include "check.hpp"
 
 Tape Tape::build(libfive::Tree tree) {
-    auto ordered = tree.ordered();
+    auto ordered = tree.orderedDfs();
 
     std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
     std::vector<float> constant_data = {0};
