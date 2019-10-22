@@ -167,12 +167,14 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     }
 }
 
-__global__ void processTiles(Renderable* r, const uint32_t offset, Renderable::View v) {
+__global__ void processTiles(Renderable* r, const uint32_t offset,
+                             Renderable::View v)
+{
     r->processTiles(offset, v);
 }
 
 __device__
-void Renderable::buildSubtapes()
+void Renderable::buildSubtapes(const uint32_t offset)
 {
     // This is a 1D kernel which consumes tiles and writes out their tapes
     assert(blockDim.y == 1);
@@ -180,105 +182,105 @@ void Renderable::buildSubtapes()
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t num_active = active_tiles;
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t offset = blockDim.x * gridDim.x;
 
     // Reuse the registers array to track activeness
     auto regs = regs_i + start * tape.num_regs;
-    for (uint32_t i=start; i < num_active; i += offset) {
-        const uint32_t index = tiles[2 * i];
+    const uint32_t i = start + offset;
+    if (i >= active_tiles) {
+        return;
+    }
+    const uint32_t index = tiles[2 * i];
 
-        bool* __restrict__ active = reinterpret_cast<bool*>(regs);
-        for (uint32_t j=0; j < tape.num_regs; ++j) {
-            active[i] = false;
-        }
+    bool* __restrict__ active = reinterpret_cast<bool*>(regs);
+    for (uint32_t j=0; j < tape.num_regs; ++j) {
+        active[i] = false;
+    }
 
-        // Pick an offset CSG choices array
-        auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
+    // Pick an offset CSG choices array
+    auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
 
-        // Mark the root of the tree as true
-        uint32_t t = tape.tape_length;
-        active[tape[t - 1].out] = true;
+    // Mark the root of the tree as true
+    uint32_t t = tape.tape_length;
+    active[tape[t - 1].out] = true;
 
-        // Begin walking down CSG choices
-        uint32_t c = tape.num_csg_choices;
+    // Begin walking down CSG choices
+    uint32_t c = tape.num_csg_choices;
 
-        // Claim a subtape to populate
-        uint32_t subtape_index = atomicAdd(&active_subtapes, 1);
-        assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
+    // Claim a subtape to populate
+    uint32_t subtape_index = atomicAdd(&active_subtapes, 1);
+    assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
 
-        // Since we're reversing the tape, this is going to be the
-        // end of the linked list (i.e. next = 0)
-        Subtape* subtape = &subtapes[subtape_index];
-        subtape->next = 0;
-        uint32_t s = 0;
+    // Since we're reversing the tape, this is going to be the
+    // end of the linked list (i.e. next = 0)
+    Subtape* subtape = &subtapes[subtape_index];
+    subtape->next = 0;
+    uint32_t s = 0;
 
-        // Walk from the root of the tape downwards
-        while (t--) {
-            if (active[tape[t].out]) {
-                active[tape[t].out] = false;
-                using namespace libfive::Opcode;
-                uint32_t mask = 0;
-                const uint32_t lhs = (tape[t].banks & 1) ? 0 : tape[t].lhs;
-                const uint32_t rhs = (tape[t].banks & 2) ? 0 : tape[t].rhs;
-                if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX)
-                {
-                    uint8_t choice = csg_choices[--c];
-                    if (choice == 1) {
-                        active[lhs] = true;
-                        if (lhs == tape[t].out) {
-                            continue;
-                        }
-                    } else if (choice == 2) {
-                        active[rhs] = true;
-                        if (rhs == tape[t].out) {
-                            continue;
-                        }
-                    } else if (choice == 0) {
-                        active[lhs] = true;
-                        active[rhs] = true;
-                    } else {
-                        assert(false);
+    // Walk from the root of the tape downwards
+    while (t--) {
+        if (active[tape[t].out]) {
+            active[tape[t].out] = false;
+            using namespace libfive::Opcode;
+            uint32_t mask = 0;
+            const uint32_t lhs = (tape[t].banks & 1) ? 0 : tape[t].lhs;
+            const uint32_t rhs = (tape[t].banks & 2) ? 0 : tape[t].rhs;
+            if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX)
+            {
+                uint8_t choice = csg_choices[--c];
+                if (choice == 1) {
+                    active[lhs] = true;
+                    if (lhs == tape[t].out) {
+                        continue;
                     }
-                    mask = (choice << 30);
-                } else {
+                } else if (choice == 2) {
+                    active[rhs] = true;
+                    if (rhs == tape[t].out) {
+                        continue;
+                    }
+                } else if (choice == 0) {
                     active[lhs] = true;
                     active[rhs] = true;
+                } else {
+                    assert(false);
                 }
-
-                if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
-                    auto next_subtape_index = atomicAdd(&active_subtapes, 1);
-                    auto next_subtape = &subtapes[next_subtape_index];
-                    subtape->size = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
-                    next_subtape->next = subtape_index;
-
-                    subtape_index = next_subtape_index;
-                    subtape = next_subtape;
-                    s = 0;
-                }
-                (*subtape)[s++] = (t | mask);
+                mask = (choice << 30);
+            } else {
+                active[lhs] = true;
+                active[rhs] = true;
             }
-        }
-        // The last subtape may not be completely filled
-        subtape->size = s;
 
-        // Store the linked list of subtapes into the active tiles list
-        tiles[2 * i + 1] = subtape_index;
+            if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+                auto next_subtape_index = atomicAdd(&active_subtapes, 1);
+                auto next_subtape = &subtapes[next_subtape_index];
+                subtape->size = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+                next_subtape->next = subtape_index;
+
+                subtape_index = next_subtape_index;
+                subtape = next_subtape;
+                s = 0;
+            }
+            (*subtape)[s++] = (t | mask);
+        }
     }
+    // The last subtape may not be completely filled
+    subtape->size = s;
+
+    // Store the linked list of subtapes into the active tiles list
+    tiles[2 * i + 1] = subtape_index;
 }
 
-__global__ void buildSubtapes(Renderable* r) {
-    r->buildSubtapes();
+__global__ void buildSubtapes(Renderable* r, const uint32_t offset) {
+    r->buildSubtapes(offset);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void drawFilledTiles(Renderable* r, Renderable::View v) {
-    r->drawFilledTiles(v);
+__global__ void drawFilledTiles(Renderable* r, const uint32_t offset, Renderable::View v) {
+    r->drawFilledTiles(offset, v);
 }
 
-__device__ void Renderable::drawFilledTiles(const View& v)
+__device__ void Renderable::drawFilledTiles(const uint32_t offset, const View& v)
 {
     // Each thread picks a block and fills in the whole thing
     assert(blockDim.y == 1);
@@ -286,25 +288,26 @@ __device__ void Renderable::drawFilledTiles(const View& v)
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t num_filled = filled_tiles;
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t offset = blockDim.x * gridDim.x;
-    for (uint32_t i=start; i < num_filled; i += offset) {
-        const uint32_t tile = tiles[TOTAL_TILES*2 - i - 1];
+    const uint32_t i = start + offset;
+    if (i >= filled_tiles) {
+        return;
+    }
 
-        // Convert from tile position to pixels
-        const uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
-        const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
+    const uint32_t tile = tiles[TOTAL_TILES*2 - i - 1];
 
-        uint4* pix = reinterpret_cast<uint4*>(&image[px + py * IMAGE_SIZE_PX]);
-        const uint4 fill = make_uint4(0xF0F0F0F0, 0xF0F0F0F0, 0xF0F0F0F0, 0xF0F0F0F0);
-        for (unsigned y=0; y < LIBFIVE_CUDA_TILE_SIZE_PX; y++) {
-            for (unsigned x=0; x < LIBFIVE_CUDA_TILE_SIZE_PX; x += 16) {
-                *pix = fill;
-                pix++;
-            }
-            pix += (IMAGE_SIZE_PX - LIBFIVE_CUDA_TILE_SIZE_PX) / 16;
+    // Convert from tile position to pixels
+    const uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
+    const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
+
+    uint4* pix = reinterpret_cast<uint4*>(&image[px + py * IMAGE_SIZE_PX]);
+    const uint4 fill = make_uint4(0xF0F0F0F0, 0xF0F0F0F0, 0xF0F0F0F0, 0xF0F0F0F0);
+    for (unsigned y=0; y < LIBFIVE_CUDA_TILE_SIZE_PX; y++) {
+        for (unsigned x=0; x < LIBFIVE_CUDA_TILE_SIZE_PX; x += 16) {
+            *pix = fill;
+            pix++;
         }
+        pix += (IMAGE_SIZE_PX - LIBFIVE_CUDA_TILE_SIZE_PX) / 16;
     }
 }
 
@@ -381,7 +384,7 @@ __device__ float walkF(const Tape& tape,
     return 0.0f;
 }
 
-__device__ void Renderable::drawAmbiguousTiles(const View& v)
+__device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View& v)
 {
     // We assume one thread per pixel in a tile
     assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
@@ -393,40 +396,42 @@ __device__ void Renderable::drawAmbiguousTiles(const View& v)
     const uint32_t dy = threadIdx.y;
 
     // Pick an index into the register array
-    uint32_t offset = (blockIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + dx) *
-                      LIBFIVE_CUDA_TILE_SIZE_PX + dy;
-    float* const __restrict__ regs = regs_f + offset * tape.num_regs;
+    const uint32_t pos = (blockIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + dx) *
+                          LIBFIVE_CUDA_TILE_SIZE_PX + dy;
+    float* const __restrict__ regs = regs_f + pos * tape.num_regs;
 
-    const uint32_t num_active = active_tiles;
-    for (uint32_t i=blockIdx.x; i < num_active; i += gridDim.x) {
-        // Pick an active tile from the list
-        const uint32_t tile = tiles[i * 2];
-        const uint32_t subtape_index = tiles[i * 2 + 1];
+    // Pick an active tile from the list
+    const uint32_t i = offset + blockIdx.x;
+    if (i >= active_tiles) {
+        return;
+    }
+    const uint32_t tile = tiles[i * 2];
+    const uint32_t subtape_index = tiles[i * 2 + 1];
 
-        // Convert from tile position to pixels
-        uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
-        uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
+    // Convert from tile position to pixels
+    uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
+    uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
 
-        float x = px / (IMAGE_SIZE_PX - 1.0f);
-        float y = py / (IMAGE_SIZE_PX - 1.0f);
-        x = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
-        y = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
-        const float f = walkF(tape, subtapes, subtape_index, x, y, regs);
-        if (f < 0.0f) {
-            image[px + py * IMAGE_SIZE_PX] = 255;
-        }
+    float x = px / (IMAGE_SIZE_PX - 1.0f);
+    float y = py / (IMAGE_SIZE_PX - 1.0f);
+    x = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
+    y = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
+    const float f = walkF(tape, subtapes, subtape_index, x, y, regs);
+    if (f < 0.0f) {
+        image[px + py * IMAGE_SIZE_PX] = 255;
     }
 }
 
-__global__ void drawAmbiguousTiles(Renderable* r, Renderable::View v) {
-    r->drawAmbiguousTiles(v);
+__global__ void drawAmbiguousTiles(Renderable* r, const uint32_t offset,
+                                   Renderable::View v)
+{
+    r->drawAmbiguousTiles(offset, v);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 void Renderable::run(const View& view)
 {
-    dim3 threads_p(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
     // Reset our counter variables
@@ -434,31 +439,51 @@ void Renderable::run(const View& view)
     filled_tiles = 0;
     active_subtapes = 1;
 
+    // Record this local variable because otherwise it looks up memory
+    // that has been loaned to the GPU and not synchronized.
     const uint32_t total_tiles = TOTAL_TILES;
+    const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
+                            LIBFIVE_CUDA_TILE_BLOCKS;
 
-    {   // Do per-tile evaluation to get filled / ambiguous tiles
-        const dim3 B(LIBFIVE_CUDA_TILE_BLOCKS);
-        const dim3 T(LIBFIVE_CUDA_TILE_THREADS);
+    // Do per-tile evaluation to get filled / ambiguous tiles
+    for (unsigned i=0; i < total_tiles; i += stride) {
+        ::processTiles<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                         LIBFIVE_CUDA_TILE_THREADS,
+                         0, streams[0]>>>(this, i, view);
+        CHECK(cudaGetLastError());
+        CHECK(cudaDeviceSynchronize());
+    }
+    CHECK(cudaStreamSynchronize(streams[0]));
 
-        for (unsigned i=0; i < total_tiles; i += LIBFIVE_CUDA_TILE_THREADS * LIBFIVE_CUDA_TILE_BLOCKS) {
-            ::processTiles<<<B, T, 0, streams[0]>>>(this, i, view);
-            CHECK(cudaGetLastError());
-        }
-        CHECK(cudaStreamSynchronize(streams[0]));
+    // Pull a few variables back from the GPU
+    const uint32_t filled_tiles = this->filled_tiles;
+    const uint32_t active_tiles = this->active_tiles;
 
+    for (unsigned i=0; i < filled_tiles; i += stride) {
         // Drawing filled and ambiguous tiles can happen simultaneously,
         // so we assign each one to a separate stream.
-        ::drawFilledTiles<<<B, T, 0, streams[1]>>>(this, view);
+        ::drawFilledTiles<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                            LIBFIVE_CUDA_TILE_THREADS,
+                            0, streams[1]>>>(this, i, view);
         CHECK(cudaGetLastError());
-
-        ::buildSubtapes<<<B, T, 0, streams[0]>>>(this);
-        CHECK(cudaGetLastError());
+        CHECK(cudaDeviceSynchronize());
     }
 
-    {   // Do pixel-by-pixel rendering for ambiguous tiles
-        const dim3 B(LIBFIVE_CUDA_RENDER_BLOCKS);
-        const dim3 T(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
-        ::drawAmbiguousTiles<<<B, T, 0, streams[0]>>>(this, view);
+    // Build subtapes in memory for ambiguous tiles
+    for (unsigned i=0; i < active_tiles; i += stride) {
+        ::buildSubtapes<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                          LIBFIVE_CUDA_TILE_THREADS,
+                          0, streams[0]>>>(this, i);
         CHECK(cudaGetLastError());
+        CHECK(cudaDeviceSynchronize());
+    }
+
+    // Do pixel-by-pixel rendering for ambiguous tiles
+    for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_RENDER_BLOCKS) {
+        const dim3 T(LIBFIVE_CUDA_TILE_SIZE_PX, LIBFIVE_CUDA_TILE_SIZE_PX);
+        ::drawAmbiguousTiles<<<LIBFIVE_CUDA_RENDER_BLOCKS,
+                               T, 0, streams[0]>>>(this, i, view);
+        CHECK(cudaGetLastError());
+        CHECK(cudaDeviceSynchronize());
     }
 }
