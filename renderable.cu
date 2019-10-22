@@ -451,7 +451,6 @@ void Renderable::run(const View& view)
                          LIBFIVE_CUDA_TILE_THREADS,
                          0, streams[0]>>>(this, i, view);
         CHECK(cudaGetLastError());
-        CHECK(cudaDeviceSynchronize());
     }
     CHECK(cudaStreamSynchronize(streams[0]));
 
@@ -466,7 +465,6 @@ void Renderable::run(const View& view)
                             LIBFIVE_CUDA_TILE_THREADS,
                             0, streams[1]>>>(this, i, view);
         CHECK(cudaGetLastError());
-        CHECK(cudaDeviceSynchronize());
     }
 
     // Build subtapes in memory for ambiguous tiles
@@ -475,7 +473,6 @@ void Renderable::run(const View& view)
                           LIBFIVE_CUDA_TILE_THREADS,
                           0, streams[0]>>>(this, i);
         CHECK(cudaGetLastError());
-        CHECK(cudaDeviceSynchronize());
     }
 
     // Do pixel-by-pixel rendering for ambiguous tiles
@@ -484,6 +481,5 @@ void Renderable::run(const View& view)
         ::drawAmbiguousTiles<<<LIBFIVE_CUDA_RENDER_BLOCKS,
                                T, 0, streams[0]>>>(this, i, view);
         CHECK(cudaGetLastError());
-        CHECK(cudaDeviceSynchronize());
     }
 }

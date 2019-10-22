@@ -29,12 +29,12 @@ int main(int argc, char **argv)
     } else {
         auto X = libfive::Tree::X();
         auto Y = libfive::Tree::Y();
-        t= min(sqrt((X + 1.5)*(X + 1.5)+ Y*Y) - 1.0,
-               sqrt((X - 1.5)*(X - 1.5) + Y*Y) - 1.0);
+        t= min(sqrt((X + 0.5)*(X + 0.5)+ Y*Y) - 0.25,
+               sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
     auto r = Renderable::build(t, 4096);
     for (unsigned i=0; i < 10; ++i) {
-        r->run({{0, 0}, 2});
+        r->run({{0, 0}, 1});
         cudaDeviceSynchronize();
     }
 
@@ -45,7 +45,7 @@ int main(int argc, char **argv)
             out.depth(y, x) = r->image[x + y * r->IMAGE_SIZE_PX] << 16;
         }
     }
-    out.savePNG("out.png");
+    out.savePNG("out_gpu.png");
 
     if (r->IMAGE_SIZE_PX == 256) {
         for (unsigned i=0; i < r->IMAGE_SIZE_PX; ++i) {
@@ -59,6 +59,12 @@ int main(int argc, char **argv)
             printf("\n");
         }
     }
+
+    std::atomic_bool abort(false);
+    auto h = libfive::Heightmap::render(t,
+            libfive::Voxels({-1, -1, 0}, {1, 1, 0}, r->IMAGE_SIZE_PX / 2),
+            abort);
+    h->savePNG("out_cpu.png");
 
     return 0;
 }
