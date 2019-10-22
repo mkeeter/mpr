@@ -82,7 +82,7 @@ struct Interval {
     }
 
     __device__ Interval operator-(const Interval& other) {
-        return {__fsub_rd(lower, other.lower), __fsub_ru(upper, other.upper)};
+        return {__fsub_rd(lower, other.upper), __fsub_ru(upper, other.lower)};
     }
 
     __device__ Interval square() const {
