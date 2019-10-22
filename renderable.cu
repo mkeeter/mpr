@@ -220,9 +220,9 @@ void Renderable::buildSubtapes(const uint32_t offset)
 
     // Walk from the root of the tape downwards
     while (t--) {
+        using namespace libfive::Opcode;
         if (active[tape[t].out]) {
             active[tape[t].out] = false;
-            using namespace libfive::Opcode;
             uint32_t mask = 0;
             const uint32_t lhs = (tape[t].banks & 1) ? 0 : tape[t].lhs;
             const uint32_t rhs = (tape[t].banks & 2) ? 0 : tape[t].rhs;
@@ -262,6 +262,8 @@ void Renderable::buildSubtapes(const uint32_t offset)
                 s = 0;
             }
             (*subtape)[s++] = (t | mask);
+        } else if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX) {
+            --c;
         }
     }
     // The last subtape may not be completely filled
