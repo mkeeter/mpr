@@ -73,6 +73,34 @@ struct Interval {
         }
     }
 
+    __device__ Interval operator/(const Interval& other) {
+        if (upper < 0.0f) {
+            if (other.upper < 0.0f) {
+                return { __fdiv_rd(upper, other.lower),
+                         __fdiv_ru(lower, other.upper) };
+            } else {
+                return { __fdiv_rd(lower, other.lower),
+                         __fdiv_ru(upper, other.upper) };
+            }
+        } else if (lower < 0.0f) {
+            if (other.upper < 0.0f) {
+                return { __fdiv_rd(upper, other.upper),
+                         __fdiv_ru(lower, other.upper) };
+            } else {
+                return { __fdiv_rd(lower, other.lower),
+                         __fdiv_ru(upper, other.lower) };
+            }
+        } else {
+            if (other.upper < 0.0f) {
+                return { __fdiv_rd(upper, other.upper),
+                         __fdiv_ru(lower, other.lower) };
+            } else {
+                return { __fdiv_rd(lower, other.upper),
+                         __fdiv_ru(upper, other.lower) };
+            }
+        }
+    }
+
     __device__ Interval min(const Interval& other) {
         return {fminf(lower, other.lower), fminf(upper, other.upper)};
     }

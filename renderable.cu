@@ -87,6 +87,7 @@ __device__ void walkI(const Tape& tape,
 
             case OP_ADD: regs[c.out] = LHS + RHS; break;
             case OP_MUL: regs[c.out] = LHS * RHS; break;
+            case OP_DIV: regs[c.out] = LHS / RHS; break;
             case OP_MIN: if (LHS.upper < RHS.lower) {
                              choices[choice_index] = 1;
                              regs[c.out] = LHS;
@@ -360,6 +361,7 @@ __device__ float walkF(const Tape& tape,
 
             case OP_ADD: regs[c.out] = LHS + RHS; break;
             case OP_MUL: regs[c.out] = LHS * RHS; break;
+            case OP_DIV: regs[c.out] = LHS / RHS; break;
             case OP_MIN: if (choice == 1) {
                             regs[c.out] = LHS;
                         } else if (choice == 2) {
