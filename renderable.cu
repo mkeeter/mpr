@@ -196,7 +196,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
 
     bool* __restrict__ active = reinterpret_cast<bool*>(regs);
     for (uint32_t j=0; j < tape.num_regs; ++j) {
-        active[i] = false;
+        active[j] = false;
     }
 
     // Pick an offset CSG choices array
