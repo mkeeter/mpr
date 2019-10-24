@@ -32,11 +32,9 @@ int main(int argc, char **argv)
         t= min(sqrt((X + 0.5)*(X + 0.5)+ Y*Y) - 0.25,
                sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
-    auto r = Renderable::build(t, 4096);
-    for (unsigned i=0; i < 10; ++i) {
-        r->run({{0, 0}, 1});
-        cudaDeviceSynchronize();
-    }
+    auto r = Renderable::build(t, 2048);
+    r->run({{0, 0}, 1});
+    cudaDeviceSynchronize();
 
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(r->IMAGE_SIZE_PX, r->IMAGE_SIZE_PX);
