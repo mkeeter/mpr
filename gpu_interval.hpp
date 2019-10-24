@@ -6,11 +6,11 @@ struct Interval {
     float lower;
     float upper;
 
-    __device__ Interval operator+(const Interval& other) {
+    __device__ inline Interval operator+(const Interval& other) {
         return {__fadd_rd(lower, other.lower), __fadd_ru(upper, other.upper)};
     }
 
-    __device__ Interval operator*(const Interval& other) {
+    __device__ inline Interval operator*(const Interval& other) {
         if (lower < 0.0f) {
             if (upper > 0.0f) {
                 if (other.lower < 0.0f) {
@@ -73,7 +73,7 @@ struct Interval {
         }
     }
 
-    __device__ Interval operator/(const Interval& other) {
+    __device__ inline Interval operator/(const Interval& other) {
         if (upper < 0.0f) {
             if (other.upper < 0.0f) {
                 return { __fdiv_rd(upper, other.lower),
@@ -101,19 +101,19 @@ struct Interval {
         }
     }
 
-    __device__ Interval min(const Interval& other) {
+    __device__ inline Interval min(const Interval& other) {
         return {fminf(lower, other.lower), fminf(upper, other.upper)};
     }
 
-    __device__ Interval max(const Interval& other) {
+    __device__ inline Interval max(const Interval& other) {
         return {fmaxf(lower, other.lower), fmaxf(upper, other.upper)};
     }
 
-    __device__ Interval operator-(const Interval& other) {
+    __device__ inline Interval operator-(const Interval& other) {
         return {__fsub_rd(lower, other.upper), __fsub_ru(upper, other.lower)};
     }
 
-    __device__ Interval square() const {
+    __device__ inline Interval square() const {
         if (upper < 0.0f) {
             return {__fmul_rd(upper, upper), __fmul_ru(lower, lower)};
         } else if (lower > 0.0f) {
@@ -125,7 +125,7 @@ struct Interval {
         }
     }
 
-    __device__ Interval sqrt() const {
+    __device__ inline Interval sqrt() const {
         if (upper < 0.0f) {
             return {CUDART_NAN_F, CUDART_NAN_F};
         } else if (lower <= 0.0f) {
@@ -135,7 +135,7 @@ struct Interval {
         }
     }
 
-    __device__ Interval operator-() const {
+    __device__ inline Interval operator-() const {
         return {-upper, -lower};
     }
 };
