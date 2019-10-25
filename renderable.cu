@@ -68,7 +68,7 @@ __device__ void walkI(const Tape& tape,
                       uint8_t* const __restrict__ choices)
 {
     uint32_t choice_index = 0;
-    for (uint32_t i=0; i < tape.tape_length; ++i) {
+    for (uint32_t i=0; i < tape.num_clauses; ++i) {
         const Clause c = tape[i];
 #define LHS ((!(c.banks & 1) ? regs[c.lhs] : Interval{tape.constant(c.lhs), \
                                                       tape.constant(c.lhs)}))
@@ -153,7 +153,7 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
     walkI(tape, X, Y, regs, csg_choices);
 
-    const Interval result = regs[tape[tape.tape_length - 1].out];
+    const Interval result = regs[tape[tape.num_clauses - 1].out];
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper < 0.0f) {
@@ -203,7 +203,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
     auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
 
     // Mark the root of the tree as true
-    uint32_t t = tape.tape_length;
+    uint32_t t = tape.num_clauses;
     active[tape[t - 1].out] = true;
 
     // Begin walking down CSG choices
@@ -450,6 +450,9 @@ void Renderable::run(const View& view)
     const uint32_t total_tiles = TOTAL_TILES;
     const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
                             LIBFIVE_CUDA_TILE_BLOCKS;
+
+    // Eventually, we'll move the tape data to constant memory
+    tape.pointTo(tape.data);
 
     // Do per-tile evaluation to get filled / ambiguous tiles
     for (unsigned i=0; i < total_tiles; i += stride) {

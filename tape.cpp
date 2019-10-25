@@ -106,40 +106,49 @@ Tape Tape::build(libfive::Tree tree) {
         std::cout << " -> " << out << "\n";
     }
 
-    auto d_tape = CUDA_MALLOC(Clause, flat.size());
-    auto d_constants = CUDA_MALLOC(float, constant_data.size());
-
+    auto data = CUDA_MALLOC(char, sizeof(Clause) * flat.size() +
+                                  sizeof(float) * constant_data.size());
     CHECK(cudaDeviceSynchronize());
-    memcpy(d_tape, flat.data(), sizeof(Clause) * flat.size());
-    memcpy(d_constants, constant_data.data(),
-           sizeof(float) * constant_data.size());
 
-    return Tape(d_tape, static_cast<uint32_t>(flat.size()),
-                num_registers, num_csg_choices,
-                d_constants);
+    // Copy everything onto the GPU
+    CHECK(cudaMemcpy(data, flat.data(), sizeof(Clause) * flat.size(),
+                     cudaMemcpyHostToDevice));
+    CHECK(cudaMemcpy(data + sizeof(Clause) * flat.size(), constant_data.data(),
+                     sizeof(float) * constant_data.size(),
+                     cudaMemcpyHostToDevice));
+
+    return Tape(data,
+                static_cast<uint16_t>(flat.size()),
+                static_cast<uint16_t>(constant_data.size()),
+                num_registers, num_csg_choices);
 }
 
-Tape::Tape(const Clause* data, uint32_t tape_length,
-           uint16_t num_regs, uint16_t num_csg_choices,
-           const float* constants)
-    : tape_length(tape_length),
+Tape::Tape(const char* data,
+           uint16_t num_clauses, uint16_t num_constants,
+           uint16_t num_regs, uint16_t num_csg_choices)
+    : num_clauses(num_clauses), num_constants(num_constants),
       num_regs(num_regs), num_csg_choices(num_csg_choices),
-      data(data), constants(constants)
+      data(data)
 {
     // Nothing to do here
 }
 
 Tape::Tape(Tape&& other)
-    : tape_length(other.tape_length),
+    : num_clauses(other.num_clauses), num_constants(other.num_constants),
       num_regs(other.num_regs), num_csg_choices(other.num_csg_choices),
-      data(other.data), constants(other.constants)
+      data(other.data)
 {
     other.data = nullptr;
-    other.constants = nullptr;
 }
 
 Tape::~Tape()
 {
     CHECK(cudaFree((void*)data));
-    CHECK(cudaFree((void*)constants));
+}
+
+void Tape::pointTo(const char* ptr)
+{
+    tape = reinterpret_cast<const Clause*>(ptr);
+    constants = reinterpret_cast<const float*>(
+            ptr + sizeof(Clause) * num_clauses);
 }

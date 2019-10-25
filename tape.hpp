@@ -11,25 +11,32 @@ struct Tape {
     Tape(Tape&& other);
 
     __host__ __device__
-    const Clause& operator[](uint32_t i) const { return data[i]; }
+    const Clause& operator[](uint16_t i) const { return tape[i]; }
 
     __host__ __device__
-    float constant(uint32_t i) const { return constants[i]; }
+    float constant(uint16_t i) const { return constants[i]; }
 
     static Tape build(libfive::Tree tree);
-    const uint32_t tape_length;
+    const uint16_t num_clauses;
+    const uint16_t num_constants;
 
     const uint16_t num_regs;
     const uint16_t num_csg_choices;
 
+    void pointTo(const char* ptr);
+
+    /*  We allocate global data in bulk for the tape + constants */
+    const char* data=nullptr;
 private:
-    Tape(const Clause* data, uint32_t tape_length,
-         uint16_t num_regs, uint16_t num_csg_choices,
-         const float* constants);
+    Tape(const char* data,
+         uint16_t num_clauses, uint16_t num_constants,
+         uint16_t num_regs, uint16_t num_csg_choices);
 
     Tape(const Tape& other)=delete;
     Tape& operator=(const Tape& other)=delete;
 
-    const Clause* __restrict__ data=nullptr;
+    /*  These are pointers into memory assigned in pointTo.
+     *  They may point to either global or constant memory */
+    const Clause* __restrict__ tape=nullptr;
     const float* __restrict__ constants=nullptr;
 };
