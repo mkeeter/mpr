@@ -3,6 +3,8 @@
 #include "gpu_interval.hpp"
 #include "parameters.hpp"
 
+__constant__ static uint64_t const_buffer[0x2000];
+
 void Renderable::Deleter::operator()(Renderable* r)
 {
     r->~Renderable();
@@ -451,8 +453,7 @@ void Renderable::run(const View& view)
     const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
                             LIBFIVE_CUDA_TILE_BLOCKS;
 
-    // Eventually, we'll move the tape data to constant memory
-    tape.pointTo(tape.data);
+    tape.sendToConstantMemory((const char*)const_buffer);
 
     // Do per-tile evaluation to get filled / ambiguous tiles
     for (unsigned i=0; i < total_tiles; i += stride) {

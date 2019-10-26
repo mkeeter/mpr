@@ -146,9 +146,17 @@ Tape::~Tape()
     CHECK(cudaFree((void*)data));
 }
 
-void Tape::pointTo(const char* ptr)
+void Tape::sendToConstantMemory(const char* ptr)
 {
-    tape = reinterpret_cast<const Clause*>(ptr);
+    const char* dev_ptr;
+    CHECK(cudaGetSymbolAddress((void**)&dev_ptr, ptr));
+
+    tape = reinterpret_cast<const Clause*>(dev_ptr);
     constants = reinterpret_cast<const float*>(
-            ptr + sizeof(Clause) * num_clauses);
+            dev_ptr + sizeof(Clause) * num_clauses);
+
+    CHECK(cudaMemcpyToSymbol(ptr, data,
+            sizeof(Clause) * num_clauses +
+            sizeof(float)  * num_constants,
+            0, cudaMemcpyDeviceToDevice));
 }
