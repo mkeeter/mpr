@@ -376,6 +376,11 @@ __device__ float walkF(const Tape& tape,
                        Renderable::FloatRegisters* const __restrict__ regs)
 {
     assert(subtape_index != 0);
+    using namespace libfive::Opcode;
+
+    const Clause* __restrict__ clause_ptr = &tape[0];
+    const float* __restrict__ constant_ptr = &tape.constant(0);
+
     const uint32_t q = threadIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + threadIdx.y;
     uint32_t s = subtapes[subtape_index].size;
     uint32_t target;
@@ -385,7 +390,7 @@ __device__ float walkF(const Tape& tape,
                 subtape_index = subtapes[subtape_index].next;
                 s = subtapes[subtape_index].size;
             } else {
-                return regs[tape[target].out][q];
+                return regs[clause_ptr[target].out][q];
             }
         }
         s -= 1;
@@ -397,44 +402,59 @@ __device__ float walkF(const Tape& tape,
         const uint8_t choice = (target >> 30);
         target &= (1 << 30) - 1;
 
-        const Clause c = tape[target];
+        const Clause c = clause_ptr[target];
 
-#define LHS (!(c.banks & 1) ? regs[c.lhs][q] : tape.constant(c.lhs))
-#define RHS (!(c.banks & 2) ? regs[c.rhs][q] : tape.constant(c.rhs))
-        using namespace libfive::Opcode;
+        // All clauses must have at least one argument, since constants
+        // and VAR_X/Y/Z are handled separately.
+        float lhs;
+        if (c.banks & 1) {
+            lhs = constant_ptr[c.lhs];
+        } else {
+            lhs = regs[c.lhs][q];
+        }
+
+        float rhs;
+        if (c.opcode >= OP_ADD) {
+            if (c.banks & 2) {
+                rhs = constant_ptr[c.rhs];
+            } else {
+                rhs = regs[c.rhs][q];
+            }
+        }
+
+        float out;
         switch (c.opcode) {
-            case OP_SQUARE: regs[c.out][q] = LHS * LHS; break;
-            case OP_SQRT: regs[c.out][q] = sqrtf(LHS); break;
-            case OP_NEG: regs[c.out][q] = -LHS; break;
+            case OP_SQUARE: out = lhs * lhs; break;
+            case OP_SQRT: out = sqrtf(lhs); break;
+            case OP_NEG: out = -lhs; break;
             // Skipping transcendental functions for now
 
-            case OP_ADD: regs[c.out][q] = LHS + RHS; break;
-            case OP_MUL: regs[c.out][q] = LHS * RHS; break;
-            case OP_DIV: regs[c.out][q] = LHS / RHS; break;
+            case OP_ADD: out = lhs + rhs; break;
+            case OP_MUL: out = lhs * rhs; break;
+            case OP_DIV: out = lhs / rhs; break;
             case OP_MIN: if (choice == 1) {
-                            regs[c.out][q] = LHS;
+                            out = lhs;
                         } else if (choice == 2) {
-                            regs[c.out][q] = RHS;
+                            out = rhs;
                         } else {
-                            regs[c.out][q] = fminf(LHS, RHS);
+                            out = fminf(lhs, rhs);
                         }
                         break;
             case OP_MAX: if (choice == 1) {
-                           regs[c.out][q] = LHS;
+                           out = lhs;
                         } else if (choice == 2) {
-                           regs[c.out][q] = RHS;
+                           out = rhs;
                         } else {
-                           regs[c.out][q] = fmaxf(LHS, RHS);
+                           out = fmaxf(lhs, rhs);
                         }
                         break;
-            case OP_SUB: regs[c.out][q] = LHS - RHS; break;
+            case OP_SUB: out = lhs - rhs; break;
 
             // Skipping various hard functions here
             default: break;
         }
+        regs[c.out][q] = out;
     }
-#undef LHS
-#undef RHS
     assert(false);
     return 0.0f;
 }
