@@ -2,7 +2,7 @@
 
 /*  Defines how many pixels are on the side of each tile */
 #define LIBFIVE_CUDA_TILE_SIZE_PX 16
-#define LIBFIVE_CUDA_FAST_REG_COUNT 12
+#define LIBFIVE_CUDA_FAST_REG_COUNT 8
 
 /*  All tile operations are done with this many blocks and threads,
  *  looping to consume all available tiles */

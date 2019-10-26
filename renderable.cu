@@ -43,7 +43,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
                    sizeof(float) * tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS
                                  * LIBFIVE_CUDA_TILE_SIZE_PX
                                  * LIBFIVE_CUDA_TILE_SIZE_PX))),
-      regs_i(reinterpret_cast<Interval*>(scratch)),
+      regs_i(reinterpret_cast<IntervalRegisters*>(scratch)),
       csg_choices(scratch + LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS
                             * sizeof(Interval) * tape.num_regs),
       regs_f(reinterpret_cast<float*>(scratch)),
@@ -65,8 +65,8 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ Interval walkI(const Tape& tape,
-                          Interval* const __restrict__ fast_regs,
-                          Interval* const __restrict__ regs,
+                          Renderable::IntervalRegisters* const __restrict__ fast_regs,
+                          Renderable::IntervalRegisters* const __restrict__ regs,
                           uint8_t* const __restrict__ choices)
 {
     using namespace libfive::Opcode;
@@ -87,9 +87,9 @@ __device__ Interval walkI(const Tape& tape,
             lhs.lower = f;
             lhs.upper = f;
         } else if (c.lhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
-            lhs = fast_regs[c.lhs];
+            lhs = fast_regs[c.lhs][threadIdx.x];
         } else {
-            lhs = regs[c.lhs];
+            lhs = regs[c.lhs][threadIdx.x];
         }
 
         Interval rhs;
@@ -99,9 +99,9 @@ __device__ Interval walkI(const Tape& tape,
                 rhs.lower = f;
                 rhs.upper = f;
             } else if (c.rhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
-                rhs = fast_regs[c.rhs];
+                rhs = fast_regs[c.rhs][threadIdx.x];
             } else {
-                rhs = regs[c.rhs];
+                rhs = regs[c.rhs][threadIdx.x];
             }
         }
 
@@ -144,18 +144,19 @@ __device__ Interval walkI(const Tape& tape,
             // Skipping various hard functions here
             default: break;
         }
+
         if (c.out < LIBFIVE_CUDA_FAST_REG_COUNT) {
-            fast_regs[c.out] = out;
+            fast_regs[c.out][threadIdx.x] = out;
         } else {
-            regs[c.out] = out;
+            regs[c.out][threadIdx.x] = out;
         }
     }
     // Copy output to standard register before exiting
     const Clause c = clause_ptr[num_clauses - 1];
     if (c.out < LIBFIVE_CUDA_FAST_REG_COUNT) {
-        return fast_regs[c.out];
+        return fast_regs[c.out][threadIdx.x];
     } else {
-        return regs[c.out];
+        return regs[c.out][threadIdx.x];
     }
 }
 
@@ -169,20 +170,17 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     assert(gridDim.z == 1);
 
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    auto regs = regs_i + start * tape.num_regs;
 
     const uint32_t index = start + offset;
     if (index >= TOTAL_TILES) {
         return;
     }
-    const float x = index / TILE_COUNT;
-    const float y = index % TILE_COUNT;
-
-    __shared__ Interval fast_regs_[LIBFIVE_CUDA_TILE_THREADS]
-                                  [LIBFIVE_CUDA_FAST_REG_COUNT];
-    Interval* __restrict__ fast_regs = fast_regs_[threadIdx.x];
+    __shared__ IntervalRegisters fast_regs[LIBFIVE_CUDA_FAST_REG_COUNT];
 
     {   // Prepopulate axis values
+        const float x = index / TILE_COUNT;
+        const float y = index % TILE_COUNT;
+
         Interval vs[3];
         const Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
         vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
@@ -198,9 +196,9 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
                 if (tape.axes.reg[i] < LIBFIVE_CUDA_FAST_REG_COUNT) {
-                    fast_regs[tape.axes.reg[i]] = vs[i];
+                    fast_regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
                 } else {
-                    regs[tape.axes.reg[i]] = vs[i];
+                    regs_i[tape.axes.reg[i]][threadIdx.x] = vs[i];
                 }
             }
         }
@@ -210,7 +208,8 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
 
     // Run actual evaluation
-    const Interval result = walkI(tape, fast_regs, regs, csg_choices);
+    const Interval result = walkI(
+            tape, fast_regs, regs_i + tape.num_regs * blockIdx.x, csg_choices);
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
@@ -245,14 +244,13 @@ void Renderable::buildSubtapes(const uint32_t offset)
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
 
     // Reuse the registers array to track activeness
-    auto regs = regs_i + start * tape.num_regs;
     const uint32_t i = start + offset;
     if (i >= active_tiles) {
         return;
     }
     const uint32_t index = tiles[2 * i];
 
-    bool* __restrict__ active = reinterpret_cast<bool*>(regs);
+    bool* __restrict__ active = reinterpret_cast<bool*>(regs_i) + start * tape.num_regs;
     for (uint32_t j=0; j < tape.num_regs; ++j) {
         active[j] = false;
     }
