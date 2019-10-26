@@ -34,12 +34,11 @@ Tape Tape::build(libfive::Tree tree) {
     }
 
     std::list<uint16_t> free_registers;
-    std::list<uint16_t> free_fast_registers;
     std::map<libfive::Tree::Id, uint16_t> bound_registers;
 
-    uint16_t num_registers = LIBFIVE_CUDA_FAST_REG_COUNT;
-    for (unsigned i=0; i < LIBFIVE_CUDA_FAST_REG_COUNT; ++i) {
-        free_fast_registers.push_back(i);
+    uint16_t num_registers = 3;
+    for (unsigned i=0; i < num_registers; ++i) {
+        free_registers.push_back(i);
     }
     // Bind the axes to known registers, so that we can store their values
     // before beginning an evaluation.
@@ -48,8 +47,8 @@ Tape Tape::build(libfive::Tree tree) {
     Axes axes;
     for (unsigned i=0; i < 3; ++i) {
         if (has_axis[i]) {
-            axes.reg[i] = free_fast_registers.back();
-            free_fast_registers.pop_back();
+            axes.reg[i] = free_registers.back();
+            free_registers.pop_back();
             bound_registers[axis_trees[i].id()] = axes.reg[i];
         } else {
             axes.reg[i] = UINT16_MAX;
@@ -103,21 +102,14 @@ Tape Tape::build(libfive::Tree tree) {
                 last_used[h] == c.id())
             {
                 auto itr = bound_registers.find(h);
-                if (itr->second < LIBFIVE_CUDA_FAST_REG_COUNT) {
-                    free_fast_registers.push_back(itr->second);
-                } else {
-                    free_registers.push_back(itr->second);
-                }
+                free_registers.push_back(itr->second);
                 bound_registers.erase(itr);
             }
         }
 
         // Pick a registers for the output of this opcode
         uint16_t out;
-        if (free_fast_registers.size()) {
-            out = free_fast_registers.back();
-            free_fast_registers.pop_back();
-        } else if (free_registers.size()) {
+        if (free_registers.size()) {
             out = free_registers.back();
             free_registers.pop_back();
         } else {

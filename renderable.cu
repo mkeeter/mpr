@@ -65,7 +65,6 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ Interval walkI(const Tape& tape,
-                          Renderable::IntervalRegisters* const __restrict__ fast_regs,
                           Renderable::IntervalRegisters* const __restrict__ regs,
                           uint8_t* const __restrict__ choices)
 {
@@ -86,8 +85,6 @@ __device__ Interval walkI(const Tape& tape,
             const float f = constant_ptr[c.lhs];
             lhs.lower = f;
             lhs.upper = f;
-        } else if (c.lhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
-            lhs = fast_regs[c.lhs][threadIdx.x];
         } else {
             lhs = regs[c.lhs][threadIdx.x];
         }
@@ -98,8 +95,6 @@ __device__ Interval walkI(const Tape& tape,
                 const float f = constant_ptr[c.rhs];
                 rhs.lower = f;
                 rhs.upper = f;
-            } else if (c.rhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
-                rhs = fast_regs[c.rhs][threadIdx.x];
             } else {
                 rhs = regs[c.rhs][threadIdx.x];
             }
@@ -145,19 +140,11 @@ __device__ Interval walkI(const Tape& tape,
             default: break;
         }
 
-        if (c.out < LIBFIVE_CUDA_FAST_REG_COUNT) {
-            fast_regs[c.out][threadIdx.x] = out;
-        } else {
-            regs[c.out][threadIdx.x] = out;
-        }
+        regs[c.out][threadIdx.x] = out;
     }
     // Copy output to standard register before exiting
     const Clause c = clause_ptr[num_clauses - 1];
-    if (c.out < LIBFIVE_CUDA_FAST_REG_COUNT) {
-        return fast_regs[c.out][threadIdx.x];
-    } else {
-        return regs[c.out][threadIdx.x];
-    }
+    return regs[c.out][threadIdx.x];
 }
 
 __device__
@@ -175,8 +162,7 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     if (index >= TOTAL_TILES) {
         return;
     }
-    __shared__ IntervalRegisters fast_regs[LIBFIVE_CUDA_FAST_REG_COUNT];
-
+    auto regs = regs_i + tape.num_regs * blockIdx.x;
     {   // Prepopulate axis values
         const float x = index / TILE_COUNT;
         const float y = index % TILE_COUNT;
@@ -195,11 +181,7 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
 
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
-                if (tape.axes.reg[i] < LIBFIVE_CUDA_FAST_REG_COUNT) {
-                    fast_regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
-                } else {
-                    regs_i[tape.axes.reg[i]][threadIdx.x] = vs[i];
-                }
+                regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
             }
         }
     }
@@ -209,7 +191,7 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
 
     // Run actual evaluation
     const Interval result = walkI(
-            tape, fast_regs, regs_i + tape.num_regs * blockIdx.x, csg_choices);
+            tape, regs, csg_choices);
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
