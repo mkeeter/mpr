@@ -1,5 +1,6 @@
 #include "tape.hpp"
 #include "check.hpp"
+#include "parameters.hpp"
 
 Tape Tape::build(libfive::Tree tree) {
     auto ordered = tree.orderedDfs();
@@ -28,8 +29,14 @@ Tape Tape::build(libfive::Tree tree) {
     }
 
     std::list<uint16_t> free_registers;
+    std::list<uint16_t> free_fast_registers;
     std::map<libfive::Tree::Id, uint16_t> bound_registers;
-    uint16_t num_registers = 0;
+
+    uint16_t num_registers = LIBFIVE_CUDA_FAST_REG_COUNT;
+    for (unsigned i=0; i < LIBFIVE_CUDA_FAST_REG_COUNT; ++i) {
+        free_fast_registers.push_back(i);
+    }
+
     std::vector<Clause> flat;
     for (auto& c : ordered) {
         // Constants are not inserted into the tape, because they
@@ -72,14 +79,21 @@ Tape Tape::build(libfive::Tree tree) {
                 last_used[h] == c.id())
             {
                 auto itr = bound_registers.find(h);
-                free_registers.push_back(itr->second);
+                if (itr->second < LIBFIVE_CUDA_FAST_REG_COUNT) {
+                    free_fast_registers.push_back(itr->second);
+                } else {
+                    free_registers.push_back(itr->second);
+                }
                 bound_registers.erase(itr);
             }
         }
 
         // Pick a registers for the output of this opcode
         uint16_t out;
-        if (free_registers.size()) {
+        if (free_fast_registers.size()) {
+            out = free_fast_registers.back();
+            free_fast_registers.pop_back();
+        } else if (free_registers.size()) {
             out = free_registers.back();
             free_registers.pop_back();
         } else {

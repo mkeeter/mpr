@@ -64,10 +64,10 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ void walkI(const Tape& tape,
-                      const Interval X, const Interval Y,
-                      Interval* const __restrict__ regs,
-                      uint8_t* const __restrict__ choices)
+__device__ Interval walkI(const Tape& tape,
+                          const Interval X, const Interval Y,
+                          Interval* const __restrict__ regs,
+                          uint8_t* const __restrict__ choices)
 {
     using namespace libfive::Opcode;
 
@@ -77,6 +77,10 @@ __device__ void walkI(const Tape& tape,
     const float* __restrict__ constant_ptr = &tape.constant(0);
     const uint32_t num_clauses = tape.num_clauses;
 
+    __shared__ Interval fast_regs_[LIBFIVE_CUDA_TILE_THREADS]
+                                  [LIBFIVE_CUDA_FAST_REG_COUNT];
+    Interval* __restrict__ fast_regs = fast_regs_[threadIdx.x];
+
     for (uint32_t i=0; i < num_clauses; ++i) {
         const Clause c = clause_ptr[i];
         Interval lhs;
@@ -85,6 +89,8 @@ __device__ void walkI(const Tape& tape,
                 const float f = constant_ptr[c.lhs];
                 lhs.lower = f;
                 lhs.upper = f;
+            } else if (c.lhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
+                lhs = fast_regs[c.lhs];
             } else {
                 lhs = regs[c.lhs];
             }
@@ -96,53 +102,68 @@ __device__ void walkI(const Tape& tape,
                 const float f = constant_ptr[c.rhs];
                 rhs.lower = f;
                 rhs.upper = f;
+            } else if (c.rhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
+                rhs = fast_regs[c.rhs];
             } else {
                 rhs = regs[c.rhs];
             }
         }
 
+        Interval out;
         switch (c.opcode) {
-            case VAR_X: regs[c.out] = X; break;
-            case VAR_Y: regs[c.out] = Y; break;
-            case VAR_Z: regs[c.out] = Interval{0.0f, 0.0f}; break;
+            case VAR_X: out = X; break;
+            case VAR_Y: out = Y; break;
+            case VAR_Z: out = Interval{0.0f, 0.0f}; break;
 
-            case OP_SQUARE: regs[c.out] = lhs.square(); break;
-            case OP_SQRT: regs[c.out] = lhs.sqrt(); break;
-            case OP_NEG: regs[c.out] = -lhs; break;
+            case OP_SQUARE: out = lhs.square(); break;
+            case OP_SQRT: out = lhs.sqrt(); break;
+            case OP_NEG: out = -lhs; break;
             // Skipping transcendental functions for now
 
-            case OP_ADD: regs[c.out] = lhs + rhs; break;
-            case OP_MUL: regs[c.out] = lhs * rhs; break;
-            case OP_DIV: regs[c.out] = lhs / rhs; break;
+            case OP_ADD: out = lhs + rhs; break;
+            case OP_MUL: out = lhs * rhs; break;
+            case OP_DIV: out = lhs / rhs; break;
             case OP_MIN: if (lhs.upper < rhs.lower) {
                              choices[choice_index] = 1;
-                             regs[c.out] = lhs;
+                             out = lhs;
                          } else if (rhs.upper < lhs.lower) {
                              choices[choice_index] = 2;
-                             regs[c.out] = rhs;
+                             out = rhs;
                          } else {
                              choices[choice_index] = 0;
-                             regs[c.out] = lhs.min(rhs);
+                             out = lhs.min(rhs);
                          }
                          choice_index++;
                          break;
             case OP_MAX: if (lhs.lower > rhs.upper) {
                              choices[choice_index] = 1;
-                             regs[c.out] = lhs;
+                             out = lhs;
                          } else if (rhs.lower > lhs.upper) {
                              choices[choice_index] = 2;
-                             regs[c.out] = rhs;
+                             out = rhs;
                          } else {
                              choices[choice_index] = 0;
-                             regs[c.out] = lhs.max(rhs);
+                             out = lhs.max(rhs);
                          }
                          choice_index++;
                          break;
-            case OP_SUB: regs[c.out] = lhs - rhs; break;
+            case OP_SUB: out = lhs - rhs; break;
 
             // Skipping various hard functions here
             default: break;
         }
+        if (c.out < LIBFIVE_CUDA_FAST_REG_COUNT) {
+            fast_regs[c.out] = out;
+        } else {
+            regs[c.out] = out;
+        }
+    }
+    // Copy output to standard register before exiting
+    const Clause c = clause_ptr[num_clauses - 1];
+    if (c.out < LIBFIVE_CUDA_FAST_REG_COUNT) {
+        return fast_regs[c.out];
+    } else {
+        return regs[c.out];
     }
 }
 
@@ -175,9 +196,10 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
 
     // Unpack a 1D offset into the data arrays
     auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
-    walkI(tape, X, Y, regs, csg_choices);
 
-    const Interval result = regs[tape[tape.num_clauses - 1].out];
+    // Run actual evaluation
+    const Interval result = walkI(tape, X, Y, regs, csg_choices);
+
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper < 0.0f) {
@@ -252,7 +274,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
             uint32_t mask = 0;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX)
             {
-                uint8_t choice = csg_choices[--csg_choice];
+                const uint8_t choice = csg_choices[--csg_choice];
                 if (choice == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;
