@@ -72,56 +72,70 @@ __device__ void walkI(const Tape& tape,
     uint32_t choice_index = 0;
     for (uint32_t i=0; i < tape.num_clauses; ++i) {
         const Clause c = tape[i];
-#define LHS ((!(c.banks & 1) ? regs[c.lhs] : Interval{tape.constant(c.lhs), \
-                                                      tape.constant(c.lhs)}))
-#define RHS ((!(c.banks & 2) ? regs[c.rhs] : Interval{tape.constant(c.rhs), \
-                                                      tape.constant(c.rhs)}))
+        Interval lhs;
+        if (c.banks & 1) {
+            const float f = tape.constant(c.lhs);
+            lhs.lower = f;
+            lhs.upper = f;
+        } else {
+            lhs = regs[c.lhs];
+        }
+
         using namespace libfive::Opcode;
+        Interval rhs;
+        if (c.opcode >= OP_ADD) {
+            if (c.banks & 2) {
+                const float f = tape.constant(c.rhs);
+                rhs.lower = f;
+                rhs.upper = f;
+            } else {
+                rhs = regs[c.rhs];
+            }
+        }
+
         switch (c.opcode) {
             case VAR_X: regs[c.out] = X; break;
             case VAR_Y: regs[c.out] = Y; break;
             case VAR_Z: regs[c.out] = Interval{0.0f, 0.0f}; break;
 
-            case OP_SQUARE: regs[c.out] = LHS.square(); break;
-            case OP_SQRT: regs[c.out] = LHS.sqrt(); break;
-            case OP_NEG: regs[c.out] = -LHS; break;
+            case OP_SQUARE: regs[c.out] = lhs.square(); break;
+            case OP_SQRT: regs[c.out] = lhs.sqrt(); break;
+            case OP_NEG: regs[c.out] = -lhs; break;
             // Skipping transcendental functions for now
 
-            case OP_ADD: regs[c.out] = LHS + RHS; break;
-            case OP_MUL: regs[c.out] = LHS * RHS; break;
-            case OP_DIV: regs[c.out] = LHS / RHS; break;
-            case OP_MIN: if (LHS.upper < RHS.lower) {
+            case OP_ADD: regs[c.out] = lhs + rhs; break;
+            case OP_MUL: regs[c.out] = lhs * rhs; break;
+            case OP_DIV: regs[c.out] = lhs / rhs; break;
+            case OP_MIN: if (lhs.upper < rhs.lower) {
                              choices[choice_index] = 1;
-                             regs[c.out] = LHS;
-                         } else if (RHS.upper < LHS.lower) {
+                             regs[c.out] = lhs;
+                         } else if (rhs.upper < lhs.lower) {
                              choices[choice_index] = 2;
-                             regs[c.out] = RHS;
+                             regs[c.out] = rhs;
                          } else {
                              choices[choice_index] = 0;
-                             regs[c.out] = LHS.min(RHS);
+                             regs[c.out] = lhs.min(rhs);
                          }
                          choice_index++;
                          break;
-            case OP_MAX: if (LHS.lower > RHS.upper) {
+            case OP_MAX: if (lhs.lower > rhs.upper) {
                              choices[choice_index] = 1;
-                             regs[c.out] = LHS;
-                         } else if (RHS.lower > LHS.upper) {
+                             regs[c.out] = lhs;
+                         } else if (rhs.lower > lhs.upper) {
                              choices[choice_index] = 2;
-                             regs[c.out] = RHS;
+                             regs[c.out] = rhs;
                          } else {
                              choices[choice_index] = 0;
-                             regs[c.out] = LHS.max(RHS);
+                             regs[c.out] = lhs.max(rhs);
                          }
                          choice_index++;
                          break;
-            case OP_SUB: regs[c.out] = LHS - RHS; break;
+            case OP_SUB: regs[c.out] = lhs - rhs; break;
 
             // Skipping various hard functions here
             default: break;
         }
     }
-#undef LHS
-#undef RHS
 }
 
 __device__
