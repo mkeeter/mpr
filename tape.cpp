@@ -35,24 +35,32 @@ Tape Tape::build(libfive::Tree tree) {
 
     std::list<uint16_t> free_registers;
     std::map<libfive::Tree::Id, uint16_t> bound_registers;
+    uint16_t num_registers = 0;
 
-    uint16_t num_registers = 3;
-    for (unsigned i=0; i < num_registers; ++i) {
-        free_registers.push_back(i);
-    }
+    auto getRegister = [&](libfive::Tree::Id id) {
+        // Pick a registers for the output of this opcode
+        uint16_t out;
+        if (free_registers.size()) {
+            out = free_registers.back();
+            free_registers.pop_back();
+        } else {
+            out = num_registers++;
+            if (num_registers == UINT16_MAX) {
+                fprintf(stderr, "Ran out of registers!\n");
+            }
+        }
+        bound_registers[id] = out;
+        return out;
+    };
+
     // Bind the axes to known registers, so that we can store their values
     // before beginning an evaluation.
     const libfive::Tree axis_trees[3] = {
         libfive::Tree::X(), libfive::Tree::Y(), libfive::Tree::Z()};
     Axes axes;
     for (unsigned i=0; i < 3; ++i) {
-        if (has_axis[i]) {
-            axes.reg[i] = free_registers.back();
-            free_registers.pop_back();
-            bound_registers[axis_trees[i].id()] = axes.reg[i];
-        } else {
-            axes.reg[i] = UINT16_MAX;
-        }
+        axes.reg[i] = has_axis[i] ? getRegister(axis_trees[i].id())
+                                  : UINT16_MAX;
     }
 
     std::vector<Clause> flat;
@@ -107,20 +115,7 @@ Tape Tape::build(libfive::Tree tree) {
             }
         }
 
-        // Pick a registers for the output of this opcode
-        uint16_t out;
-        if (free_registers.size()) {
-            out = free_registers.back();
-            free_registers.pop_back();
-        } else {
-            out = num_registers++;
-            if (num_registers == UINT16_MAX) {
-                fprintf(stderr, "Ran out of registers!\n");
-            }
-        }
-
-        bound_registers[c.id()] = out;
-
+        const uint16_t out = getRegister(c.id());
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
 
         std::cout << libfive::Opcode::toString(c->op) << " ";
