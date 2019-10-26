@@ -46,7 +46,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       regs_i(reinterpret_cast<IntervalRegisters*>(scratch)),
       csg_choices(scratch + LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS
                             * sizeof(Interval) * tape.num_regs),
-      regs_f(reinterpret_cast<float*>(scratch)),
+      regs_f(reinterpret_cast<FloatRegisters*>(scratch)),
 
       tiles(CUDA_MALLOC(uint32_t, 2 * TOTAL_TILES)),
       active_tiles(0),
@@ -373,9 +373,10 @@ __device__ void Renderable::drawFilledTiles(const uint32_t offset, const View& v
 __device__ float walkF(const Tape& tape,
                        const Subtape* const subtapes,
                        uint32_t subtape_index,
-                       float* const __restrict__ regs)
+                       Renderable::FloatRegisters* const __restrict__ regs)
 {
     assert(subtape_index != 0);
+    const uint32_t q = threadIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + threadIdx.y;
     uint32_t s = subtapes[subtape_index].size;
     uint32_t target;
     while (true) {
@@ -384,7 +385,7 @@ __device__ float walkF(const Tape& tape,
                 subtape_index = subtapes[subtape_index].next;
                 s = subtapes[subtape_index].size;
             } else {
-                return regs[tape[target].out];
+                return regs[tape[target].out][q];
             }
         }
         s -= 1;
@@ -398,35 +399,35 @@ __device__ float walkF(const Tape& tape,
 
         const Clause c = tape[target];
 
-#define LHS (!(c.banks & 1) ? regs[c.lhs] : tape.constant(c.lhs))
-#define RHS (!(c.banks & 2) ? regs[c.rhs] : tape.constant(c.rhs))
+#define LHS (!(c.banks & 1) ? regs[c.lhs][q] : tape.constant(c.lhs))
+#define RHS (!(c.banks & 2) ? regs[c.rhs][q] : tape.constant(c.rhs))
         using namespace libfive::Opcode;
         switch (c.opcode) {
-            case OP_SQUARE: regs[c.out] = LHS * LHS; break;
-            case OP_SQRT: regs[c.out] = sqrtf(LHS); break;
-            case OP_NEG: regs[c.out] = -LHS; break;
+            case OP_SQUARE: regs[c.out][q] = LHS * LHS; break;
+            case OP_SQRT: regs[c.out][q] = sqrtf(LHS); break;
+            case OP_NEG: regs[c.out][q] = -LHS; break;
             // Skipping transcendental functions for now
 
-            case OP_ADD: regs[c.out] = LHS + RHS; break;
-            case OP_MUL: regs[c.out] = LHS * RHS; break;
-            case OP_DIV: regs[c.out] = LHS / RHS; break;
+            case OP_ADD: regs[c.out][q] = LHS + RHS; break;
+            case OP_MUL: regs[c.out][q] = LHS * RHS; break;
+            case OP_DIV: regs[c.out][q] = LHS / RHS; break;
             case OP_MIN: if (choice == 1) {
-                            regs[c.out] = LHS;
+                            regs[c.out][q] = LHS;
                         } else if (choice == 2) {
-                            regs[c.out] = RHS;
+                            regs[c.out][q] = RHS;
                         } else {
-                            regs[c.out] = fminf(LHS, RHS);
+                            regs[c.out][q] = fminf(LHS, RHS);
                         }
                         break;
             case OP_MAX: if (choice == 1) {
-                           regs[c.out] = LHS;
+                           regs[c.out][q] = LHS;
                         } else if (choice == 2) {
-                           regs[c.out] = RHS;
+                           regs[c.out][q] = RHS;
                         } else {
-                           regs[c.out] = fmaxf(LHS, RHS);
+                           regs[c.out][q] = fmaxf(LHS, RHS);
                         }
                         break;
-            case OP_SUB: regs[c.out] = LHS - RHS; break;
+            case OP_SUB: regs[c.out][q] = LHS - RHS; break;
 
             // Skipping various hard functions here
             default: break;
@@ -442,17 +443,16 @@ __device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View
 {
     // We assume one thread per pixel in a tile
     assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
-    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
+    assert(blockDim.y == LIBFIVE_CUDA_TILE_SIZE_PX);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
     const uint32_t dx = threadIdx.x;
     const uint32_t dy = threadIdx.y;
+    const uint32_t q = dx * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
 
     // Pick an index into the register array
-    const uint32_t pos = (blockIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + dx) *
-                          LIBFIVE_CUDA_TILE_SIZE_PX + dy;
-    float* const __restrict__ regs = regs_f + pos * tape.num_regs;
+    auto regs = regs_f + tape.num_regs * blockIdx.x;
 
     // Pick an active tile from the list
     const uint32_t i = offset + blockIdx.x;
@@ -475,7 +475,7 @@ __device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View
         vs[2] = 0.0f;
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
-                regs[tape.axes.reg[i]] = vs[i];
+                regs[tape.axes.reg[i]][q] = vs[i];
             }
         }
     }

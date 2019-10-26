@@ -34,13 +34,14 @@ public:
 
     // This is a block of data which should be indexed as i[threadIdx.x]
     using IntervalRegisters = Interval[LIBFIVE_CUDA_TILE_THREADS];
+    using FloatRegisters = float[LIBFIVE_CUDA_TILE_THREADS];
 
     // [regs_i, csg_choices] and regs_f are both stored in scratch, to reduce
     // total memory usage (since we're only using one or the other)
     uint8_t* const scratch;
     IntervalRegisters* __restrict__ const regs_i;
     uint8_t* __restrict__ const csg_choices;
-    float* __restrict__ const regs_f;
+    FloatRegisters* __restrict__ const regs_f;
 
     uint32_t* __restrict__ const tiles;
     uint32_t active_tiles;
