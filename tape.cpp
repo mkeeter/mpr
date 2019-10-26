@@ -9,6 +9,7 @@ Tape Tape::build(libfive::Tree tree) {
     std::vector<float> constant_data;
     std::map<libfive::Tree::Id, uint16_t> constants;
     uint16_t num_csg_choices = 0;
+    bool has_axis[3] = {false, false, false};
     for (auto& c : ordered) {
         if (c->op == libfive::Opcode::CONSTANT) {
             // Store constants in a separate list
@@ -26,6 +27,10 @@ Tape Tape::build(libfive::Tree tree) {
             num_csg_choices += (c->op == libfive::Opcode::OP_MIN ||
                                 c->op == libfive::Opcode::OP_MAX);
         }
+
+        has_axis[0] |= (c->op == libfive::Opcode::VAR_X);
+        has_axis[1] |= (c->op == libfive::Opcode::VAR_Y);
+        has_axis[2] |= (c->op == libfive::Opcode::VAR_Z);
     }
 
     std::list<uint16_t> free_registers;
@@ -36,6 +41,20 @@ Tape Tape::build(libfive::Tree tree) {
     for (unsigned i=0; i < LIBFIVE_CUDA_FAST_REG_COUNT; ++i) {
         free_fast_registers.push_back(i);
     }
+    // Bind the axes to known registers, so that we can store their values
+    // before beginning an evaluation.
+    const libfive::Tree axis_trees[3] = {
+        libfive::Tree::X(), libfive::Tree::Y(), libfive::Tree::Z()};
+    Axes axes;
+    for (unsigned i=0; i < 3; ++i) {
+        if (has_axis[i]) {
+            axes.reg[i] = free_fast_registers.back();
+            free_fast_registers.pop_back();
+            bound_registers[axis_trees[i].id()] = axes.reg[i];
+        } else {
+            axes.reg[i] = UINT16_MAX;
+        }
+    }
 
     std::vector<Clause> flat;
     for (auto& c : ordered) {
@@ -43,6 +62,11 @@ Tape Tape::build(libfive::Tree tree) {
         // live in a separate data array addressed with flags in
         // the 'banks' argument of a Clause.
         if (constants.find(c.id()) != constants.end()) {
+            continue;
+        } else if (c->op == libfive::Opcode::VAR_X ||
+                   c->op == libfive::Opcode::VAR_Y ||
+                   c->op == libfive::Opcode::VAR_Z)
+        {
             continue;
         }
 
@@ -102,6 +126,7 @@ Tape Tape::build(libfive::Tree tree) {
                 fprintf(stderr, "Ran out of registers!\n");
             }
         }
+
         bound_registers[c.id()] = out;
 
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
@@ -134,15 +159,17 @@ Tape Tape::build(libfive::Tree tree) {
     return Tape(data,
                 static_cast<uint16_t>(flat.size()),
                 static_cast<uint16_t>(constant_data.size()),
-                num_registers, num_csg_choices);
+                num_registers, num_csg_choices,
+                axes);
 }
 
 Tape::Tape(const char* data,
            uint16_t num_clauses, uint16_t num_constants,
-           uint16_t num_regs, uint16_t num_csg_choices)
+           uint16_t num_regs, uint16_t num_csg_choices,
+           Axes axes)
     : num_clauses(num_clauses), num_constants(num_constants),
       num_regs(num_regs), num_csg_choices(num_csg_choices),
-      data(data)
+      axes(axes), data(data)
 {
     // Nothing to do here
 }
@@ -150,7 +177,7 @@ Tape::Tape(const char* data,
 Tape::Tape(Tape&& other)
     : num_clauses(other.num_clauses), num_constants(other.num_constants),
       num_regs(other.num_regs), num_csg_choices(other.num_csg_choices),
-      data(other.data)
+      axes(other.axes), data(other.data)
 {
     other.data = nullptr;
 }

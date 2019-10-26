@@ -22,13 +22,18 @@ struct Tape {
 
     const uint16_t num_regs;
     const uint16_t num_csg_choices;
+    struct Axes {
+        uint16_t reg[3];
+    };
+    const Axes axes;
 
     void sendToConstantMemory(const char* ptr);
 
 private:
     Tape(const char* data,
          uint16_t num_clauses, uint16_t num_constants,
-         uint16_t num_regs, uint16_t num_csg_choices);
+         uint16_t num_regs, uint16_t num_csg_choices,
+         Axes axes);
 
     Tape(const Tape& other)=delete;
     Tape& operator=(const Tape& other)=delete;

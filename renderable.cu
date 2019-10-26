@@ -65,7 +65,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ Interval walkI(const Tape& tape,
-                          const Interval X, const Interval Y,
+                          Interval* const __restrict__ fast_regs,
                           Interval* const __restrict__ regs,
                           uint8_t* const __restrict__ choices)
 {
@@ -77,23 +77,19 @@ __device__ Interval walkI(const Tape& tape,
     const float* __restrict__ constant_ptr = &tape.constant(0);
     const uint32_t num_clauses = tape.num_clauses;
 
-    __shared__ Interval fast_regs_[LIBFIVE_CUDA_TILE_THREADS]
-                                  [LIBFIVE_CUDA_FAST_REG_COUNT];
-    Interval* __restrict__ fast_regs = fast_regs_[threadIdx.x];
-
     for (uint32_t i=0; i < num_clauses; ++i) {
         const Clause c = clause_ptr[i];
+        // All clauses must have at least one argument, since constants
+        // and VAR_X/Y/Z are handled separately.
         Interval lhs;
-        if (c.opcode >= OP_SQUARE) {
-            if (c.banks & 1) {
-                const float f = constant_ptr[c.lhs];
-                lhs.lower = f;
-                lhs.upper = f;
-            } else if (c.lhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
-                lhs = fast_regs[c.lhs];
-            } else {
-                lhs = regs[c.lhs];
-            }
+        if (c.banks & 1) {
+            const float f = constant_ptr[c.lhs];
+            lhs.lower = f;
+            lhs.upper = f;
+        } else if (c.lhs < LIBFIVE_CUDA_FAST_REG_COUNT) {
+            lhs = fast_regs[c.lhs];
+        } else {
+            lhs = regs[c.lhs];
         }
 
         Interval rhs;
@@ -111,10 +107,6 @@ __device__ Interval walkI(const Tape& tape,
 
         Interval out;
         switch (c.opcode) {
-            case VAR_X: out = X; break;
-            case VAR_Y: out = Y; break;
-            case VAR_Z: out = Interval{0.0f, 0.0f}; break;
-
             case OP_SQUARE: out = lhs.square(); break;
             case OP_SQRT: out = lhs.sqrt(); break;
             case OP_NEG: out = -lhs; break;
@@ -186,19 +178,39 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     const float x = index / TILE_COUNT;
     const float y = index % TILE_COUNT;
 
-    Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
-    X.lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
-    X.upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+    __shared__ Interval fast_regs_[LIBFIVE_CUDA_TILE_THREADS]
+                                  [LIBFIVE_CUDA_FAST_REG_COUNT];
+    Interval* __restrict__ fast_regs = fast_regs_[threadIdx.x];
 
-    Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
-    Y.lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
-    Y.upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
+    {   // Prepopulate axis values
+        Interval vs[3];
+        const Interval X = {x / TILE_COUNT, (x + 1) / TILE_COUNT};
+        vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
+        vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+
+        const Interval Y = {y / TILE_COUNT, (y + 1) / TILE_COUNT};
+        vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
+        vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
+
+        vs[2].lower = 0.0f;
+        vs[2].upper = 0.0f;
+
+        for (unsigned i=0; i < 3; ++i) {
+            if (tape.axes.reg[i] != UINT16_MAX) {
+                if (tape.axes.reg[i] < LIBFIVE_CUDA_FAST_REG_COUNT) {
+                    fast_regs[tape.axes.reg[i]] = vs[i];
+                } else {
+                    regs[tape.axes.reg[i]] = vs[i];
+                }
+            }
+        }
+    }
 
     // Unpack a 1D offset into the data arrays
     auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
 
     // Run actual evaluation
-    const Interval result = walkI(tape, X, Y, regs, csg_choices);
+    const Interval result = walkI(tape, fast_regs, regs, csg_choices);
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
@@ -381,7 +393,6 @@ __device__ void Renderable::drawFilledTiles(const uint32_t offset, const View& v
 __device__ float walkF(const Tape& tape,
                        const Subtape* const subtapes,
                        uint32_t subtape_index,
-                       const float x, const float y,
                        float* const __restrict__ regs)
 {
     assert(subtape_index != 0);
@@ -411,10 +422,6 @@ __device__ float walkF(const Tape& tape,
 #define RHS (!(c.banks & 2) ? regs[c.rhs] : tape.constant(c.rhs))
         using namespace libfive::Opcode;
         switch (c.opcode) {
-            case VAR_X: regs[c.out] = x; break;
-            case VAR_Y: regs[c.out] = y; break;
-            case VAR_Z: regs[c.out] = 0.0f; break;
-
             case OP_SQUARE: regs[c.out] = LHS * LHS; break;
             case OP_SQRT: regs[c.out] = sqrtf(LHS); break;
             case OP_NEG: regs[c.out] = -LHS; break;
@@ -479,11 +486,20 @@ __device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View
     uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
     uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
 
-    float x = px / (IMAGE_SIZE_PX - 1.0f);
-    float y = py / (IMAGE_SIZE_PX - 1.0f);
-    x = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
-    y = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
-    const float f = walkF(tape, subtapes, subtape_index, x, y, regs);
+    {   // Prepopulate axis values
+        const float x = px / (IMAGE_SIZE_PX - 1.0f);
+        const float y = py / (IMAGE_SIZE_PX - 1.0f);
+        float vs[3];
+        vs[0] = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
+        vs[1] = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
+        vs[2] = 0.0f;
+        for (unsigned i=0; i < 3; ++i) {
+            if (tape.axes.reg[i] != UINT16_MAX) {
+                regs[tape.axes.reg[i]] = vs[i];
+            }
+        }
+    }
+    const float f = walkF(tape, subtapes, subtape_index, regs);
     if (f < 0.0f) {
         image[px + py * IMAGE_SIZE_PX] = 255;
     }
