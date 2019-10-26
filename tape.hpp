@@ -11,10 +11,10 @@ struct Tape {
     Tape(Tape&& other);
 
     __host__ __device__ inline
-    Clause operator[](uint16_t i) const { return tape[i]; }
+    const Clause& operator[](uint16_t i) const { return tape[i]; }
 
     __host__ __device__ inline
-    float constant(uint16_t i) const { return constants[i]; }
+    const float& constant(uint16_t i) const { return constants[i]; }
 
     static Tape build(libfive::Tree tree);
     const uint16_t num_clauses;

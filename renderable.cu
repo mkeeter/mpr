@@ -70,11 +70,16 @@ __device__ void walkI(const Tape& tape,
                       uint8_t* const __restrict__ choices)
 {
     uint32_t choice_index = 0;
-    for (uint32_t i=0; i < tape.num_clauses; ++i) {
-        const Clause c = tape[i];
+
+    const Clause* __restrict__ clause_ptr = &tape[0];
+    const float* __restrict__ constant_ptr = &tape.constant(0);
+    const uint32_t num_clauses = tape.num_clauses;
+
+    for (uint32_t i=0; i < num_clauses; ++i) {
+        const Clause c = clause_ptr[i];
         Interval lhs;
         if (c.banks & 1) {
-            const float f = tape.constant(c.lhs);
+            const float f = constant_ptr[c.lhs];
             lhs.lower = f;
             lhs.upper = f;
         } else {
@@ -85,7 +90,7 @@ __device__ void walkI(const Tape& tape,
         Interval rhs;
         if (c.opcode >= OP_ADD) {
             if (c.banks & 2) {
-                const float f = tape.constant(c.rhs);
+                const float f = constant_ptr[c.rhs];
                 rhs.lower = f;
                 rhs.upper = f;
             } else {
