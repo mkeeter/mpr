@@ -69,6 +69,8 @@ __device__ void walkI(const Tape& tape,
                       Interval* const __restrict__ regs,
                       uint8_t* const __restrict__ choices)
 {
+    using namespace libfive::Opcode;
+
     uint32_t choice_index = 0;
 
     const Clause* __restrict__ clause_ptr = &tape[0];
@@ -78,15 +80,16 @@ __device__ void walkI(const Tape& tape,
     for (uint32_t i=0; i < num_clauses; ++i) {
         const Clause c = clause_ptr[i];
         Interval lhs;
-        if (c.banks & 1) {
-            const float f = constant_ptr[c.lhs];
-            lhs.lower = f;
-            lhs.upper = f;
-        } else {
-            lhs = regs[c.lhs];
+        if (c.opcode >= OP_SQUARE) {
+            if (c.banks & 1) {
+                const float f = constant_ptr[c.lhs];
+                lhs.lower = f;
+                lhs.upper = f;
+            } else {
+                lhs = regs[c.lhs];
+            }
         }
 
-        using namespace libfive::Opcode;
         Interval rhs;
         if (c.opcode >= OP_ADD) {
             if (c.banks & 2) {
@@ -228,7 +231,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
     active[tape[t - 1].out] = true;
 
     // Begin walking down CSG choices
-    uint32_t c = tape.num_csg_choices;
+    uint32_t csg_choice = tape.num_csg_choices;
 
     // Claim a subtape to populate
     uint32_t subtape_index = atomicAdd(&active_subtapes, 1);
@@ -243,34 +246,49 @@ void Renderable::buildSubtapes(const uint32_t offset)
     // Walk from the root of the tape downwards
     while (t--) {
         using namespace libfive::Opcode;
-        if (active[tape[t].out]) {
-            active[tape[t].out] = false;
+        const Clause c = tape[t];
+        if (active[c.out]) {
+            active[c.out] = false;
             uint32_t mask = 0;
-            const uint32_t lhs = (tape[t].banks & 1) ? 0 : tape[t].lhs;
-            const uint32_t rhs = (tape[t].banks & 2) ? 0 : tape[t].rhs;
-            if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX)
+            if (c.opcode == OP_MIN || c.opcode == OP_MAX)
             {
-                uint8_t choice = csg_choices[--c];
+                uint8_t choice = csg_choices[--csg_choice];
                 if (choice == 1) {
-                    active[lhs] = true;
-                    if (lhs == tape[t].out) {
-                        continue;
+                    if (!(c.banks & 1)) {
+                        active[c.lhs] = true;
+                        if (c.lhs == c.out) {
+                            continue;
+                        }
                     }
                 } else if (choice == 2) {
-                    active[rhs] = true;
-                    if (rhs == tape[t].out) {
-                        continue;
+                    active[c.rhs] = true;
+                    if (!(c.banks & 2)) {
+                        if (c.rhs == c.out) {
+                            continue;
+                        }
                     }
                 } else if (choice == 0) {
-                    active[lhs] = true;
-                    active[rhs] = true;
+                    if (!(c.banks & 1)) {
+                        active[c.lhs] = true;
+                    }
+                    if (!(c.banks & 2)) {
+                        active[c.rhs] = true;
+                    }
                 } else {
                     assert(false);
                 }
                 mask = (choice << 30);
-            } else {
-                active[lhs] = true;
-                active[rhs] = true;
+            } else if (c.opcode >= OP_ADD) {
+                if (!(c.banks & 1)) {
+                    active[c.lhs] = true;
+                }
+                if (!(c.banks & 2)) {
+                    active[c.rhs] = true;
+                }
+            } else if (c.opcode >= OP_SQUARE) {
+                if (!(c.banks & 1)) {
+                    active[c.lhs] = true;
+                }
             }
 
             if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
@@ -284,8 +302,8 @@ void Renderable::buildSubtapes(const uint32_t offset)
                 s = 0;
             }
             (*subtape)[s++] = (t | mask);
-        } else if (tape[t].opcode == OP_MIN || tape[t].opcode == OP_MAX) {
-            --c;
+        } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            --csg_choice;
         }
     }
     // The last subtape may not be completely filled

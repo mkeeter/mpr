@@ -5,7 +5,7 @@ Tape Tape::build(libfive::Tree tree) {
     auto ordered = tree.orderedDfs();
 
     std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
-    std::vector<float> constant_data = {0};
+    std::vector<float> constant_data;
     std::map<libfive::Tree::Id, uint16_t> constants;
     uint16_t num_csg_choices = 0;
     for (auto& c : ordered) {
@@ -29,7 +29,7 @@ Tape Tape::build(libfive::Tree tree) {
 
     std::list<uint16_t> free_registers;
     std::map<libfive::Tree::Id, uint16_t> bound_registers;
-    uint16_t num_registers = 1; // Use register 0 as the empty register
+    uint16_t num_registers = 0;
     std::vector<Clause> flat;
     for (auto& c : ordered) {
         // Constants are not inserted into the tape, because they
