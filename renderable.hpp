@@ -37,12 +37,13 @@ public:
     using FloatRegisters = float[LIBFIVE_CUDA_TILE_SIZE_PX *
                                  LIBFIVE_CUDA_TILE_SIZE_PX];
 
-    // [regs_i, csg_choices] and regs_f are both stored in scratch, to reduce
+    // regs_i and regs_f are both stored in scratch, to reduce
     // total memory usage (since we're only using one or the other)
     uint8_t* const scratch;
     IntervalRegisters* __restrict__ const regs_i;
-    uint8_t* __restrict__ const csg_choices;
     FloatRegisters* __restrict__ const regs_f;
+
+    uint8_t* __restrict__ const csg_choices;
 
     uint32_t* __restrict__ const tiles;
     uint32_t active_tiles;
@@ -60,6 +61,9 @@ public:
 
     cudaStream_t streams[2];
 protected:
+    static size_t floatRegSize(uint16_t num_regs);
+    static size_t intervalRegSize(uint16_t num_regs);
+
     Renderable(libfive::Tree tree, uint32_t image_size_px);
 
     Renderable(const Renderable& other)=delete;

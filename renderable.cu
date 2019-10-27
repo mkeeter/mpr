@@ -14,6 +14,7 @@ void Renderable::Deleter::operator()(Renderable* r)
 Renderable::~Renderable()
 {
     CHECK(cudaFree(scratch));
+    CHECK(cudaFree(csg_choices));
     CHECK(cudaFree(tiles));
     CHECK(cudaFree(subtapes));
     CHECK(cudaFree(image));
@@ -36,17 +37,13 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       TILE_COUNT(IMAGE_SIZE_PX / LIBFIVE_CUDA_TILE_SIZE_PX),
       TOTAL_TILES(TILE_COUNT * TILE_COUNT),
 
-      scratch(CUDA_MALLOC(uint8_t,
-          std::max(LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS *
-                           sizeof(Interval) * tape.num_regs
-                       + TOTAL_TILES * max(1, tape.num_csg_choices),
-                   sizeof(float) * tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS
-                                 * LIBFIVE_CUDA_TILE_SIZE_PX
-                                 * LIBFIVE_CUDA_TILE_SIZE_PX))),
+      scratch(CUDA_MALLOC(uint8_t, std::max(floatRegSize(tape.num_regs),
+                                            intervalRegSize(tape.num_regs)))),
       regs_i(reinterpret_cast<IntervalRegisters*>(scratch)),
-      csg_choices(scratch + LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS
-                            * sizeof(Interval) * tape.num_regs),
       regs_f(reinterpret_cast<FloatRegisters*>(scratch)),
+
+      csg_choices(CUDA_MALLOC(uint8_t,
+                  std::max(1U, TOTAL_TILES * tape.num_csg_choices))),
 
       tiles(CUDA_MALLOC(uint32_t, 2 * TOTAL_TILES)),
       active_tiles(0),
@@ -563,4 +560,15 @@ void Renderable::run(const View& view)
                                T, 0, streams[0]>>>(this, i, view);
         CHECK(cudaGetLastError());
     }
+}
+
+size_t Renderable::intervalRegSize(uint16_t num_regs) {
+    return LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS *
+           sizeof(Interval) * num_regs;
+}
+
+size_t Renderable::floatRegSize(uint16_t num_regs) {
+    return sizeof(float) * num_regs * LIBFIVE_CUDA_RENDER_BLOCKS
+                                    * LIBFIVE_CUDA_TILE_SIZE_PX
+                                    * LIBFIVE_CUDA_TILE_SIZE_PX;
 }
