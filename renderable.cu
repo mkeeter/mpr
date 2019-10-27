@@ -42,8 +42,9 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       regs_i(reinterpret_cast<IntervalRegisters*>(scratch)),
       regs_f(reinterpret_cast<FloatRegisters*>(scratch)),
 
-      csg_choices(CUDA_MALLOC(uint8_t,
-                  std::max(1U, TOTAL_TILES * tape.num_csg_choices))),
+      csg_choices(CUDA_MALLOC(ChoiceArray,
+                  std::max(1U, TOTAL_TILES / LIBFIVE_CUDA_TILE_THREADS
+                                           * tape.num_csg_choices))),
 
       tiles(CUDA_MALLOC(uint32_t, 2 * TOTAL_TILES)),
       active_tiles(0),
@@ -54,6 +55,14 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 
       image(CUDA_MALLOC(uint8_t, IMAGE_SIZE_PX * IMAGE_SIZE_PX))
 {
+    // This ensures that the csg_choices array will be the correct size
+    // (otherwise we'd need extra memory to make things work)
+    if (TOTAL_TILES % (LIBFIVE_CUDA_TILE_THREADS *
+                       LIBFIVE_CUDA_TILE_BLOCKS) != 0) {
+        fprintf(stderr, "Invalid tile sizes\n");
+        exit(1);
+    }
+
     cudaMemset(image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
     CHECK(cudaStreamCreate(&streams[0]));
     CHECK(cudaStreamCreate(&streams[1]));
@@ -62,8 +71,8 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ Interval walkI(const Tape& tape,
-                          Renderable::IntervalRegisters* const __restrict__ regs,
-                          uint8_t* const __restrict__ choices)
+                      Renderable::IntervalRegisters* const __restrict__ regs,
+                      Renderable::ChoiceArray* const __restrict__ choices)
 {
     using namespace libfive::Opcode;
 
@@ -108,25 +117,25 @@ __device__ Interval walkI(const Tape& tape,
             case OP_MUL: out = lhs * rhs; break;
             case OP_DIV: out = lhs / rhs; break;
             case OP_MIN: if (lhs.upper < rhs.lower) {
-                             choices[choice_index] = 1;
+                             choices[choice_index][threadIdx.x] = 1;
                              out = lhs;
                          } else if (rhs.upper < lhs.lower) {
-                             choices[choice_index] = 2;
+                             choices[choice_index][threadIdx.x] = 2;
                              out = rhs;
                          } else {
-                             choices[choice_index] = 0;
+                             choices[choice_index][threadIdx.x] = 0;
                              out = lhs.min(rhs);
                          }
                          choice_index++;
                          break;
             case OP_MAX: if (lhs.lower > rhs.upper) {
-                             choices[choice_index] = 1;
+                             choices[choice_index][threadIdx.x] = 1;
                              out = lhs;
                          } else if (rhs.lower > lhs.upper) {
-                             choices[choice_index] = 2;
+                             choices[choice_index][threadIdx.x] = 2;
                              out = rhs;
                          } else {
-                             choices[choice_index] = 0;
+                             choices[choice_index][threadIdx.x] = 0;
                              out = lhs.max(rhs);
                          }
                          choice_index++;
@@ -184,11 +193,11 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
     }
 
     // Unpack a 1D offset into the data arrays
-    auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
+    auto csg_choices = this->csg_choices + index / LIBFIVE_CUDA_TILE_THREADS
+                                                 * tape.num_csg_choices;
 
     // Run actual evaluation
-    const Interval result = walkI(
-            tape, regs, csg_choices);
+    const Interval result = walkI(tape, regs, csg_choices);
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
@@ -235,7 +244,9 @@ void Renderable::buildSubtapes(const uint32_t offset)
     }
 
     // Pick an offset CSG choices array
-    auto csg_choices = this->csg_choices + index * tape.num_csg_choices;
+    auto csg_choices = this->csg_choices + index / LIBFIVE_CUDA_TILE_THREADS
+                                                 * tape.num_csg_choices;
+    const uint32_t j = index % LIBFIVE_CUDA_TILE_THREADS;
 
     // Mark the root of the tree as true
     uint32_t t = tape.num_clauses;
@@ -263,7 +274,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
             uint32_t mask = 0;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX)
             {
-                const uint8_t choice = csg_choices[--csg_choice];
+                const uint8_t choice = csg_choices[--csg_choice][j];
                 if (choice == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;

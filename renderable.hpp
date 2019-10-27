@@ -36,6 +36,7 @@ public:
     using IntervalRegisters = Interval[LIBFIVE_CUDA_TILE_THREADS];
     using FloatRegisters = float[LIBFIVE_CUDA_TILE_SIZE_PX *
                                  LIBFIVE_CUDA_TILE_SIZE_PX];
+    using ChoiceArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
 
     // regs_i and regs_f are both stored in scratch, to reduce
     // total memory usage (since we're only using one or the other)
@@ -43,7 +44,7 @@ public:
     IntervalRegisters* __restrict__ const regs_i;
     FloatRegisters* __restrict__ const regs_f;
 
-    uint8_t* __restrict__ const csg_choices;
+    ChoiceArray* __restrict__ const csg_choices;
 
     uint32_t* __restrict__ const tiles;
     uint32_t active_tiles;
