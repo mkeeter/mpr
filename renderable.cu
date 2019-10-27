@@ -238,7 +238,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
     }
     const uint32_t index = tiles[2 * i];
 
-    bool* __restrict__ active = reinterpret_cast<bool*>(regs_i) + start * tape.num_regs;
+    uint8_t* __restrict__ active = scratch + start * tape.num_regs;
     for (uint32_t j=0; j < tape.num_regs; ++j) {
         active[j] = false;
     }
