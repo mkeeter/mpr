@@ -292,16 +292,12 @@ void Renderable::buildSubtapes(const uint32_t offset)
                     assert(false);
                 }
                 mask = (choice << 30);
-            } else if (c.opcode >= OP_ADD) {
-                if (!(c.banks & 1)) {
+            } else {
+                if (c.opcode >= OP_SQUARE && !(c.banks & 1)) {
                     active[c.lhs] = true;
                 }
-                if (!(c.banks & 2)) {
+                if (c.opcode >= OP_ADD && !(c.banks & 2)) {
                     active[c.rhs] = true;
-                }
-            } else if (c.opcode >= OP_SQUARE) {
-                if (!(c.banks & 1)) {
-                    active[c.lhs] = true;
                 }
             }
 
