@@ -42,9 +42,11 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       regs_i(reinterpret_cast<IntervalRegisters*>(scratch)),
       regs_f(reinterpret_cast<FloatRegisters*>(scratch)),
 
-      csg_choices(CUDA_MALLOC(ChoiceArray,
-                  std::max(1U, TOTAL_TILES / LIBFIVE_CUDA_TILE_THREADS
-                                           * tape.num_csg_choices))),
+      csg_choices(CUDA_MALLOC(ChoiceArray, std::max(1U,
+                  LIBFIVE_CUDA_TILE_BLOCKS * tape.num_csg_choices *
+                  ((TOTAL_TILES + LIBFIVE_CUDA_TILE_THREADS *
+                                  LIBFIVE_CUDA_TILE_BLOCKS - 1) /
+                   (LIBFIVE_CUDA_TILE_THREADS * LIBFIVE_CUDA_TILE_BLOCKS))))),
 
       tiles(CUDA_MALLOC(uint32_t, 2 * TOTAL_TILES)),
       active_tiles(0),
@@ -55,14 +57,6 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 
       image(CUDA_MALLOC(uint8_t, IMAGE_SIZE_PX * IMAGE_SIZE_PX))
 {
-    // This ensures that the csg_choices array will be the correct size
-    // (otherwise we'd need extra memory to make things work)
-    if (TOTAL_TILES % (LIBFIVE_CUDA_TILE_THREADS *
-                       LIBFIVE_CUDA_TILE_BLOCKS) != 0) {
-        fprintf(stderr, "Invalid tile sizes\n");
-        exit(1);
-    }
-
     cudaMemset(image, 0, IMAGE_SIZE_PX * IMAGE_SIZE_PX);
     CHECK(cudaStreamCreate(&streams[0]));
     CHECK(cudaStreamCreate(&streams[1]));
