@@ -377,6 +377,11 @@ __device__ float walkF(const Tape& tape,
     const uint32_t q = threadIdx.x + threadIdx.y * LIBFIVE_CUDA_TILE_SIZE_PX;
     uint32_t s = subtapes.size[subtape_index];
     uint32_t target;
+
+    __shared__ uint32_t subtape_data[256];
+    subtape_data[q] = subtapes.data[subtape_index][q];
+    __syncthreads();
+
     while (true) {
         if (s == 0) {
             const uint32_t next = subtapes.next[subtape_index];
@@ -386,11 +391,14 @@ __device__ float walkF(const Tape& tape,
             } else {
                 return regs[clause_ptr[target].out][q];
             }
+            __syncthreads();
+            subtape_data[q] = subtapes.data[subtape_index][q];
+            __syncthreads();
         }
         s -= 1;
 
         // Pick the target, which is an offset into the original tape
-        target = subtapes.data[subtape_index][s];
+        target = subtape_data[s];
 
         // Mask out choice bits
         const uint8_t choice = (target >> 30);
