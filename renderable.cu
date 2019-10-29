@@ -463,7 +463,7 @@ __device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View
 
     const uint32_t dx = threadIdx.x;
     const uint32_t dy = threadIdx.y;
-    const uint32_t q = dx * LIBFIVE_CUDA_TILE_SIZE_PX + dy;
+    const uint32_t q = dx + dy * LIBFIVE_CUDA_TILE_SIZE_PX;
 
     // Pick an index into the register array
     auto regs = regs_f + tape.num_regs * blockIdx.x;
