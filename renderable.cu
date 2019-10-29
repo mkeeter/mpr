@@ -378,10 +378,15 @@ __device__ float walkF(const Tape& tape,
     uint32_t s = subtapes.size[subtape_index];
     uint32_t target;
 
-    __shared__ uint32_t subtape_data[256];
-#define STORE_LOCAL_CLAUSES() do {                              \
-        subtape_data[q] = subtapes.data[subtape_index][q];      \
-        __syncthreads();                                        \
+    __shared__ Clause clauses[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
+    __shared__ uint8_t choices[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
+#define STORE_LOCAL_CLAUSES() do {                                      \
+        for (unsigned i=q; i < s; i += blockDim.x * blockDim.y) {       \
+            const uint32_t target = subtapes.data[subtape_index][i];    \
+            clauses[i] = clause_ptr[target & ((1 << 30) - 1)];          \
+            choices[i] = target >> 30;                                  \
+        }                                                               \
+        __syncthreads();                                                \
     } while (0)
 
     STORE_LOCAL_CLAUSES();
@@ -393,21 +398,15 @@ __device__ float walkF(const Tape& tape,
                 subtape_index = next;
                 s = subtapes.size[subtape_index];
             } else {
-                return regs[clause_ptr[target].out][q];
+                return regs[clauses[0].out][q];
             }
             __syncthreads();
             STORE_LOCAL_CLAUSES();
         }
         s -= 1;
 
-        // Pick the target, which is an offset into the original tape
-        target = subtape_data[s];
-
-        // Mask out choice bits
-        const uint8_t choice = (target >> 30);
-        target &= (1 << 30) - 1;
-
-        const Clause c = clause_ptr[target];
+        const uint8_t choice = choices[s];
+        const Clause c = clauses[s];
 
         // All clauses must have at least one argument, since constants
         // and VAR_X/Y/Z are handled separately.
