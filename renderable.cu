@@ -379,8 +379,12 @@ __device__ float walkF(const Tape& tape,
     uint32_t target;
 
     __shared__ uint32_t subtape_data[256];
-    subtape_data[q] = subtapes.data[subtape_index][q];
-    __syncthreads();
+#define STORE_LOCAL_CLAUSES() do {                              \
+        subtape_data[q] = subtapes.data[subtape_index][q];      \
+        __syncthreads();                                        \
+    } while (0)
+
+    STORE_LOCAL_CLAUSES();
 
     while (true) {
         if (s == 0) {
@@ -392,8 +396,7 @@ __device__ float walkF(const Tape& tape,
                 return regs[clause_ptr[target].out][q];
             }
             __syncthreads();
-            subtape_data[q] = subtapes.data[subtape_index][q];
-            __syncthreads();
+            STORE_LOCAL_CLAUSES();
         }
         s -= 1;
 
