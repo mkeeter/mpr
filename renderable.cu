@@ -16,7 +16,6 @@ Renderable::~Renderable()
     CHECK(cudaFree(scratch));
     CHECK(cudaFree(csg_choices));
     CHECK(cudaFree(tiles));
-    CHECK(cudaFree(subtapes));
     CHECK(cudaFree(image));
     for (auto& s : streams) {
         CHECK(cudaStreamDestroy(s));
@@ -52,7 +51,6 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       active_tiles(0),
       filled_tiles(0),
 
-      subtapes(CUDA_MALLOC(Subtape, LIBFIVE_CUDA_NUM_SUBTAPES)),
       active_subtapes(1),
 
       image(CUDA_MALLOC(uint8_t, IMAGE_SIZE_PX * IMAGE_SIZE_PX))
@@ -255,8 +253,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
 
     // Since we're reversing the tape, this is going to be the
     // end of the linked list (i.e. next = 0)
-    Subtape* subtape = &subtapes[subtape_index];
-    subtape->next = 0;
+    subtapes.next[subtape_index] = 0;
     uint32_t s = 0;
 
     // Walk from the root of the tape downwards
@@ -305,21 +302,19 @@ void Renderable::buildSubtapes(const uint32_t offset)
 
             if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
                 auto next_subtape_index = atomicAdd(&active_subtapes, 1);
-                auto next_subtape = &subtapes[next_subtape_index];
-                subtape->size = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
-                next_subtape->next = subtape_index;
+                subtapes.size[subtape_index] = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+                subtapes.next[next_subtape_index] = subtape_index;
 
                 subtape_index = next_subtape_index;
-                subtape = next_subtape;
                 s = 0;
             }
-            (*subtape)[s++] = (t | mask);
+            subtapes.data[subtape_index][s++] = (t | mask);
         } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             --csg_choice;
         }
     }
     // The last subtape may not be completely filled
-    subtape->size = s;
+    subtapes.size[subtape_index] = s;
 
     // Store the linked list of subtapes into the active tiles list
     tiles[2 * i + 1] = subtape_index;
@@ -369,7 +364,7 @@ __device__ void Renderable::drawFilledTiles(const uint32_t offset, const View& v
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ float walkF(const Tape& tape,
-                       const Subtape* const subtapes,
+                       const Renderable::Subtapes& subtapes,
                        uint32_t subtape_index,
                        Renderable::FloatRegisters* const __restrict__ regs)
 {
@@ -380,13 +375,14 @@ __device__ float walkF(const Tape& tape,
     const float* __restrict__ constant_ptr = &tape.constant(0);
 
     const uint32_t q = threadIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + threadIdx.y;
-    uint32_t s = subtapes[subtape_index].size;
+    uint32_t s = subtapes.size[subtape_index];
     uint32_t target;
     while (true) {
         if (s == 0) {
-            if (subtapes[subtape_index].next) {
-                subtape_index = subtapes[subtape_index].next;
-                s = subtapes[subtape_index].size;
+            const uint32_t next = subtapes.next[subtape_index];
+            if (next) {
+                subtape_index = next;
+                s = subtapes.size[subtape_index];
             } else {
                 return regs[clause_ptr[target].out][q];
             }
@@ -394,7 +390,7 @@ __device__ float walkF(const Tape& tape,
         s -= 1;
 
         // Pick the target, which is an offset into the original tape
-        target = subtapes[subtape_index][s];
+        target = subtapes.data[subtape_index][s];
 
         // Mask out choice bits
         const uint8_t choice = (target >> 30);

@@ -14,7 +14,7 @@
 
 /*  This is the number of subtapes allocated.  Each subtape has room for some
  *  number of clauses, defined in the Subtape struct */
-#define LIBFIVE_CUDA_NUM_SUBTAPES 65535
+#define LIBFIVE_CUDA_NUM_SUBTAPES 65536
 
 /*  This is the length of each subtape chunk */
-#define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 250
+#define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 256

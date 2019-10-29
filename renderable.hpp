@@ -2,7 +2,7 @@
 #include <cuda_runtime.h>
 #include <libfive/tree/tree.hpp>
 #include "tape.hpp"
-#include "subtape.hpp"
+#include "parameters.hpp"
 
 struct Interval;
 
@@ -16,6 +16,13 @@ public:
     struct View {
         float center[2];
         float scale;
+    };
+
+    struct Subtapes {
+        uint32_t size[LIBFIVE_CUDA_NUM_SUBTAPES];
+        uint32_t next[LIBFIVE_CUDA_NUM_SUBTAPES];
+        uint32_t data[LIBFIVE_CUDA_NUM_SUBTAPES]
+                     [LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
     };
 
     using Handle = std::unique_ptr<Renderable, Deleter>;
@@ -50,7 +57,7 @@ public:
     uint32_t active_tiles;
     uint32_t filled_tiles;
 
-    Subtape* __restrict__ const subtapes;
+    Subtapes subtapes;
     uint32_t active_subtapes;
 
     uint8_t* __restrict__ const image;
