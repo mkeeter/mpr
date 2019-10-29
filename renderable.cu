@@ -374,7 +374,7 @@ __device__ float walkF(const Tape& tape,
     const Clause* __restrict__ clause_ptr = &tape[0];
     const float* __restrict__ constant_ptr = &tape.constant(0);
 
-    const uint32_t q = threadIdx.x * LIBFIVE_CUDA_TILE_SIZE_PX + threadIdx.y;
+    const uint32_t q = threadIdx.x + threadIdx.y * LIBFIVE_CUDA_TILE_SIZE_PX;
     uint32_t s = subtapes.size[subtape_index];
     uint32_t target;
     while (true) {
