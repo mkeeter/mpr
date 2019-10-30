@@ -5,8 +5,8 @@
 
 /*  All tile operations are done with this many blocks and threads,
  *  looping to consume all available tiles */
-#define LIBFIVE_CUDA_TILE_BLOCKS 16
-#define LIBFIVE_CUDA_TILE_THREADS 256
+#define LIBFIVE_CUDA_TILE_BLOCKS 32
+#define LIBFIVE_CUDA_TILE_THREADS 128
 
 /*  Rendering is done with this many blogs, and TILE_SIZE_PX^2 threads
  *  (one per pixel in each tile) */

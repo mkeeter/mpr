@@ -79,15 +79,17 @@ __device__ Interval walkI(const Tape& tape,
     __shared__ Clause clauses[LIBFIVE_CUDA_TILE_THREADS];
 #define STORE_LOCAL_CLAUSES() do {                                      \
         __syncthreads();                                                \
-        clauses[threadIdx.x] = clause_ptr[i + threadIdx.x];             \
+        if (i + threadIdx.x < num_clauses) {                            \
+            clauses[threadIdx.x] = clause_ptr[i + threadIdx.x];         \
+        }                                                               \
         __syncthreads();                                                \
     } while (0)
 
     for (uint32_t i=0; i < num_clauses; ++i) {
-        if ((i % LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) == 0) {
+        if ((i % LIBFIVE_CUDA_TILE_THREADS) == 0) {
             STORE_LOCAL_CLAUSES();
         }
-        const Clause c = clauses[i % LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
+        const Clause c = clauses[i % LIBFIVE_CUDA_TILE_THREADS];
         // All clauses must have at least one argument, since constants
         // and VAR_X/Y/Z are handled separately.
         Interval lhs;
