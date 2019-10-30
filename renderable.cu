@@ -390,7 +390,6 @@ __device__ float walkF(const Tape& tape,
 
     const uint32_t q = threadIdx.x + threadIdx.y * LIBFIVE_CUDA_TILE_SIZE_PX;
     uint32_t s = subtapes.size[subtape_index];
-    uint32_t target;
 
     __shared__ Clause clauses[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
     __shared__ uint8_t choices[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
