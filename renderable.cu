@@ -75,21 +75,20 @@ __device__ Interval walkI(const Tape& tape,
     const uint32_t num_clauses = tape.num_clauses;
 
     // We copy a chunk of the tape from constant to shared memory, with
-    // each thread moving one Clause.
-    __shared__ Clause clauses[LIBFIVE_CUDA_TILE_THREADS];
-#define STORE_LOCAL_CLAUSES() do {                                      \
-        __syncthreads();                                                \
-        if (i + threadIdx.x < num_clauses) {                            \
-            clauses[threadIdx.x] = clause_ptr[i + threadIdx.x];         \
-        }                                                               \
-        __syncthreads();                                                \
-    } while (0)
+    // each thread moving two Clause in a SIMD operation.
+    constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS * 2;
+    __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
 
     for (uint32_t i=0; i < num_clauses; ++i) {
-        if ((i % LIBFIVE_CUDA_TILE_THREADS) == 0) {
-            STORE_LOCAL_CLAUSES();
+        if ((i % SHARED_CLAUSE_SIZE) == 0) {
+            const uint32_t j = threadIdx.x * 2;
+            __syncthreads();
+            *reinterpret_cast<uint4*>(&clauses[j]) =
+                *reinterpret_cast<const uint4*>(&clause_ptr[i + j]);
+            __syncthreads();
         }
-        const Clause c = clauses[i % LIBFIVE_CUDA_TILE_THREADS];
+
+        const Clause c = clauses[i % SHARED_CLAUSE_SIZE];
         // All clauses must have at least one argument, since constants
         // and VAR_X/Y/Z are handled separately.
         Interval lhs;
