@@ -74,8 +74,20 @@ __device__ Interval walkI(const Tape& tape,
     const float* __restrict__ constant_ptr = &tape.constant(0);
     const uint32_t num_clauses = tape.num_clauses;
 
+    // We copy a chunk of the tape from constant to shared memory, with
+    // each thread moving one Clause.
+    __shared__ Clause clauses[LIBFIVE_CUDA_TILE_THREADS];
+#define STORE_LOCAL_CLAUSES() do {                                      \
+        __syncthreads();                                                \
+        clauses[threadIdx.x] = clause_ptr[i + threadIdx.x];             \
+        __syncthreads();                                                \
+    } while (0)
+
     for (uint32_t i=0; i < num_clauses; ++i) {
-        const Clause c = clause_ptr[i];
+        if ((i % LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) == 0) {
+            STORE_LOCAL_CLAUSES();
+        }
+        const Clause c = clauses[i % LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
         // All clauses must have at least one argument, since constants
         // and VAR_X/Y/Z are handled separately.
         Interval lhs;
@@ -143,6 +155,8 @@ __device__ Interval walkI(const Tape& tape,
     // Copy output to standard register before exiting
     const Clause c = clause_ptr[num_clauses - 1];
     return regs[c.out][threadIdx.x];
+
+#undef STORE_LOCAL_CLAUSES
 }
 
 __device__
@@ -461,6 +475,8 @@ __device__ float walkF(const Tape& tape,
     }
     assert(false);
     return 0.0f;
+
+#undef STORE_LOCAL_CLAUSES
 }
 
 __device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View& v)
