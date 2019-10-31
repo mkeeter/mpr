@@ -1,5 +1,5 @@
-#include <stdio.h>
-#include <assert.h>
+#include <cstdio>
+#include <chrono>
 #include <iostream>
 #include <fstream>
 
@@ -33,8 +33,15 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
     auto r = Renderable::build(t, 2048);
+    cudaDeviceSynchronize();
+
+    auto start_gpu = std::chrono::steady_clock::now();
     r->run({{0, 0}, 1});
     cudaDeviceSynchronize();
+    auto end_gpu = std::chrono::steady_clock::now();
+    std::cout << "GPU rendering took " <<
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() <<
+        " ms\n";
 
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(r->IMAGE_SIZE_PX, r->IMAGE_SIZE_PX);
@@ -59,9 +66,14 @@ int main(int argc, char **argv)
     }
 
     std::atomic_bool abort(false);
+    auto start_cpu = std::chrono::steady_clock::now();
     auto h = libfive::Heightmap::render(t,
             libfive::Voxels({-1, -1, 0}, {1, 1, 0}, r->IMAGE_SIZE_PX / 2),
             abort);
+    auto end_cpu = std::chrono::steady_clock::now();
+    std::cout << "CPU rendering took " <<
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu).count() <<
+        " ms\n";
     h->savePNG("out_cpu.png");
 
     return 0;
