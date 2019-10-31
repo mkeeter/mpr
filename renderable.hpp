@@ -3,6 +3,7 @@
 #include <libfive/tree/tree.hpp>
 #include "tape.hpp"
 #include "parameters.hpp"
+#include "check.hpp"
 
 struct Interval;
 
@@ -53,12 +54,51 @@ public:
 
     ChoiceArray* __restrict__ const csg_choices;
 
-    uint32_t* __restrict__ const tiles;
-    uint32_t active_tiles;
-    uint32_t filled_tiles;
+    struct Tiles {
+        Tiles(uint32_t count)
+            : data(CUDA_MALLOC(uint32_t, 2 * count)), size(2 * count)
+        {
+            reset();
+        }
 
-    Subtapes subtapes;
-    uint32_t active_subtapes;
+        ~Tiles() {
+            CHECK(cudaFree(data));
+        }
+
+        __host__ __device__ uint32_t filled(uint32_t i) const
+            { return data[size - i - 1]; }
+        __host__ __device__ uint32_t active(uint32_t i) const
+            { return data[i * 2]; }
+        __host__ __device__ uint32_t head(uint32_t i) const
+            { return data[i * 2 + 1]; }
+
+        __host__ __device__ uint32_t& filled(uint32_t i)
+            { return data[size - i - 1]; }
+        __host__ __device__ uint32_t& active(uint32_t i)
+            { return data[i * 2]; }
+        __host__ __device__ uint32_t& head(uint32_t i)
+            { return data[i * 2 + 1]; }
+
+        __device__ void insert_filled(uint32_t index);
+        __device__ void insert_active(uint32_t index);
+
+        void reset() {
+            num_active = 0;
+            num_filled = 0;
+            num_subtapes = 1;
+        }
+
+        uint32_t num_active;
+        uint32_t num_filled;
+
+        Subtapes subtapes;
+        uint32_t num_subtapes;
+    protected:
+        uint32_t* __restrict__ const data;
+        const uint32_t size;
+    };
+
+    Tiles tiles;
 
     uint8_t* __restrict__ const image;
 
