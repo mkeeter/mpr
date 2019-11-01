@@ -22,7 +22,7 @@ public:
     struct Subtapes {
         uint32_t size[LIBFIVE_CUDA_NUM_SUBTAPES];
         uint32_t next[LIBFIVE_CUDA_NUM_SUBTAPES];
-        uint32_t data[LIBFIVE_CUDA_NUM_SUBTAPES]
+        Clause   data[LIBFIVE_CUDA_NUM_SUBTAPES]
                      [LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
     };
 

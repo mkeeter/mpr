@@ -266,10 +266,9 @@ void Renderable::buildSubtapes(const uint32_t offset)
     // Walk from the root of the tape downwards
     while (t--) {
         using namespace libfive::Opcode;
-        const Clause c = tape[t];
+        Clause c = tape[t];
         if (active[c.out]) {
             active[c.out] = false;
-            uint32_t mask = 0;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX)
             {
                 const uint8_t choice = csg_choices[--csg_choice][j];
@@ -279,6 +278,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
                         if (c.lhs == c.out) {
                             continue;
                         }
+                        c.rhs = c.lhs;
                     }
                 } else if (choice == 2) {
                     if (!(c.banks & 2)) {
@@ -286,6 +286,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
                         if (c.rhs == c.out) {
                             continue;
                         }
+                        c.lhs = c.rhs;
                     }
                 } else if (choice == 0) {
                     if (!(c.banks & 1)) {
@@ -297,7 +298,6 @@ void Renderable::buildSubtapes(const uint32_t offset)
                 } else {
                     assert(false);
                 }
-                mask = (choice << 30);
             } else {
                 if (c.opcode >= OP_SQUARE && !(c.banks & 1)) {
                     active[c.lhs] = true;
@@ -315,7 +315,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
                 subtape_index = next_subtape_index;
                 s = 0;
             }
-            tiles.subtapes.data[subtape_index][s++] = (t | mask);
+            tiles.subtapes.data[subtape_index][s++] = c;
         } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             --csg_choice;
         }
@@ -385,12 +385,9 @@ __device__ float walkF(const Tape& tape,
     uint32_t s = subtapes.size[subtape_index];
 
     __shared__ Clause clauses[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
-    __shared__ uint8_t choices[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
 #define STORE_LOCAL_CLAUSES() do {                                      \
         for (unsigned i=q; i < s; i += blockDim.x * blockDim.y) {       \
-            const uint32_t target = subtapes.data[subtape_index][i];    \
-            clauses[i] = clause_ptr[target & ((1 << 30) - 1)];          \
-            choices[i] = target >> 30;                                  \
+            clauses[i] = subtapes.data[subtape_index][i];               \
         }                                                               \
         __syncthreads();                                                \
     } while (0)
@@ -411,7 +408,6 @@ __device__ float walkF(const Tape& tape,
         }
         s -= 1;
 
-        const uint8_t choice = choices[s];
         const Clause c = clauses[s];
 
         // All clauses must have at least one argument, since constants
@@ -442,22 +438,8 @@ __device__ float walkF(const Tape& tape,
             case OP_ADD: out = lhs + rhs; break;
             case OP_MUL: out = lhs * rhs; break;
             case OP_DIV: out = lhs / rhs; break;
-            case OP_MIN: if (choice == 1) {
-                            out = lhs;
-                        } else if (choice == 2) {
-                            out = rhs;
-                        } else {
-                            out = fminf(lhs, rhs);
-                        }
-                        break;
-            case OP_MAX: if (choice == 1) {
-                           out = lhs;
-                        } else if (choice == 2) {
-                           out = rhs;
-                        } else {
-                           out = fmaxf(lhs, rhs);
-                        }
-                        break;
+            case OP_MIN: out = fminf(lhs, rhs); break;
+            case OP_MAX: out = fmaxf(lhs, rhs); break;
             case OP_SUB: out = lhs - rhs; break;
 
             // Skipping various hard functions here
