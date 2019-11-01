@@ -36,8 +36,10 @@ int main(int argc, char **argv)
     cudaDeviceSynchronize();
 
     auto start_gpu = std::chrono::steady_clock::now();
-    r->run({{0, 0}, 1});
-    cudaDeviceSynchronize();
+    for (unsigned i=0; i < 10; ++i) {
+        r->run({{0, 0}, 1});
+        cudaDeviceSynchronize();
+    }
     auto end_gpu = std::chrono::steady_clock::now();
     std::cout << "GPU rendering took " <<
         std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() <<
@@ -66,15 +68,16 @@ int main(int argc, char **argv)
     }
 
     std::atomic_bool abort(false);
+    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->IMAGE_SIZE_PX / 2);
     auto start_cpu = std::chrono::steady_clock::now();
-    auto h = libfive::Heightmap::render(t,
-            libfive::Voxels({-1, -1, 0}, {1, 1, 0}, r->IMAGE_SIZE_PX / 2),
-            abort);
+    for (unsigned i=0; i < 10; ++i) {
+        auto h = libfive::Heightmap::render(t, vox, abort);
+    }
     auto end_cpu = std::chrono::steady_clock::now();
     std::cout << "CPU rendering took " <<
         std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu).count() <<
         " ms\n";
-    h->savePNG("out_cpu.png");
+    libfive::Heightmap::render(t, vox, abort)->savePNG("out_cpu.png");
 
     return 0;
 }
