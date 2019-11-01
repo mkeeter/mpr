@@ -57,17 +57,16 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ Interval walkI(const Tape& tape,
-                      Renderable::IntervalRegisters* const __restrict__ regs,
-                      Renderable::ChoiceArray* const __restrict__ choices)
+__device__ Interval walkI(
+        const Clause* __restrict__ clause_ptr,
+        const float* __restrict__ constant_ptr,
+        const uint32_t num_clauses,
+        Renderable::IntervalRegisters* const __restrict__ regs,
+        Renderable::ChoiceArray* const __restrict__ choices)
 {
     using namespace libfive::Opcode;
 
     uint32_t choice_index = 0;
-
-    const Clause* __restrict__ clause_ptr = &tape[0];
-    const float* __restrict__ constant_ptr = &tape.constant(0);
-    const uint32_t num_clauses = tape.num_clauses;
 
     // We copy a chunk of the tape from constant to shared memory, with
     // each thread moving two Clause in a SIMD operation.
@@ -199,7 +198,8 @@ void Renderable::processTiles(const uint32_t offset, const View& v)
                                                  * tape.num_csg_choices;
 
     // Run actual evaluation
-    const Interval result = walkI(tape, regs, csg_choices);
+    const Interval result = walkI(&tape[0], &tape.constant(0),
+                                  tape.num_clauses, regs, csg_choices);
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
