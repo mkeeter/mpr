@@ -261,7 +261,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
     // Since we're reversing the tape, this is going to be the
     // end of the linked list (i.e. next = 0)
     tiles.subtapes.next[subtape_index] = 0;
-    uint32_t s = 0;
+    uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
 
     // Walk from the root of the tape downwards
     while (t--) {
@@ -269,8 +269,7 @@ void Renderable::buildSubtapes(const uint32_t offset)
         Clause c = tape[t];
         if (active[c.out]) {
             active[c.out] = false;
-            if (c.opcode == OP_MIN || c.opcode == OP_MAX)
-            {
+            if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
                 const uint8_t choice = csg_choices[--csg_choice][j];
                 if (choice == 1) {
                     if (!(c.banks & 1)) {
@@ -307,21 +306,21 @@ void Renderable::buildSubtapes(const uint32_t offset)
                 }
             }
 
-            if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+            if (s == 0) {
                 auto next_subtape_index = atomicAdd(&tiles.num_subtapes, 1);
-                tiles.subtapes.size[subtape_index] = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+                tiles.subtapes.start[subtape_index] = 0;
                 tiles.subtapes.next[next_subtape_index] = subtape_index;
 
                 subtape_index = next_subtape_index;
-                s = 0;
+                s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
             }
-            tiles.subtapes.data[subtape_index][s++] = c;
+            tiles.subtapes.data[subtape_index][--s] = c;
         } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             --csg_choice;
         }
     }
     // The last subtape may not be completely filled
-    tiles.subtapes.size[subtape_index] = s;
+    tiles.subtapes.start[subtape_index] = s;
 
     // Store the linked list of subtapes into the active tiles list
     tiles.head(i) = subtape_index;
@@ -382,11 +381,13 @@ __device__ float walkF(const Tape& tape,
     const float* __restrict__ constant_ptr = &tape.constant(0);
 
     const uint32_t q = threadIdx.x + threadIdx.y * LIBFIVE_CUDA_TILE_SIZE_PX;
-    uint32_t s = subtapes.size[subtape_index];
+    uint32_t s = subtapes.start[subtape_index];
 
     __shared__ Clause clauses[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
 #define STORE_LOCAL_CLAUSES() do {                                      \
-        for (unsigned i=q; i < s; i += blockDim.x * blockDim.y) {       \
+        for (unsigned i=q; i < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;         \
+                           i += blockDim.x * blockDim.y)                \
+        {                                                               \
             clauses[i] = subtapes.data[subtape_index][i];               \
         }                                                               \
         __syncthreads();                                                \
@@ -395,20 +396,19 @@ __device__ float walkF(const Tape& tape,
     STORE_LOCAL_CLAUSES();
 
     while (true) {
-        if (s == 0) {
+        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
             const uint32_t next = subtapes.next[subtape_index];
             if (next) {
                 subtape_index = next;
-                s = subtapes.size[subtape_index];
+                s = subtapes.start[subtape_index];
             } else {
-                return regs[clauses[0].out][q];
+                return regs[clauses[s - 1].out][q];
             }
             __syncthreads();
             STORE_LOCAL_CLAUSES();
         }
-        s -= 1;
 
-        const Clause c = clauses[s];
+        const Clause c = clauses[s++];
 
         // All clauses must have at least one argument, since constants
         // and VAR_X/Y/Z are handled separately.
