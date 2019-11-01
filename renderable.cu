@@ -281,8 +281,8 @@ void Renderable::buildSubtapes(const uint32_t offset)
                         }
                     }
                 } else if (choice == 2) {
-                    active[c.rhs] = true;
                     if (!(c.banks & 2)) {
+                        active[c.rhs] = true;
                         if (c.rhs == c.out) {
                             continue;
                         }
