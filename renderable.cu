@@ -220,57 +220,21 @@ __global__ void processTiles(Renderable* r, const uint32_t offset,
 }
 
 __device__
-void Renderable::buildSubtapes(const uint32_t offset)
+void pushSubtape(uint32_t t, const uint32_t j,
+                 const Clause* __restrict__ const clause_ptr,
+                 uint8_t* __restrict__ const active,
+                 Renderable::ChoiceArray* __restrict__& choices,
+                 uint32_t& subtape_index, uint32_t& s,
+                 Renderable::Tiles& out)
 {
-    // This is a 1D kernel which consumes tiles and writes out their tapes
-    assert(blockDim.y == 1);
-    assert(blockDim.z == 1);
-    assert(gridDim.y == 1);
-    assert(gridDim.z == 1);
-
-    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-
-    // Reuse the registers array to track activeness
-    const uint32_t i = start + offset;
-    if (i >= tiles.num_active) {
-        return;
-    }
-    const uint32_t index = tiles.active(i);
-
-    uint8_t* __restrict__ active = scratch + start * tape.num_regs;
-    for (uint32_t j=0; j < tape.num_regs; ++j) {
-        active[j] = false;
-    }
-
-    // Pick an offset CSG choices array
-    auto csg_choices = this->csg_choices + index / LIBFIVE_CUDA_TILE_THREADS
-                                                 * tape.num_csg_choices;
-    const uint32_t j = index % LIBFIVE_CUDA_TILE_THREADS;
-
-    // Mark the root of the tree as true
-    uint32_t t = tape.num_clauses;
-    active[tape[t - 1].out] = true;
-
-    // Begin walking down CSG choices
-    uint32_t csg_choice = tape.num_csg_choices;
-
-    // Claim a subtape to populate
-    uint32_t subtape_index = atomicAdd(&tiles.num_subtapes, 1);
-    assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
-
-    // Since we're reversing the tape, this is going to be the
-    // end of the linked list (i.e. next = 0)
-    tiles.subtapes.next[subtape_index] = 0;
-    uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
-
     // Walk from the root of the tape downwards
     while (t--) {
         using namespace libfive::Opcode;
-        Clause c = tape[t];
+        Clause c = clause_ptr[t];
         if (active[c.out]) {
             active[c.out] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice = csg_choices[--csg_choice][j];
+                const uint8_t choice = (*(--choices))[j];
                 if (choice == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;
@@ -307,18 +271,67 @@ void Renderable::buildSubtapes(const uint32_t offset)
             }
 
             if (s == 0) {
-                auto next_subtape_index = atomicAdd(&tiles.num_subtapes, 1);
-                tiles.subtapes.start[subtape_index] = 0;
-                tiles.subtapes.next[next_subtape_index] = subtape_index;
+                auto next_subtape_index = atomicAdd(&out.num_subtapes, 1);
+                out.subtapes.start[subtape_index] = 0;
+                out.subtapes.next[next_subtape_index] = subtape_index;
 
                 subtape_index = next_subtape_index;
                 s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
             }
-            tiles.subtapes.data[subtape_index][--s] = c;
+            out.subtapes.data[subtape_index][--s] = c;
         } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            --csg_choice;
+            --choices;
         }
     }
+
+}
+
+__device__
+void Renderable::buildSubtapes(const uint32_t offset)
+{
+    // This is a 1D kernel which consumes tiles and writes out their tapes
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // Reuse the registers array to track activeness
+    const uint32_t i = start + offset;
+    if (i >= tiles.num_active) {
+        return;
+    }
+    const uint32_t index = tiles.active(i);
+    const uint32_t j = index % LIBFIVE_CUDA_TILE_THREADS;
+
+    uint8_t* __restrict__ active = scratch + start * tape.num_regs;
+    for (uint32_t j=0; j < tape.num_regs; ++j) {
+        active[j] = false;
+    }
+
+    // Pick an offset CSG choices array, pointing to the last
+    // set of choices (we'll walk this back as we process the tape)
+    auto csg_choices = (this->csg_choices + index / LIBFIVE_CUDA_TILE_THREADS
+                                                  * tape.num_csg_choices)
+                        + tape.num_csg_choices;
+
+    // Mark the root of the tree as true
+    uint32_t t = tape.num_clauses;
+    active[tape[t - 1].out] = true;
+
+    // Claim a subtape to populate
+    uint32_t subtape_index = atomicAdd(&tiles.num_subtapes, 1);
+    assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
+
+    // Since we're reversing the tape, this is going to be the
+    // end of the linked list (i.e. next = 0)
+    tiles.subtapes.next[subtape_index] = 0;
+    uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+
+    // Walk from the root of the tape downwards
+    pushSubtape(t, j, &tape[0], active, csg_choices, subtape_index, s, tiles);
+
     // The last subtape may not be completely filled
     tiles.subtapes.start[subtape_index] = s;
 
