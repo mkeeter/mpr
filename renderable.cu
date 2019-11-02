@@ -270,6 +270,7 @@ void pushSubtape(uint32_t t, const uint32_t j,
                 }
             }
 
+            // Allocate a new subtape and begin writing to it
             if (s == 0) {
                 auto next_subtape_index = atomicAdd(&out.num_subtapes, 1);
                 out.subtapes.start[subtape_index] = 0;
@@ -283,7 +284,6 @@ void pushSubtape(uint32_t t, const uint32_t j,
             --choices;
         }
     }
-
 }
 
 __device__
@@ -345,12 +345,7 @@ __global__ void buildSubtapes(Renderable* r, const uint32_t offset) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__ void drawFilledTiles(Renderable* r, const uint32_t offset, Renderable::View v) {
-    r->drawFilledTiles(offset, v);
-}
-
-__device__ void Renderable::drawFilledTiles(const uint32_t offset, const View& v)
-{
+__global__ void drawFilledTiles(Renderable* r, const uint32_t offset) {
     // Each thread picks a block and fills in the whole thing
     assert(blockDim.y == 1);
     assert(blockDim.z == 1);
@@ -359,12 +354,14 @@ __device__ void Renderable::drawFilledTiles(const uint32_t offset, const View& v
 
     const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t i = start + offset;
-    if (i >= tiles.num_filled) {
-        return;
+    if (i < r->tiles.num_filled) {
+        const uint32_t tile = r->tiles.filled(i);
+        r->drawFilledTile(tile);
     }
+}
 
-    const uint32_t tile = tiles.filled(i);
-
+__device__ void Renderable::drawFilledTile(const uint32_t tile)
+{
     // Convert from tile position to pixels
     const uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
     const uint32_t py = (tile % TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX;
@@ -466,28 +463,15 @@ __device__ float walkF(const Tape& tape,
 #undef STORE_LOCAL_CLAUSES
 }
 
-__device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View& v)
+__device__ void Renderable::drawAmbiguousTile(
+        const uint32_t tile, const uint32_t subtape_index, const View& v)
 {
-    // We assume one thread per pixel in a tile
-    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
-    assert(blockDim.y == LIBFIVE_CUDA_TILE_SIZE_PX);
-    assert(gridDim.y == 1);
-    assert(gridDim.z == 1);
-
     const uint32_t dx = threadIdx.x;
     const uint32_t dy = threadIdx.y;
     const uint32_t q = dx + dy * LIBFIVE_CUDA_TILE_SIZE_PX;
 
     // Pick an index into the register array
     auto regs = regs_f + tape.num_regs * blockIdx.x;
-
-    // Pick an active tile from the list
-    const uint32_t i = offset + blockIdx.x;
-    if (i >= tiles.num_active) {
-        return;
-    }
-    const uint32_t tile = tiles.active(i);
-    const uint32_t subtape_index = tiles.head(i);
 
     // Convert from tile position to pixels
     uint32_t px = (tile / TILE_COUNT) * LIBFIVE_CUDA_TILE_SIZE_PX + dx;
@@ -515,7 +499,20 @@ __device__ void Renderable::drawAmbiguousTiles(const uint32_t offset, const View
 __global__ void drawAmbiguousTiles(Renderable* r, const uint32_t offset,
                                    Renderable::View v)
 {
-    r->drawAmbiguousTiles(offset, v);
+    // We assume one thread per pixel in a tile
+    assert(blockDim.x == LIBFIVE_CUDA_TILE_SIZE_PX);
+    assert(blockDim.y == LIBFIVE_CUDA_TILE_SIZE_PX);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    // Pick an active tile from the list
+    const uint32_t i = offset + blockIdx.x;
+    if (i < r->tiles.num_active) {
+        const uint32_t tile = r->tiles.active(i);
+        const uint32_t subtape_index = r->tiles.head(i);
+
+        r->drawAmbiguousTile(tile, subtape_index, v);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -553,7 +550,7 @@ void Renderable::run(const View& view)
         // so we assign each one to a separate stream.
         ::drawFilledTiles<<<LIBFIVE_CUDA_TILE_BLOCKS,
                             LIBFIVE_CUDA_TILE_THREADS,
-                            0, streams[1]>>>(this, i, view);
+                            0, streams[1]>>>(this, i);
         CHECK(cudaGetLastError());
     }
 
