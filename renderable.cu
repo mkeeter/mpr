@@ -459,23 +459,24 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__
-void SubtileRenderer::check(const uint32_t tile, const Tape& tape,
-                            uint32_t subtape_index, const Subtapes& subtapes,
+void SubtileRenderer::check(const uint32_t subtile,
+                            uint32_t subtape_index,
                             const View& v)
 {
     const uint32_t index = threadIdx.x + threadIdx.y * blockDim.x;
 
     auto regs = this->regs + tape.num_regs * blockIdx.x;
     {   // Prepopulate axis values
-        const float x = tile / tiles.per_side;
-        const float y = tile % tiles.per_side;
+        const float x = subtile / subtiles.per_side;
+        const float y = subtile % subtiles.per_side;
 
+        // TODO: put this into a separate function, since it's repeated
         Interval vs[3];
-        const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
+        const Interval X = {x / subtiles.per_side, (x + 1) / subtiles.per_side};
         vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
         vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
 
-        const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
+        const Interval Y = {y / subtiles.per_side, (y + 1) / subtiles.per_side};
         vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
         vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
 
@@ -490,24 +491,25 @@ void SubtileRenderer::check(const uint32_t tile, const Tape& tape,
     }
 
     // Unpack a 1D offset into the data arrays
-    auto csg_choices = choices + tile / LIBFIVE_CUDA_SUBTILES_PER_TILE
-                                      * tape.num_csg_choices;
+    auto csg_choices = choices + subtile / LIBFIVE_CUDA_SUBTILES_PER_TILE
+                                         * tape.num_csg_choices;
 
     // Run actual evaluation
-    uint32_t s = subtapes.start[subtape_index];
+    uint32_t s = tiles.subtapes.start[subtape_index];
     Interval result;
     while (true) {
         if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
-            const uint32_t next = subtapes.next[subtape_index];
+            const uint32_t next = tiles.subtapes.next[subtape_index];
             if (next) {
                 subtape_index = next;
-                s = subtapes.start[subtape_index];
+                s = tiles.subtapes.start[subtape_index];
             } else {
                 break;
             }
         }
         result = walkI(index,
-                       &subtapes.data[subtape_index][s], &tape.constant(0),
+                       &tiles.subtapes.data[subtape_index][s],
+                       &tape.constant(0),
                        LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s,
                        regs, csg_choices);
     }
@@ -515,12 +517,46 @@ void SubtileRenderer::check(const uint32_t tile, const Tape& tape,
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper < 0.0f) {
-        tiles.insert_filled(tile);
+        subtiles.insert_filled(subtile);
     }
 
     // If the tile is ambiguous, then record it as needing further refinement
     else if (result.lower <= 0.0f && result.upper >= 0.0f) {
-        tiles.insert_active(tile);
+        subtiles.insert_active(subtile);
+    }
+}
+
+__global__
+void SubtileRenderer_check(SubtileRenderer* r,
+                           const uint32_t offset,
+                           const View& v)
+{
+    // This should be a 2D kernel, with one thread per subtile
+    assert(blockDim.x == LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE);
+    assert(blockDim.y == LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE);
+    assert(blockDim.z == 1);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    const uint32_t i = blockIdx.x + offset;
+    if (i < r->tiles.num_active) {
+        // Pick out the next active tile
+        // (this will be the same for every thread in a block)
+        const uint32_t tile = r->tiles.active(i);
+        const uint32_t subtape_index = r->tiles.head(i);
+
+        // Convert from tile position to pixels
+        const uint32_t px = (tile / r->tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
+        const uint32_t py = (tile % r->tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
+
+        // Then convert from pixels into subtiles
+        const uint32_t tx = px / LIBFIVE_CUDA_SUBTILE_SIZE_PX + threadIdx.x;
+        const uint32_t ty = py / LIBFIVE_CUDA_SUBTILE_SIZE_PX + threadIdx.y;
+
+        // Finally, unconvert back into a single index
+        const uint32_t subtile = tx + ty * r->subtiles.per_side;
+
+        r->check(subtile, subtape_index, v);
     }
 }
 

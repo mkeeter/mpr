@@ -62,20 +62,22 @@ public:
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
     __device__ void check(
-            const uint32_t tile, const Tape& tape,
-            uint32_t subtape_index, const Subtapes& subtapes,
+            const uint32_t subtile,
+            uint32_t subtape_index,
             const View& v);
     __device__ uint32_t buildTape(
-            const uint32_t tile, const uint32_t subtape_index,
-            const Subtapes& subtapes);
+            const uint32_t tile, const uint32_t subtape_index);
     __device__ void drawFilled(const uint32_t tile);
 
-    Tiles tiles;
+    const Tape& tape;
+    Image& image;
+
+    const Tiles& tiles; // Reference to tiles generated in previous stage
+    Tiles subtiles;     // New tiles generated in this stage
 
 protected:
     IntervalRegisters* __restrict__ const regs;
     ChoiceArray* __restrict__ const choices;
-    uint8_t* __restrict__ const image;
 
     SubtileRenderer(const SubtileRenderer& other)=delete;
     SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
