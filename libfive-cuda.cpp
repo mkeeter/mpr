@@ -32,11 +32,11 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5)+ Y*Y) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
-    auto r = Renderable::build(t, 512);
+    auto r = Renderable::build(t, 2048);
     cudaDeviceSynchronize();
 
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 1; ++i) {
+    for (unsigned i=0; i < 10; ++i) {
         r->run({{0, 0}, 1});
         cudaDeviceSynchronize();
     }
