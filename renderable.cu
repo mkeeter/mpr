@@ -194,7 +194,7 @@ float walkF(const uint32_t index, const Tape& tape,
 template <typename ChoiceArray, typename ActiveArray>
 __device__
 void pushSubtape(const uint32_t index, const uint32_t tile_index,
-                 uint32_t num_clauses,
+                 const uint32_t num_clauses,
                  const Clause* __restrict__ const clause_ptr,
                  ActiveArray* __restrict__ const active,
                  ChoiceArray* __restrict__& choices,
@@ -202,9 +202,9 @@ void pushSubtape(const uint32_t index, const uint32_t tile_index,
                  Tiles& out)
 {
     // Walk from the root of the tape downwards
-    while (num_clauses--) {
+    for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
-        Clause c = clause_ptr[num_clauses];
+        Clause c = clause_ptr[num_clauses - i - 1];
         if (active[c.out][index]) {
             active[c.out][index] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
