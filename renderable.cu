@@ -18,7 +18,7 @@ Interval walkI(const uint32_t index,
     uint32_t choice_index = 0;
 
     // We copy a chunk of the tape from constant to shared memory
-    constexpr unsigned SHARED_CLAUSE_SIZE = 512;
+    constexpr unsigned SHARED_CLAUSE_SIZE = 256;
     __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
 
     for (uint32_t i=0; i < num_clauses; ++i) {

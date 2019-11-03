@@ -17,7 +17,7 @@
 
 /*  Rendering is done with this many blocks, and SUBTILES_PER_TILE threads
  *  (one per subtile in each tile) */
-#define LIBFIVE_CUDA_SUBTILE_BLOCKS 16
+#define LIBFIVE_CUDA_SUBTILE_BLOCKS 128
 
 /*  Refining subtile tapes is done with this many threads */
 #define LIBFIVE_CUDA_SUBTILE_THREADS 256
