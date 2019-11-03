@@ -54,10 +54,13 @@ protected:
 
 class SubtileRenderer {
 public:
+    SubtileRenderer(const Tape& tape, Image& image, const TileRenderer& prev);
+
     // These are blocks of data which should be indexed as
     //      i[threadIdx.x + threadIdx.y * LIBFIVE_CUDA_SUBTILE_PER_TILE_SIDE]
     using IntervalRegisters = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE];
     using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE];
+    using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILE_THREADS];
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
@@ -77,7 +80,11 @@ public:
 
 protected:
     IntervalRegisters* __restrict__ const regs;
+    ActiveArray* __restrict__ const active;
+
     ChoiceArray* __restrict__ const choices;
+
+    size_t num_passes() const;
 
     SubtileRenderer(const SubtileRenderer& other)=delete;
     SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
@@ -132,6 +139,7 @@ protected:
 
     cudaStream_t streams[2];
     TileRenderer tile_renderer;
+    SubtileRenderer subtile_renderer;
     PixelRenderer pixel_renderer;
 
     Renderable(const Renderable& other)=delete;

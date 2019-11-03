@@ -458,6 +458,24 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
+                                 const TileRenderer& prev)
+    : tape(tape), image(image), tiles(prev.tiles),
+      subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
+
+      regs(CUDA_MALLOC(IntervalRegisters, LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                          sizeof(Interval) * tape.num_regs)),
+      active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                      tape.num_regs)),
+      choices(tape.num_csg_choices ?
+              CUDA_MALLOC(ChoiceArray,
+                LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_csg_choices *
+                num_passes())
+              : nullptr)
+{
+    // Nothing to do here
+}
+
 __device__
 void SubtileRenderer::check(const uint32_t subtile,
                             uint32_t subtape_index,
@@ -466,7 +484,7 @@ void SubtileRenderer::check(const uint32_t subtile,
     const uint32_t index = threadIdx.x + threadIdx.y * blockDim.x;
 
     auto regs = this->regs + tape.num_regs * blockIdx.x;
-    {   // Prepopulate axis values
+       // Prepopulate axis values
         const float x = subtile / subtiles.per_side;
         const float y = subtile % subtiles.per_side;
 
@@ -488,30 +506,22 @@ void SubtileRenderer::check(const uint32_t subtile,
                 regs[tape.axes.reg[i]][index] = vs[i];
             }
         }
-    }
 
     // Unpack a 1D offset into the data arrays
     auto csg_choices = choices + subtile / LIBFIVE_CUDA_SUBTILES_PER_TILE
                                          * tape.num_csg_choices;
 
     // Run actual evaluation
-    uint32_t s = tiles.subtapes.start[subtape_index];
     Interval result;
-    while (true) {
-        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
-            const uint32_t next = tiles.subtapes.next[subtape_index];
-            if (next) {
-                subtape_index = next;
-                s = tiles.subtapes.start[subtape_index];
-            } else {
-                break;
-            }
-        }
+    while (subtape_index) {
+        const uint32_t s = tiles.subtapes.start[subtape_index];
         result = walkI(index,
                        &tiles.subtapes.data[subtape_index][s],
                        &tape.constant(0),
                        LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s,
                        regs, csg_choices);
+
+        subtape_index = tiles.subtapes.next[subtape_index];
     }
 
     // If this tile is unambiguously filled, then mark it at the end
@@ -529,7 +539,7 @@ void SubtileRenderer::check(const uint32_t subtile,
 __global__
 void SubtileRenderer_check(SubtileRenderer* r,
                            const uint32_t offset,
-                           const View& v)
+                           View v)
 {
     // This should be a 2D kernel, with one thread per subtile
     assert(blockDim.x == LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE);
@@ -554,9 +564,51 @@ void SubtileRenderer_check(SubtileRenderer* r,
         const uint32_t ty = py / LIBFIVE_CUDA_SUBTILE_SIZE_PX + threadIdx.y;
 
         // Finally, unconvert back into a single index
-        const uint32_t subtile = tx + ty * r->subtiles.per_side;
+        const uint32_t subtile = ty + tx * r->subtiles.per_side;
 
         r->check(subtile, subtape_index, v);
+    }
+}
+
+size_t SubtileRenderer::num_passes() const {
+    // ????
+    const auto denom = LIBFIVE_CUDA_SUBTILES_PER_TILE * LIBFIVE_CUDA_SUBTILE_BLOCKS;
+    return (subtiles.total + denom - 1) / denom;
+}
+
+__device__ void SubtileRenderer::drawFilled(const uint32_t tile)
+{
+    static_assert(LIBFIVE_CUDA_TILE_SIZE_PX >= 8, "Tiles are too small");
+    static_assert(LIBFIVE_CUDA_TILE_SIZE_PX % 8 == 0, "Invalid tile size");
+
+    // Convert from tile position to pixels
+    const uint32_t px = (tile / subtiles.per_side) * LIBFIVE_CUDA_SUBTILE_SIZE_PX;
+    const uint32_t py = (tile % subtiles.per_side) * LIBFIVE_CUDA_SUBTILE_SIZE_PX;
+
+    uint2* pix = reinterpret_cast<uint2*>(&image[px + py * image.size_px]);
+    const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
+    for (unsigned y=0; y < LIBFIVE_CUDA_SUBTILE_SIZE_PX; y++) {
+        for (unsigned x=0; x < LIBFIVE_CUDA_SUBTILE_SIZE_PX; x += 8) {
+            *pix = fill;
+            pix++;
+        }
+        pix += (image.size_px - LIBFIVE_CUDA_SUBTILE_SIZE_PX) / 8;
+    }
+}
+
+__global__ void SubtileRenderer_drawFilled(SubtileRenderer* r, const uint32_t offset)
+{
+    // Each thread picks a block and fills in the whole thing
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint32_t i = start + offset;
+    if (i < r->subtiles.num_filled) {
+        const uint32_t tile = r->subtiles.filled(i);
+        r->drawFilled(tile);
     }
 }
 
@@ -652,6 +704,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       tape(std::move(Tape::build(tree))),
 
       tile_renderer(tape, image),
+      subtile_renderer(tape, image, tile_renderer),
       pixel_renderer(tape, image)
 {
     CHECK(cudaStreamCreate(&streams[0]));
@@ -666,8 +719,9 @@ void Renderable::run(const View& view)
     // that has been loaned to the GPU and not synchronized.
     TileRenderer* tile_renderer = &this->tile_renderer;
     const uint32_t total_tiles = tile_renderer->tiles.total;
-    const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
-                            LIBFIVE_CUDA_TILE_BLOCKS;
+    const uint32_t tile_stride = LIBFIVE_CUDA_TILE_THREADS *
+                                 LIBFIVE_CUDA_TILE_BLOCKS;
+    SubtileRenderer* subtile_renderer = &this->subtile_renderer;
     PixelRenderer* pixel_renderer = &this->pixel_renderer;
 
     // Reset everything in preparation for a render
@@ -677,7 +731,7 @@ void Renderable::run(const View& view)
     tape.sendToConstantMemory((const char*)const_buffer);
 
     // Do per-tile evaluation to get filled / ambiguous tiles
-    for (unsigned i=0; i < total_tiles; i += stride) {
+    for (unsigned i=0; i < total_tiles; i += tile_stride) {
         TileRenderer_check<<<LIBFIVE_CUDA_TILE_BLOCKS,
                              LIBFIVE_CUDA_TILE_THREADS,
                              0, streams[0]>>>(tile_renderer, i, view);
@@ -689,7 +743,7 @@ void Renderable::run(const View& view)
     const uint32_t filled_tiles = tile_renderer->tiles.num_filled;
     const uint32_t active_tiles = tile_renderer->tiles.num_active;
 
-    for (unsigned i=0; i < filled_tiles; i += stride) {
+    for (unsigned i=0; i < filled_tiles; i += tile_stride) {
         // Drawing filled and ambiguous tiles can happen simultaneously,
         // so we assign each one to a separate stream.
         TileRenderer_drawFilled<<<LIBFIVE_CUDA_TILE_BLOCKS,
@@ -697,15 +751,39 @@ void Renderable::run(const View& view)
                                   0, streams[1]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
+    cudaDeviceSynchronize() ;// DEBUG SYNC
 
     // Build subtapes in memory for ambiguous tiles
-    for (unsigned i=0; i < active_tiles; i += stride) {
+    for (unsigned i=0; i < active_tiles; i += tile_stride) {
         TileRenderer_buildTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
                                  LIBFIVE_CUDA_TILE_THREADS,
                                  0, streams[0]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
+    cudaDeviceSynchronize(); // DEBUG SYNC
 
+    // Refine ambiguous tiles from their subtapes
+    for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_SUBTILE_BLOCKS) {
+        SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
+            dim3(LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE,
+                 LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE),
+            0, streams[0]>>>(
+                    subtile_renderer, i, view);
+    }
+    cudaDeviceSynchronize(); // DEBUG SYNC
+
+    const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
+    const uint32_t subtile_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                    LIBFIVE_CUDA_SUBTILE_THREADS;
+    for (unsigned i=0; i < filled_subtiles; i += subtile_stride) {
+        SubtileRenderer_drawFilled<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                                     LIBFIVE_CUDA_SUBTILE_THREADS>>>(
+            subtile_renderer, i);
+        CHECK(cudaGetLastError());
+    }
+    cudaDeviceSynchronize(); // DEBUG SYNC
+
+#if 0
     // Do pixel-by-pixel rendering for ambiguous tiles
     for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_RENDER_BLOCKS) {
         const dim3 T(LIBFIVE_CUDA_SUBTILE_SIZE_PX, LIBFIVE_CUDA_SUBTILE_SIZE_PX);
@@ -714,4 +792,5 @@ void Renderable::run(const View& view)
             pixel_renderer, tile_renderer->tiles, i, view);
         CHECK(cudaGetLastError());
     }
+#endif
 }
