@@ -6,7 +6,7 @@ __constant__ static uint64_t const_buffer[0x2000];
 
 template <typename IntervalRegisters, typename ChoiceArray>
 __device__
-Interval walkI(
+Interval walkI(const uint32_t index,
         const Clause* __restrict__ clause_ptr,
         const float* __restrict__ constant_ptr,
         const uint32_t num_clauses,
@@ -17,17 +17,18 @@ Interval walkI(
 
     uint32_t choice_index = 0;
 
-    // We copy a chunk of the tape from constant to shared memory, with
-    // each thread moving two Clause in a SIMD operation.
-    constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS * 2;
+    // We copy a chunk of the tape from constant to shared memory
+    constexpr unsigned SHARED_CLAUSE_SIZE = 512;
     __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
 
     for (uint32_t i=0; i < num_clauses; ++i) {
         if ((i % SHARED_CLAUSE_SIZE) == 0) {
-            const uint32_t j = threadIdx.x * 2;
+            const uint32_t stride = blockDim.x * blockDim.y;
             __syncthreads();
-            *reinterpret_cast<uint4*>(&clauses[j]) =
-                *reinterpret_cast<const uint4*>(&clause_ptr[i + j]);
+            for (unsigned q=index; q < SHARED_CLAUSE_SIZE &&
+                                   i + q < num_clauses; q += stride) {
+                clauses[q] = clause_ptr[i + q];
+            }
             __syncthreads();
         }
 
@@ -40,7 +41,7 @@ Interval walkI(
             lhs.lower = f;
             lhs.upper = f;
         } else {
-            lhs = regs[c.lhs][threadIdx.x];
+            lhs = regs[c.lhs][index];
         }
 
         Interval rhs;
@@ -50,7 +51,7 @@ Interval walkI(
                 rhs.lower = f;
                 rhs.upper = f;
             } else {
-                rhs = regs[c.rhs][threadIdx.x];
+                rhs = regs[c.rhs][index];
             }
         }
 
@@ -65,25 +66,25 @@ Interval walkI(
             case OP_MUL: out = lhs * rhs; break;
             case OP_DIV: out = lhs / rhs; break;
             case OP_MIN: if (lhs.upper < rhs.lower) {
-                             choices[choice_index][threadIdx.x] = 1;
+                             choices[choice_index][index] = 1;
                              out = lhs;
                          } else if (rhs.upper < lhs.lower) {
-                             choices[choice_index][threadIdx.x] = 2;
+                             choices[choice_index][index] = 2;
                              out = rhs;
                          } else {
-                             choices[choice_index][threadIdx.x] = 0;
+                             choices[choice_index][index] = 0;
                              out = lhs.min(rhs);
                          }
                          choice_index++;
                          break;
             case OP_MAX: if (lhs.lower > rhs.upper) {
-                             choices[choice_index][threadIdx.x] = 1;
+                             choices[choice_index][index] = 1;
                              out = lhs;
                          } else if (rhs.lower > lhs.upper) {
-                             choices[choice_index][threadIdx.x] = 2;
+                             choices[choice_index][index] = 2;
                              out = rhs;
                          } else {
-                             choices[choice_index][threadIdx.x] = 0;
+                             choices[choice_index][index] = 0;
                              out = lhs.max(rhs);
                          }
                          choice_index++;
@@ -94,11 +95,11 @@ Interval walkI(
             default: break;
         }
 
-        regs[c.out][threadIdx.x] = out;
+        regs[c.out][index] = out;
     }
     // Copy output to standard register before exiting
     const Clause c = clause_ptr[num_clauses - 1];
-    return regs[c.out][threadIdx.x];
+    return regs[c.out][index];
 #undef STORE_LOCAL_CLAUSES
 }
 
@@ -266,6 +267,7 @@ void pushSubtape(const uint32_t index, const uint32_t tile_index,
         }
     }
 }
+
 ////////////////////////////////////////////////////////////////////////////////
 
 TileRenderer::TileRenderer(const Tape& tape, Image& image)
@@ -299,6 +301,8 @@ size_t TileRenderer::num_passes() const {
 __device__
 void TileRenderer::check(const uint32_t tile, const View& v)
 {
+    const uint32_t index = threadIdx.x;
+
     auto regs = this->regs + tape.num_regs * blockIdx.x;
     {   // Prepopulate axis values
         const float x = tile / tiles.per_side;
@@ -318,7 +322,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
 
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
-                regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
+                regs[tape.axes.reg[i]][index] = vs[i];
             }
         }
     }
@@ -328,7 +332,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
                                       * tape.num_csg_choices;
 
     // Run actual evaluation
-    const Interval result = walkI(&tape[0], &tape.constant(0),
+    const Interval result = walkI(index, &tape[0], &tape.constant(0),
                                   tape.num_clauses, regs, csg_choices);
 
     // If this tile is unambiguously filled, then mark it at the end
