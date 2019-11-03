@@ -1,34 +1,115 @@
 #pragma once
 #include <cuda_runtime.h>
 #include <libfive/tree/tree.hpp>
-#include "tape.hpp"
-#include "parameters.hpp"
-#include "check.hpp"
 
-struct Interval;
+#include "check.hpp"
+#include "clause.hpp"
+#include "gpu_interval.hpp"
+#include "image.hpp"
+#include "parameters.hpp"
+#include "subtapes.hpp"
+#include "tape.hpp"
+#include "tiles.hpp"
+#include "view.hpp"
+
+class TileRenderer {
+public:
+    TileRenderer(const Tape& tape, Image& image);
+    ~TileRenderer();
+
+    // These are blocks of data which should be indexed as i[threadIdx.x]
+    using IntervalRegisters = Interval[LIBFIVE_CUDA_TILE_THREADS];
+    using ChoiceArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
+    using ActiveArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
+
+    // Evaluates the given tile.
+    //      Filled -> Pushes it to the list of filed tiles
+    //      Ambiguous -> Pushes it to the list of active tiles
+    //      Empty -> Does nothing
+    __device__ void check(const uint32_t tile, const View& v);
+
+    // Builds a subtape for the given (active) tile, returning the head
+    __device__ uint32_t buildTape(const uint32_t tile);
+
+    // Fills in the given (filled) tile in the image
+    __device__ void drawFilled(const uint32_t tile);
+
+    const Tape& tape;
+    Image& image;
+
+    Tiles tiles;
+
+protected:
+    IntervalRegisters* __restrict__ const regs;
+    ActiveArray* __restrict__ const active;
+    ChoiceArray* __restrict__ const choices;
+
+    size_t num_passes() const;
+
+    TileRenderer(const TileRenderer& other)=delete;
+    TileRenderer& operator=(const TileRenderer& other)=delete;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class SubtileRenderer {
+public:
+    // These are blocks of data which should be indexed as
+    //      i[threadIdx.x + threadIdx.y * LIBFIVE_CUDA_SUBTILE_PER_TILE_SIDE]
+    using IntervalRegisters = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE];
+    using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE];
+
+    // Same functions as in TileRenderer, but these take a subtape because
+    // they're refining a tile into subtiles
+    __device__ void check(
+            const uint32_t tile, const Tape& tape,
+            const uint32_t subtape_index, const Subtapes& subtapes,
+            const View& v);
+    __device__ uint32_t buildTape(
+            const uint32_t tile, const uint32_t subtape_index,
+            const Subtapes& subtapes);
+    __device__ void drawFilled(const uint32_t tile);
+
+protected:
+    IntervalRegisters* __restrict__ const regs;
+    ChoiceArray* __restrict__ const choices;
+    uint8_t* __restrict__ const image;
+
+    SubtileRenderer(const SubtileRenderer& other)=delete;
+    SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class PixelRenderer {
+public:
+    PixelRenderer(const Tape& tape, Image& image);
+
+    using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE];
+
+    // Draws the given tile, starting from the given subtape
+    __device__ void draw(
+            const uint32_t tile, const uint32_t total_tiles,
+            const Subtapes& subtapes, const uint32_t subtape_index,
+            const View& v);
+
+protected:
+    const Tape& tape;
+    Image& image;
+
+    FloatRegisters* __restrict__ const regs;
+
+    PixelRenderer(const PixelRenderer& other)=delete;
+    PixelRenderer& operator=(const PixelRenderer& other)=delete;
+};
+
+////////////////////////////////////////////////////////////////////////////////
 
 class Renderable {
 public:
     class Deleter {
     public:
         void operator()(Renderable* r);
-    };
-
-    struct View {
-        float center[2];
-        float scale;
-    };
-
-    struct Subtapes {
-        /*  Each subtape is an array of LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE clauses.
-         *
-         *  subtape.data[i]'s valid clauses go from start[i] to the end of the
-         *  array; if it's not full, the beginning is invalid (which is weird,
-         *  but makes sense if you know how we're constructing subtapes). */
-        uint32_t start[LIBFIVE_CUDA_NUM_SUBTAPES];
-        uint32_t next[LIBFIVE_CUDA_NUM_SUBTAPES];
-        Clause   data[LIBFIVE_CUDA_NUM_SUBTAPES]
-                     [LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
     };
 
     using Handle = std::unique_ptr<Renderable, Deleter>;
@@ -38,88 +119,16 @@ public:
     ~Renderable();
     void run(const View& v);
 
+    Image image;
+
+protected:
+    Renderable(libfive::Tree tree, uint32_t image_size_px);
+
     Tape tape;
 
-    // Render parameters
-    const uint32_t IMAGE_SIZE_PX;
-    const uint32_t TILE_COUNT;
-    const uint32_t TOTAL_TILES;
-
-    // This is a block of data which should be indexed as i[threadIdx.x]
-    using IntervalRegisters = Interval[LIBFIVE_CUDA_TILE_THREADS];
-    using FloatRegisters = float[LIBFIVE_CUDA_TILE_SIZE_PX *
-                                 LIBFIVE_CUDA_TILE_SIZE_PX];
-    using ChoiceArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
-
-    // regs_i and regs_f are both stored in scratch, to reduce
-    // total memory usage (since we're only using one or the other)
-    uint8_t* const scratch;
-    IntervalRegisters* __restrict__ const regs_i;
-    FloatRegisters* __restrict__ const regs_f;
-
-    ChoiceArray* __restrict__ const csg_choices;
-
-    struct Tiles {
-        Tiles(uint32_t count)
-            : data(CUDA_MALLOC(uint32_t, 2 * count)), size(2 * count)
-        {
-            reset();
-        }
-
-        ~Tiles() {
-            CHECK(cudaFree(data));
-        }
-
-        __host__ __device__ uint32_t filled(uint32_t i) const
-            { return data[size - i - 1]; }
-        __host__ __device__ uint32_t active(uint32_t i) const
-            { return data[i * 2]; }
-        __host__ __device__ uint32_t head(uint32_t i) const
-            { return data[i * 2 + 1]; }
-
-        __host__ __device__ uint32_t& filled(uint32_t i)
-            { return data[size - i - 1]; }
-        __host__ __device__ uint32_t& active(uint32_t i)
-            { return data[i * 2]; }
-        __host__ __device__ uint32_t& head(uint32_t i)
-            { return data[i * 2 + 1]; }
-
-        __device__ void insert_filled(uint32_t index);
-        __device__ void insert_active(uint32_t index);
-
-        void reset() {
-            num_active = 0;
-            num_filled = 0;
-            num_subtapes = 1;
-        }
-
-        uint32_t num_active;
-        uint32_t num_filled;
-
-        Subtapes subtapes;
-        uint32_t num_subtapes;
-    protected:
-        uint32_t* __restrict__ const data;
-        const uint32_t size;
-    };
-
-    Tiles tiles;
-
-    uint8_t* __restrict__ const image;
-
-    __device__ void processTiles(const uint32_t offset, const View& v);
-    __device__ void drawFilledTile(const uint32_t tile);
-    __device__ void drawAmbiguousTile(const uint32_t tile,
-                                      const uint32_t subtape_index,
-                                      const View& v);
-    __device__ void buildSubtapes(const uint32_t offset);
-
     cudaStream_t streams[2];
-protected:
-    static size_t floatRegSize(uint16_t num_regs);
-    static size_t intervalRegSize(uint16_t num_regs);
-
-    Renderable(libfive::Tree tree, uint32_t image_size_px);
+    TileRenderer tile_renderer;
+    PixelRenderer pixel_renderer;
 
     Renderable(const Renderable& other)=delete;
     Renderable& operator=(const Renderable& other)=delete;

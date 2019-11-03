@@ -32,11 +32,11 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5)+ Y*Y) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
-    auto r = Renderable::build(t, 2048);
+    auto r = Renderable::build(t, 512);
     cudaDeviceSynchronize();
 
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 10; ++i) {
+    for (unsigned i=0; i < 1; ++i) {
         r->run({{0, 0}, 1});
         cudaDeviceSynchronize();
     }
@@ -46,18 +46,18 @@ int main(int argc, char **argv)
         " ms\n";
 
     // Save the image using libfive::Heightmap
-    libfive::Heightmap out(r->IMAGE_SIZE_PX, r->IMAGE_SIZE_PX);
-    for (unsigned x=0; x < r->IMAGE_SIZE_PX; ++x) {
-        for (unsigned y=0; y < r->IMAGE_SIZE_PX; ++y) {
-            out.depth(y, x) = r->image[x + y * r->IMAGE_SIZE_PX] << 16;
+    libfive::Heightmap out(r->image.size_px, r->image.size_px);
+    for (unsigned x=0; x < r->image.size_px; ++x) {
+        for (unsigned y=0; y < r->image.size_px; ++y) {
+            out.depth(y, x) = r->image[x + y * r->image.size_px] << 16;
         }
     }
     out.savePNG("out_gpu.png");
 
-    if (r->IMAGE_SIZE_PX == 256) {
-        for (unsigned i=0; i < r->IMAGE_SIZE_PX; ++i) {
-            for (unsigned j=0; j < r->IMAGE_SIZE_PX; ++j) {
-                switch (r->image[i * r->IMAGE_SIZE_PX + j]) {
+    if (r->image.size_px == 256) {
+        for (unsigned i=0; i < r->image.size_px; ++i) {
+            for (unsigned j=0; j < r->image.size_px; ++j) {
+                switch (r->image[i * r->image.size_px + j]) {
                     case 0:     printf(" "); break;
                     case 0xF0:  printf("."); break;
                     default:    printf("X"); break;
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
     }
 
     std::atomic_bool abort(false);
-    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->IMAGE_SIZE_PX / 2);
+    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->image.size_px / 2);
     auto start_cpu = std::chrono::steady_clock::now();
     for (unsigned i=0; i < 10; ++i) {
         auto h = libfive::Heightmap::render(t, vox, abort);

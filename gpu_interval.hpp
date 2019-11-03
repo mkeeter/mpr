@@ -6,6 +6,7 @@ struct Interval {
     float lower;
     float upper;
 
+#ifdef __CUDACC__
     __device__ inline Interval operator+(const Interval& other) {
         return {__fadd_rd(lower, other.lower), __fadd_ru(upper, other.upper)};
     }
@@ -138,5 +139,7 @@ struct Interval {
     __device__ inline Interval operator-() const {
         return {-upper, -lower};
     }
+#endif
+
 };
 
