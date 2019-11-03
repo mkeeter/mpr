@@ -49,7 +49,7 @@ int main(int argc, char **argv)
     libfive::Heightmap out(r->image.size_px, r->image.size_px);
     for (unsigned x=0; x < r->image.size_px; ++x) {
         for (unsigned y=0; y < r->image.size_px; ++y) {
-            out.depth(y, x) = r->image[x + y * r->image.size_px] << 16;
+            out.depth(y, x) = r->image(x, y) << 16;
         }
     }
     out.savePNG("out_gpu.png");
