@@ -215,6 +215,10 @@ void pushSubtape(const uint32_t index, const uint32_t tile_index,
                             continue;
                         }
                         c.rhs = c.lhs;
+                        c.banks = 0;
+                    } else {
+                        c.rhs = c.lhs;
+                        c.banks = 3;
                     }
                 } else if (choice == 2) {
                     if (!(c.banks & 2)) {
@@ -223,6 +227,10 @@ void pushSubtape(const uint32_t index, const uint32_t tile_index,
                             continue;
                         }
                         c.lhs = c.rhs;
+                        c.banks = 0;
+                    } else {
+                        c.lhs = c.rhs;
+                        c.banks = 3;
                     }
                 } else if (choice == 0) {
                     if (!(c.banks & 1)) {
