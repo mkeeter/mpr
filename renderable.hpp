@@ -63,12 +63,14 @@ public:
     // they're refining a tile into subtiles
     __device__ void check(
             const uint32_t tile, const Tape& tape,
-            const uint32_t subtape_index, const Subtapes& subtapes,
+            uint32_t subtape_index, const Subtapes& subtapes,
             const View& v);
     __device__ uint32_t buildTape(
             const uint32_t tile, const uint32_t subtape_index,
             const Subtapes& subtapes);
     __device__ void drawFilled(const uint32_t tile);
+
+    Tiles tiles;
 
 protected:
     IntervalRegisters* __restrict__ const regs;

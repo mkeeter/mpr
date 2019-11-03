@@ -458,6 +458,74 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
 
 ////////////////////////////////////////////////////////////////////////////////
 
+__device__
+void SubtileRenderer::check(const uint32_t tile, const Tape& tape,
+                            uint32_t subtape_index, const Subtapes& subtapes,
+                            const View& v)
+{
+    const uint32_t index = threadIdx.x + threadIdx.y * blockDim.x;
+
+    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    {   // Prepopulate axis values
+        const float x = tile / tiles.per_side;
+        const float y = tile % tiles.per_side;
+
+        Interval vs[3];
+        const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
+        vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
+        vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+
+        const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
+        vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
+        vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
+
+        vs[2].lower = 0.0f;
+        vs[2].upper = 0.0f;
+
+        for (unsigned i=0; i < 3; ++i) {
+            if (tape.axes.reg[i] != UINT16_MAX) {
+                regs[tape.axes.reg[i]][index] = vs[i];
+            }
+        }
+    }
+
+    // Unpack a 1D offset into the data arrays
+    auto csg_choices = choices + tile / LIBFIVE_CUDA_SUBTILES_PER_TILE
+                                      * tape.num_csg_choices;
+
+    // Run actual evaluation
+    uint32_t s = subtapes.start[subtape_index];
+    Interval result;
+    while (true) {
+        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+            const uint32_t next = subtapes.next[subtape_index];
+            if (next) {
+                subtape_index = next;
+                s = subtapes.start[subtape_index];
+            } else {
+                break;
+            }
+        }
+        result = walkI(index,
+                       &subtapes.data[subtape_index][s], &tape.constant(0),
+                       LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s,
+                       regs, csg_choices);
+    }
+
+    // If this tile is unambiguously filled, then mark it at the end
+    // of the tiles list
+    if (result.upper < 0.0f) {
+        tiles.insert_filled(tile);
+    }
+
+    // If the tile is ambiguous, then record it as needing further refinement
+    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        tiles.insert_active(tile);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 PixelRenderer::PixelRenderer(const Tape& tape, Image& image)
     : tape(tape), image(image),
       regs(CUDA_MALLOC(FloatRegisters,
