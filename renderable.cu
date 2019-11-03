@@ -430,7 +430,7 @@ __device__ void TileRenderer::drawFilled(const uint32_t tile)
     const uint32_t py = (tile % tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
 
     uint4* pix = reinterpret_cast<uint4*>(&image[px + py * image.size_px]);
-    const uint4 fill = make_uint4(0xD0D0D0D0, 0xD0D0D0D0, 0xD0D0D0D0, 0xD0D0D0D0);
+    const uint4 fill = make_uint4(0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0);
     for (unsigned y=0; y < LIBFIVE_CUDA_TILE_SIZE_PX; y++) {
         for (unsigned x=0; x < LIBFIVE_CUDA_TILE_SIZE_PX; x += 16) {
             *pix = fill;
@@ -751,16 +751,14 @@ void Renderable::run(const View& view)
                                   0, streams[1]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize() ;// DEBUG SYNC
 
     // Build subtapes in memory for ambiguous tiles
     for (unsigned i=0; i < active_tiles; i += tile_stride) {
         TileRenderer_buildTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                                 LIBFIVE_CUDA_TILE_THREADS,
+                                 32,
                                  0, streams[0]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize(); // DEBUG SYNC
 
     // Refine ambiguous tiles from their subtapes
     for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_SUBTILE_BLOCKS) {
@@ -770,18 +768,18 @@ void Renderable::run(const View& view)
             0, streams[0]>>>(
                     subtile_renderer, i, view);
     }
-    cudaDeviceSynchronize(); // DEBUG SYNC
+    CHECK(cudaStreamSynchronize(streams[0]));
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
     const uint32_t subtile_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                     LIBFIVE_CUDA_SUBTILE_THREADS;
     for (unsigned i=0; i < filled_subtiles; i += subtile_stride) {
         SubtileRenderer_drawFilled<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-                                     LIBFIVE_CUDA_SUBTILE_THREADS>>>(
+                                     LIBFIVE_CUDA_SUBTILE_THREADS,
+                                     0, streams[0]>>>(
             subtile_renderer, i);
         CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize(); // DEBUG SYNC
 
 #if 0
     // Do pixel-by-pixel rendering for ambiguous tiles
