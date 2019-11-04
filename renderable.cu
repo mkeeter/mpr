@@ -4,6 +4,37 @@ __constant__ static uint64_t const_buffer[0x2000];
 
 ////////////////////////////////////////////////////////////////////////////////
 
+template <typename IntervalRegisters>
+__device__ void storeAxes(const uint32_t index, const uint32_t tile,
+                          const View& v, const Tiles& tiles, const Tape& tape,
+                          IntervalRegisters* const __restrict__ regs)
+{
+   // Prepopulate axis values
+    const float x = tile / tiles.per_side;
+    const float y = tile % tiles.per_side;
+
+    // TODO: put this into a separate function, since it's repeated
+    Interval vs[3];
+    const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
+    vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
+    vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+
+    const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
+    vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
+    vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
+
+    vs[2].lower = 0.0f;
+    vs[2].upper = 0.0f;
+
+    for (unsigned i=0; i < 3; ++i) {
+        if (tape.axes.reg[i] != UINT16_MAX) {
+            regs[tape.axes.reg[i]][index] = vs[i];
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 template <typename IntervalRegisters, typename ChoiceArray>
 __device__
 Interval walkI(const uint32_t index,
@@ -304,28 +335,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
     const uint32_t index = threadIdx.x;
 
     auto regs = this->regs + tape.num_regs * blockIdx.x;
-    {   // Prepopulate axis values
-        const float x = tile / tiles.per_side;
-        const float y = tile % tiles.per_side;
-
-        Interval vs[3];
-        const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
-        vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
-        vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
-
-        const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
-        vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
-        vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
-
-        vs[2].lower = 0.0f;
-        vs[2].upper = 0.0f;
-
-        for (unsigned i=0; i < 3; ++i) {
-            if (tape.axes.reg[i] != UINT16_MAX) {
-                regs[tape.axes.reg[i]][index] = vs[i];
-            }
-        }
-    }
+    storeAxes(index, tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
     auto csg_choices = choices + tile / LIBFIVE_CUDA_TILE_THREADS
@@ -484,28 +494,7 @@ void SubtileRenderer::check(const uint32_t subtile,
     const uint32_t index = threadIdx.x + threadIdx.y * blockDim.x;
 
     auto regs = this->regs + tape.num_regs * blockIdx.x;
-       // Prepopulate axis values
-        const float x = subtile / subtiles.per_side;
-        const float y = subtile % subtiles.per_side;
-
-        // TODO: put this into a separate function, since it's repeated
-        Interval vs[3];
-        const Interval X = {x / subtiles.per_side, (x + 1) / subtiles.per_side};
-        vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
-        vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
-
-        const Interval Y = {y / subtiles.per_side, (y + 1) / subtiles.per_side};
-        vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
-        vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
-
-        vs[2].lower = 0.0f;
-        vs[2].upper = 0.0f;
-
-        for (unsigned i=0; i < 3; ++i) {
-            if (tape.axes.reg[i] != UINT16_MAX) {
-                regs[tape.axes.reg[i]][index] = vs[i];
-            }
-        }
+    storeAxes(index, subtile, v, subtiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
     auto csg_choices = choices + subtile / LIBFIVE_CUDA_SUBTILES_PER_TILE
