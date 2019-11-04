@@ -416,7 +416,7 @@ __global__ void TileRenderer_buildTape(TileRenderer* r, const uint32_t offset)
         const uint32_t tile = r->tiles.active(i);
 
         // Store the linked list of subtapes into the active tiles list
-        r->tiles.head(i) = r->buildTape(tile);
+        r->tiles.head(tile) = r->buildTape(tile);
     }
 }
 
@@ -553,7 +553,7 @@ void SubtileRenderer_check(SubtileRenderer* r,
         // Pick out the next active tile
         // (this will be the same for every thread in a block)
         const uint32_t tile = r->tiles.active(i);
-        const uint32_t subtape_index = r->tiles.head(i);
+        const uint32_t subtape_index = r->tiles.head(tile);
 
         // Convert from tile position to pixels
         const uint32_t px = (tile / r->tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
@@ -671,7 +671,7 @@ __global__ void PixelRenderer_draw(PixelRenderer* r,
     const uint32_t i = offset + blockIdx.x;
     if (i < tiles.num_active) {
         const uint32_t tile = tiles.active(i);
-        const uint32_t subtape_index = tiles.head(i);
+        const uint32_t subtape_index = tiles.head(tile);
 
         r->draw(tile, tiles.per_side, tiles.subtapes, subtape_index, v);
     }
@@ -726,6 +726,7 @@ void Renderable::run(const View& view)
 
     // Reset everything in preparation for a render
     tile_renderer->tiles.reset();
+    subtile_renderer->subtiles.reset();
     cudaMemset(image.data, 0, image.size_px * image.size_px);
 
     tape.sendToConstantMemory((const char*)const_buffer);

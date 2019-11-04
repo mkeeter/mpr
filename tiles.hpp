@@ -14,25 +14,25 @@ struct Tiles {
     }
 
     __host__ __device__ uint32_t filled(uint32_t i) const
-        { return data[total * 2 - i - 1]; }
+        { return data[total - i - 1]; }
     __host__ __device__ uint32_t active(uint32_t i) const
-        { return data[i * 2]; }
-    __host__ __device__ uint32_t head(uint32_t i) const
-        { return data[i * 2 + 1]; }
+        { return data[i]; }
+    __host__ __device__ uint32_t head(uint32_t t) const
+        { return data[total + t]; }
 
     __host__ __device__ uint32_t& filled(uint32_t i)
-        { return data[total * 2 - i - 1]; }
+        { return data[total - i - 1]; }
     __host__ __device__ uint32_t& active(uint32_t i)
-        { return data[i * 2]; }
-    __host__ __device__ uint32_t& head(uint32_t i)
-        { return data[i * 2 + 1]; }
+        { return data[i]; }
+    __host__ __device__ uint32_t& head(uint32_t t)
+        { return data[total + t]; }
 
 #ifdef __CUDACC__
-    __device__ void insert_filled(uint32_t index) {
-        filled(atomicAdd(&num_filled, 1)) = index;
+    __device__ void insert_filled(uint32_t t) {
+        filled(atomicAdd(&num_filled, 1)) = t;
     }
-    __device__ void insert_active(uint32_t index) {
-        active(atomicAdd(&num_active, 1)) = index;
+    __device__ void insert_active(uint32_t t) {
+        active(atomicAdd(&num_active, 1)) = t;
     }
 #endif
 
