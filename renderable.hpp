@@ -60,6 +60,7 @@ public:
     //      i[threadIdx.x + threadIdx.y * LIBFIVE_CUDA_SUBTILE_PER_TILE_SIDE]
     using IntervalRegisters = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE];
     using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE];
+
     using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILE_THREADS];
 
     // Same functions as in TileRenderer, but these take a subtape because

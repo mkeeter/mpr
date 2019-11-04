@@ -612,9 +612,8 @@ __device__ uint32_t SubtileRenderer::buildTape(const uint32_t subtile,
         active[r][index] = false;
     }
 
-    // Pick an offset CSG choices array, pointing to the last
-    // set of choices (we'll walk this back as we process the tape)
-    auto choices = (this->choices + subtile / LIBFIVE_CUDA_SUBTILE_THREADS
+    // Pick the CSG choice array corresponding to this particular subtile
+    auto choices = (this->choices + subtile / LIBFIVE_CUDA_SUBTILES_PER_TILE
                                             * tape.num_csg_choices)
                     + tape.num_csg_choices;
 
@@ -633,9 +632,9 @@ __device__ uint32_t SubtileRenderer::buildTape(const uint32_t subtile,
     // Walk from the root of the tape downwards
     while (in_subtape_index) {
         const uint32_t t = tiles.subtapes.start[subtape_index];
-        pushSubtape(index, subtile % LIBFIVE_CUDA_TILE_THREADS,
+        pushSubtape(index, subtile % LIBFIVE_CUDA_SUBTILES_PER_TILE,
                     LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - t,
-                    &tiles.subtapes.data[subtape_index][t],
+                    &tiles.subtapes.data[in_subtape_index][t],
                     active, choices,
                     subtape_index, s, subtiles);
 
