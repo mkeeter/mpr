@@ -59,9 +59,6 @@ public:
     // These are blocks of data which should be indexed as
     //      i[threadIdx.x + threadIdx.y * LIBFIVE_CUDA_SUBTILE_PER_TILE_SIDE]
     using IntervalRegisters = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE];
-    using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE];
-
-    using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILE_THREADS];
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
@@ -69,8 +66,6 @@ public:
             const uint32_t subtile,
             uint32_t subtape_index,
             const View& v);
-    __device__ uint32_t buildTape(
-            const uint32_t tile, const uint32_t subtape_index);
     __device__ void drawFilled(const uint32_t tile);
 
     const Tape& tape;
@@ -81,9 +76,6 @@ public:
 
 protected:
     IntervalRegisters* __restrict__ const regs;
-    ActiveArray* __restrict__ const active;
-
-    ChoiceArray* __restrict__ const choices;
 
     size_t num_passes() const;
 
