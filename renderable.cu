@@ -755,7 +755,6 @@ void Renderable::run(const View& view)
                                   0, streams[1]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize();
 
     // Build subtapes in memory for ambiguous tiles
     for (unsigned i=0; i < active_tiles; i += tile_stride) {
@@ -764,7 +763,6 @@ void Renderable::run(const View& view)
                                  0, streams[0]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize();
 
     // Refine ambiguous tiles from their subtapes
     for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_SUBTILE_BLOCKS) {
@@ -775,9 +773,9 @@ void Renderable::run(const View& view)
                     subtile_renderer, i, view);
     }
     CHECK(cudaStreamSynchronize(streams[0]));
-    cudaDeviceSynchronize();
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
+    const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
     const uint32_t subtile_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                     LIBFIVE_CUDA_SUBTILE_THREADS;
     for (unsigned i=0; i < filled_subtiles; i += subtile_stride) {
@@ -787,10 +785,8 @@ void Renderable::run(const View& view)
             subtile_renderer, i);
         CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize();
 
     // Do pixel-by-pixel rendering for active subtiles
-    const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
     for (unsigned i=0; i < active_subtiles; i += LIBFIVE_CUDA_RENDER_BLOCKS) {
         const dim3 T(LIBFIVE_CUDA_SUBTILE_SIZE_PX, LIBFIVE_CUDA_SUBTILE_SIZE_PX);
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
