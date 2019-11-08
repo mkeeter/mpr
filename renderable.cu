@@ -234,7 +234,7 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
       tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
 
       regs(CUDA_MALLOC(IntervalRegisters, LIBFIVE_CUDA_TILE_BLOCKS *
-                                          sizeof(Interval) * tape.num_regs)),
+                                          tape.num_regs)),
       active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_TILE_BLOCKS *
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
@@ -296,6 +296,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
         }
 
         Interval out;
+        uint8_t choice = 0;
         switch (c.opcode) {
             case OP_SQUARE: out = lhs.square(); break;
             case OP_SQRT: out = lhs.sqrt(); break;
@@ -306,28 +307,26 @@ void TileRenderer::check(const uint32_t tile, const View& v)
             case OP_MUL: out = lhs * rhs; break;
             case OP_DIV: out = lhs / rhs; break;
             case OP_MIN: if (lhs.upper < rhs.lower) {
-                             (*choices)[threadIdx.x] = 1;
+                             choice = 1;
                              out = lhs;
                          } else if (rhs.upper < lhs.lower) {
-                             (*choices)[threadIdx.x] = 2;
+                             choice = 2;
                              out = rhs;
                          } else {
-                             (*choices)[threadIdx.x] = 0;
                              out = lhs.min(rhs);
                          }
-                         choices++;
+                         (*choices++)[threadIdx.x] = choice;
                          break;
             case OP_MAX: if (lhs.lower > rhs.upper) {
-                             (*choices)[threadIdx.x] = 1;
+                             choice = 1;
                              out = lhs;
                          } else if (rhs.lower > lhs.upper) {
-                             (*choices)[threadIdx.x] = 2;
+                             choice = 2;
                              out = rhs;
                          } else {
-                             (*choices)[threadIdx.x] = 0;
                              out = lhs.max(rhs);
                          }
-                         choices++;
+                         (*choices++)[threadIdx.x] = choice;
                          break;
             case OP_SUB: out = lhs - rhs; break;
 
