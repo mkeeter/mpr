@@ -148,92 +148,6 @@ Interval walkI(const uint32_t index,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename FloatRegisters>
-__device__
-float walkF(const uint32_t index, const Tape& tape,
-            const Subtapes& subtapes, uint32_t subtape_index,
-            FloatRegisters* const __restrict__ regs)
-{
-    assert(subtape_index != 0);
-    using namespace libfive::Opcode;
-
-    const Clause* __restrict__ clause_ptr = &tape[0];
-    const float* __restrict__ constant_ptr = &tape.constant(0);
-
-    uint32_t s = subtapes.start[subtape_index];
-
-    __shared__ Clause clauses[LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
-#define STORE_LOCAL_CLAUSES() do {                                      \
-        for (unsigned i=index; i < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;     \
-                               i += blockDim.x * blockDim.y)            \
-        {                                                               \
-            clauses[i] = subtapes.data[subtape_index][i];               \
-        }                                                               \
-        __syncthreads();                                                \
-    } while (0)
-
-    STORE_LOCAL_CLAUSES();
-
-    while (true) {
-        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
-            const uint32_t next = subtapes.next[subtape_index];
-            if (next) {
-                subtape_index = next;
-                s = subtapes.start[subtape_index];
-            } else {
-                return regs[clauses[s - 1].out][index];
-            }
-            __syncthreads();
-            STORE_LOCAL_CLAUSES();
-        }
-
-        const Clause c = clauses[s++];
-
-        // All clauses must have at least one argument, since constants
-        // and VAR_X/Y/Z are handled separately.
-        float lhs;
-        if (c.banks & 1) {
-            lhs = constant_ptr[c.lhs];
-        } else {
-            lhs = regs[c.lhs][index];
-        }
-
-        float rhs;
-        if (c.opcode >= OP_ADD) {
-            if (c.banks & 2) {
-                rhs = constant_ptr[c.rhs];
-            } else {
-                rhs = regs[c.rhs][index];
-            }
-        }
-
-        float out;
-        switch (c.opcode) {
-            case OP_SQUARE: out = lhs * lhs; break;
-            case OP_SQRT: out = sqrtf(lhs); break;
-            case OP_NEG: out = -lhs; break;
-            // Skipping transcendental functions for now
-
-            case OP_ADD: out = lhs + rhs; break;
-            case OP_MUL: out = lhs * rhs; break;
-            case OP_DIV: out = lhs / rhs; break;
-            case OP_MIN: out = fminf(lhs, rhs); break;
-            case OP_MAX: out = fmaxf(lhs, rhs); break;
-            case OP_SUB: out = lhs - rhs; break;
-
-            // Skipping various hard functions here
-            default: break;
-        }
-        regs[c.out][index] = out;
-    }
-    assert(false);
-    return 0.0f;
-
-#undef STORE_LOCAL_CLAUSES
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 template <typename ChoiceArray, typename ActiveArray>
 __device__
 void pushSubtape(const uint32_t index, const uint32_t tile_index,
@@ -614,12 +528,14 @@ PixelRenderer::PixelRenderer(const Tape& tape, Image& image)
 
 __device__ void PixelRenderer::draw(
         const uint32_t tile, const uint32_t tiles_per_side,
-        const Subtapes& subtapes, const uint32_t subtape_index,
+        const Subtapes& subtapes, uint32_t subtape_index,
         const View& v)
 {
-    const uint32_t dx = threadIdx.x;
-    const uint32_t dy = threadIdx.y;
-    const uint32_t index = dx + dy * LIBFIVE_CUDA_SUBTILE_SIZE_PX;
+    assert(subtape_index != 0);
+
+    const uint32_t pixel = threadIdx.x % LIBFIVE_CUDA_PIXELS_PER_SUBTILE;
+    const uint32_t dx = pixel % LIBFIVE_CUDA_SUBTILE_SIZE_PX;
+    const uint32_t dy = pixel / LIBFIVE_CUDA_SUBTILE_SIZE_PX;
 
     // Pick an index into the register array
     auto regs = this->regs + tape.num_regs * blockIdx.x;
@@ -637,13 +553,69 @@ __device__ void PixelRenderer::draw(
         vs[2] = 0.0f;
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
-                regs[tape.axes.reg[i]][index] = vs[i];
+                regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
             }
         }
     }
-    const float f = walkF(index, tape, subtapes, subtape_index, regs);
-    if (f < 0.0f) {
-        image(px, py) = 255;
+
+    uint32_t s = subtapes.start[subtape_index];
+    const float* __restrict__ constant_ptr = &tape.constant(0);
+    const Clause* __restrict__ tape = subtapes.data[subtape_index];
+    while (true) {
+        using namespace libfive::Opcode;
+
+        // Move to the next subtape if this one is finished
+        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+            const uint32_t next = subtapes.next[subtape_index];
+            if (next) {
+                subtape_index = next;
+                s = subtapes.start[subtape_index];
+                tape = subtapes.data[subtape_index];
+            } else {
+                if (regs[tape[s - 1].out][threadIdx.x] < 0.0f) {
+                    image(px, py) = 255;
+                }
+                return;
+            }
+        }
+        const Clause c = tape[s++];
+
+        // All clauses must have at least one argument, since constants
+        // and VAR_X/Y/Z are handled separately.
+        float lhs;
+        if (c.banks & 1) {
+            lhs = constant_ptr[c.lhs];
+        } else {
+            lhs = regs[c.lhs][threadIdx.x];
+        }
+
+        float rhs;
+        if (c.opcode >= OP_ADD) {
+            if (c.banks & 2) {
+                rhs = constant_ptr[c.rhs];
+            } else {
+                rhs = regs[c.rhs][threadIdx.x];
+            }
+        }
+
+        float out;
+        switch (c.opcode) {
+            case OP_SQUARE: out = lhs * lhs; break;
+            case OP_SQRT: out = sqrtf(lhs); break;
+            case OP_NEG: out = -lhs; break;
+            // Skipping transcendental functions for now
+
+            case OP_ADD: out = lhs + rhs; break;
+            case OP_MUL: out = lhs * rhs; break;
+            case OP_DIV: out = lhs / rhs; break;
+            case OP_MIN: out = fminf(lhs, rhs); break;
+            case OP_MAX: out = fmaxf(lhs, rhs); break;
+            case OP_SUB: out = lhs - rhs; break;
+
+            // Skipping various hard functions here
+            default: break;
+        }
+        regs[c.out][threadIdx.x] = out;
     }
 }
 
@@ -653,13 +625,17 @@ __global__ void PixelRenderer_draw(PixelRenderer* r,
                                    const uint32_t offset, View v)
 {
     // We assume one thread per pixel in a tile
-    assert(blockDim.x == LIBFIVE_CUDA_SUBTILE_SIZE_PX);
-    assert(blockDim.y == LIBFIVE_CUDA_SUBTILE_SIZE_PX);
+    assert(blockDim.x % LIBFIVE_CUDA_SUBTILE_SIZE_PX == 0);
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    // Pick an active tile from the list
-    const uint32_t i = offset + blockIdx.x;
+    // Pick an active tile from the list.  Each block executes multiple tiles!
+    const uint32_t stride = blockDim.x / LIBFIVE_CUDA_PIXELS_PER_SUBTILE;
+    const uint32_t sub = threadIdx.x / LIBFIVE_CUDA_PIXELS_PER_SUBTILE;
+    const uint32_t i = offset + blockIdx.x * stride + sub;
+
     if (i < subtiles->num_active) {
         const uint32_t subtile = subtiles->active(i);
 
@@ -773,6 +749,7 @@ void Renderable::run(const View& view)
                     subtile_renderer, i, view);
     }
     CHECK(cudaStreamSynchronize(streams[0]));
+    cudaDeviceSynchronize();
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
     const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
@@ -787,10 +764,9 @@ void Renderable::run(const View& view)
     }
 
     // Do pixel-by-pixel rendering for active subtiles
-    for (unsigned i=0; i < active_subtiles; i += LIBFIVE_CUDA_RENDER_BLOCKS) {
-        const dim3 T(LIBFIVE_CUDA_SUBTILE_SIZE_PX, LIBFIVE_CUDA_SUBTILE_SIZE_PX);
+    for (unsigned i=0; i < active_subtiles; i += LIBFIVE_CUDA_RENDER_BLOCKS * 4) {
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
-                             T, 0, streams[0]>>>(
+                             LIBFIVE_CUDA_PIXELS_PER_SUBTILE * 4, 0, streams[0]>>>(
             pixel_renderer, tiles, subtiles, i, view);
         CHECK(cudaGetLastError());
     }

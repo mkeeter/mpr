@@ -24,7 +24,7 @@
 
 /*  Rendering is done with this many blocks, and PIXELS_PER_SUBTILE threads
  *  (one per pixel in each tile) */
-#define LIBFIVE_CUDA_RENDER_BLOCKS 32
+#define LIBFIVE_CUDA_RENDER_BLOCKS 64
 
 /*  This is the number of subtapes allocated.  Each subtape has room for some
  *  number of clauses, defined in the Subtape struct */
