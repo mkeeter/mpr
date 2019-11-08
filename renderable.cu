@@ -42,11 +42,9 @@ Interval walkI(const uint32_t index,
         const float* __restrict__ constant_ptr,
         const uint32_t num_clauses,
         IntervalRegisters* const __restrict__ regs,
-        ChoiceArray* const __restrict__ choices)
+        ChoiceArray* __restrict__ choices)
 {
     using namespace libfive::Opcode;
-
-    uint32_t choice_index = 0;
 
     // We copy a chunk of the tape from constant to shared memory
     constexpr unsigned SHARED_CLAUSE_SIZE = 256;
@@ -98,39 +96,43 @@ Interval walkI(const uint32_t index,
             case OP_DIV: out = lhs / rhs; break;
             case OP_MIN: if (lhs.upper < rhs.lower) {
                              if (choices) {
-                                 choices[choice_index][index] = 1;
+                                 (*choices)[index] = 1;
                              }
                              out = lhs;
                          } else if (rhs.upper < lhs.lower) {
                              if (choices) {
-                                 choices[choice_index][index] = 2;
+                                 (*choices)[index] = 2;
                              }
                              out = rhs;
                          } else {
                              if (choices) {
-                                 choices[choice_index][index] = 0;
+                                 (*choices)[index] = 0;
                              }
                              out = lhs.min(rhs);
                          }
-                         choice_index++;
+                         if (choices) {
+                             choices++;
+                         }
                          break;
             case OP_MAX: if (lhs.lower > rhs.upper) {
                              if (choices) {
-                                 choices[choice_index][index] = 1;
+                                 (*choices)[index] = 1;
                              }
                              out = lhs;
                          } else if (rhs.lower > lhs.upper) {
                              if (choices) {
-                                 choices[choice_index][index] = 2;
+                                 (*choices)[index] = 2;
                              }
                              out = rhs;
                          } else {
                              if (choices) {
-                                 choices[choice_index][index] = 0;
+                                 (*choices)[index] = 0;
                              }
                              out = lhs.max(rhs);
                          }
-                         choice_index++;
+                         if (choices) {
+                             choices++;
+                         }
                          break;
             case OP_SUB: out = lhs - rhs; break;
 
@@ -258,18 +260,86 @@ size_t TileRenderer::num_passes() const {
 __device__
 void TileRenderer::check(const uint32_t tile, const View& v)
 {
-    const uint32_t index = threadIdx.x;
-
     auto regs = this->regs + tape.num_regs * blockIdx.x;
-    storeAxes(index, tile, v, tiles, tape, regs);
+    storeAxes(threadIdx.x, tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
-    auto csg_choices = choices + tile / LIBFIVE_CUDA_TILE_THREADS
-                                      * tape.num_csg_choices;
+    auto choices = this->choices + tile / LIBFIVE_CUDA_TILE_THREADS
+                                        * tape.num_csg_choices;
 
-    // Run actual evaluation
-    const Interval result = walkI(index, &tape[0], &tape.constant(0),
-                                  tape.num_clauses, regs, csg_choices);
+    const Clause* __restrict__ clause_ptr = &tape[0];
+    const float* __restrict__ constant_ptr = &tape.constant(0);
+    const auto num_clauses = tape.num_clauses;
+
+    for (uint32_t i=0; i < num_clauses; ++i) {
+        using namespace libfive::Opcode;
+
+        const Clause c = clause_ptr[i];
+        // All clauses must have at least one argument, since constants
+        // and VAR_X/Y/Z are handled separately.
+        Interval lhs;
+        if (c.banks & 1) {
+            const float f = constant_ptr[c.lhs];
+            lhs.lower = f;
+            lhs.upper = f;
+        } else {
+            lhs = regs[c.lhs][threadIdx.x];
+        }
+
+        Interval rhs;
+        if (c.banks & 2) {
+            const float f = constant_ptr[c.rhs];
+            rhs.lower = f;
+            rhs.upper = f;
+        } else if (c.opcode >= OP_ADD) {
+            rhs = regs[c.rhs][threadIdx.x];
+        }
+
+        Interval out;
+        switch (c.opcode) {
+            case OP_SQUARE: out = lhs.square(); break;
+            case OP_SQRT: out = lhs.sqrt(); break;
+            case OP_NEG: out = -lhs; break;
+            // Skipping transcendental functions for now
+
+            case OP_ADD: out = lhs + rhs; break;
+            case OP_MUL: out = lhs * rhs; break;
+            case OP_DIV: out = lhs / rhs; break;
+            case OP_MIN: if (lhs.upper < rhs.lower) {
+                             (*choices)[threadIdx.x] = 1;
+                             out = lhs;
+                         } else if (rhs.upper < lhs.lower) {
+                             (*choices)[threadIdx.x] = 2;
+                             out = rhs;
+                         } else {
+                             (*choices)[threadIdx.x] = 0;
+                             out = lhs.min(rhs);
+                         }
+                         choices++;
+                         break;
+            case OP_MAX: if (lhs.lower > rhs.upper) {
+                             (*choices)[threadIdx.x] = 1;
+                             out = lhs;
+                         } else if (rhs.lower > lhs.upper) {
+                             (*choices)[threadIdx.x] = 2;
+                             out = rhs;
+                         } else {
+                             (*choices)[threadIdx.x] = 0;
+                             out = lhs.max(rhs);
+                         }
+                         choices++;
+                         break;
+            case OP_SUB: out = lhs - rhs; break;
+
+            // Skipping various hard functions here
+            default: break;
+        }
+
+        regs[c.out][threadIdx.x] = out;
+    }
+    // Copy output to standard register before exiting
+    const Clause c = clause_ptr[num_clauses - 1];
+    const Interval result = regs[c.out][threadIdx.x];
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
