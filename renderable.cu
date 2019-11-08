@@ -150,85 +150,6 @@ Interval walkI(const uint32_t index,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename ChoiceArray, typename ActiveArray>
-__device__
-void pushSubtape(const uint32_t index, const uint32_t tile_index,
-                 const uint32_t num_clauses,
-                 const Clause* __restrict__ const clause_ptr,
-                 ActiveArray* __restrict__ const active,
-                 ChoiceArray* __restrict__& choices,
-                 uint32_t& subtape_index, uint32_t& s,
-                 Tiles& out)
-{
-    // Walk from the root of the tape downwards
-    for (uint32_t i=0; i < num_clauses; i++) {
-        using namespace libfive::Opcode;
-        Clause c = clause_ptr[num_clauses - i - 1];
-        if (active[c.out][index]) {
-            active[c.out][index] = false;
-            if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice = (*(--choices))[tile_index];
-                if (choice == 1) {
-                    if (!(c.banks & 1)) {
-                        active[c.lhs][index] = true;
-                        if (c.lhs == c.out) {
-                            continue;
-                        }
-                        c.rhs = c.lhs;
-                        c.banks = 0;
-                    } else {
-                        c.rhs = c.lhs;
-                        c.banks = 3;
-                    }
-                } else if (choice == 2) {
-                    if (!(c.banks & 2)) {
-                        active[c.rhs][index] = true;
-                        if (c.rhs == c.out) {
-                            continue;
-                        }
-                        c.lhs = c.rhs;
-                        c.banks = 0;
-                    } else {
-                        c.lhs = c.rhs;
-                        c.banks = 3;
-                    }
-                } else if (choice == 0) {
-                    if (!(c.banks & 1)) {
-                        active[c.lhs][index] = true;
-                    }
-                    if (!(c.banks & 2)) {
-                        active[c.rhs][index] = true;
-                    }
-                } else {
-                    assert(false);
-                }
-            } else {
-                if (c.opcode >= OP_SQUARE && !(c.banks & 1)) {
-                    active[c.lhs][index] = true;
-                }
-                if (c.opcode >= OP_ADD && !(c.banks & 2)) {
-                    active[c.rhs][index] = true;
-                }
-            }
-
-            // Allocate a new subtape and begin writing to it
-            if (s == 0) {
-                auto next_subtape_index = atomicAdd(&out.num_subtapes, 1);
-                out.subtapes.start[subtape_index] = 0;
-                out.subtapes.next[next_subtape_index] = subtape_index;
-
-                subtape_index = next_subtape_index;
-                s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
-            }
-            out.subtapes.data[subtape_index][--s] = c;
-        } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            --choices;
-        }
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 TileRenderer::TileRenderer(const Tape& tape, Image& image)
     : tape(tape), image(image),
       tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
@@ -372,21 +293,20 @@ __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
 {
     // Pick a subset of the active array to use for this block
     auto active = this->active + blockIdx.x * tape.num_regs;
-    const uint32_t index = threadIdx.x;
 
     for (uint32_t r=0; r < tape.num_regs; ++r) {
-        active[r][index] = false;
+        active[r][threadIdx.x] = false;
     }
 
     // Pick an offset CSG choices array, pointing to the last
     // set of choices (we'll walk this back as we process the tape)
     auto choices = (this->choices + tile / LIBFIVE_CUDA_TILE_THREADS
-                                             * tape.num_csg_choices)
+                                         * tape.num_csg_choices)
                     + tape.num_csg_choices;
 
     // Mark the root of the tree as true
     uint32_t num_clauses = tape.num_clauses;
-    active[tape[num_clauses - 1].out][index] = true;
+    active[tape[num_clauses - 1].out][threadIdx.x] = true;
 
     // Claim a subtape to populate
     uint32_t subtape_index = atomicAdd(&tiles.num_subtapes, 1);
@@ -398,8 +318,74 @@ __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
     uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
 
     // Walk from the root of the tape downwards
-    pushSubtape(index, tile % LIBFIVE_CUDA_TILE_THREADS, num_clauses,
-                &tape[0], active, choices, subtape_index, s, tiles);
+    const Clause* __restrict__ const clause_ptr = &tape[0];
+    const uint32_t tile_index = tile % LIBFIVE_CUDA_TILE_THREADS;
+    Clause* __restrict__ out = tiles.subtapes.data[subtape_index];
+    for (uint32_t i=0; i < num_clauses; i++) {
+        using namespace libfive::Opcode;
+        Clause c = clause_ptr[num_clauses - i - 1];
+        if (active[c.out][threadIdx.x]) {
+            active[c.out][threadIdx.x] = false;
+            if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+                const uint8_t choice = (*(--choices))[tile_index];
+                if (choice == 1) {
+                    if (!(c.banks & 1)) {
+                        active[c.lhs][threadIdx.x] = true;
+                        if (c.lhs == c.out) {
+                            continue;
+                        }
+                        c.rhs = c.lhs;
+                        c.banks = 0;
+                    } else {
+                        c.rhs = c.lhs;
+                        c.banks = 3;
+                    }
+                } else if (choice == 2) {
+                    if (!(c.banks & 2)) {
+                        active[c.rhs][threadIdx.x] = true;
+                        if (c.rhs == c.out) {
+                            continue;
+                        }
+                        c.lhs = c.rhs;
+                        c.banks = 0;
+                    } else {
+                        c.lhs = c.rhs;
+                        c.banks = 3;
+                    }
+                } else if (choice == 0) {
+                    if (!(c.banks & 1)) {
+                        active[c.lhs][threadIdx.x] = true;
+                    }
+                    if (!(c.banks & 2)) {
+                        active[c.rhs][threadIdx.x] = true;
+                    }
+                } else {
+                    assert(false);
+                }
+            } else {
+                if (!(c.banks & 1)) {
+                    active[c.lhs][threadIdx.x] = true;
+                }
+                if (c.opcode >= OP_ADD && !(c.banks & 2)) {
+                    active[c.rhs][threadIdx.x] = true;
+                }
+            }
+
+            // Allocate a new subtape and begin writing to it
+            if (s == 0) {
+                auto next_subtape_index = atomicAdd(&tiles.num_subtapes, 1);
+                tiles.subtapes.start[subtape_index] = 0;
+                tiles.subtapes.next[next_subtape_index] = subtape_index;
+
+                subtape_index = next_subtape_index;
+                s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+                out = tiles.subtapes.data[subtape_index];
+            }
+            out[--s] = c;
+        } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            --choices;
+        }
+    }
 
     // The last subtape may not be completely filled
     tiles.subtapes.start[subtape_index] = s;
