@@ -160,8 +160,9 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
               CUDA_MALLOC(ChoiceArray,
-                LIBFIVE_CUDA_TILE_BLOCKS * tape.num_csg_choices *
-                num_passes())
+                  (tiles.total + LIBFIVE_CUDA_TILE_THREADS - 1) /
+                      LIBFIVE_CUDA_TILE_THREADS *
+                  tape.num_csg_choices)
               : nullptr)
 {
     // Nothing to do here
@@ -171,11 +172,6 @@ TileRenderer::~TileRenderer()
 {
     CHECK(cudaFree(regs));
     CHECK(cudaFree(choices));
-}
-
-size_t TileRenderer::num_passes() const {
-    const auto denom = LIBFIVE_CUDA_TILE_THREADS * LIBFIVE_CUDA_TILE_BLOCKS;
-    return (tiles.total + denom - 1) / denom;
 }
 
 __device__
@@ -527,12 +523,6 @@ void SubtileRenderer_check(SubtileRenderer* r,
 
         r->check(subtile, subtape_index, v);
     }
-}
-
-size_t SubtileRenderer::num_passes() const {
-    // ????
-    const auto denom = LIBFIVE_CUDA_SUBTILES_PER_TILE * LIBFIVE_CUDA_SUBTILE_BLOCKS;
-    return (subtiles.total + denom - 1) / denom;
 }
 
 __device__ void SubtileRenderer::drawFilled(const uint32_t tile)

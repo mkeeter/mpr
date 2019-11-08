@@ -44,8 +44,6 @@ protected:
     ActiveArray* __restrict__ const active;
     ChoiceArray* __restrict__ const choices;
 
-    size_t num_passes() const;
-
     TileRenderer(const TileRenderer& other)=delete;
     TileRenderer& operator=(const TileRenderer& other)=delete;
 };
@@ -76,8 +74,6 @@ public:
 
 protected:
     IntervalRegisters* __restrict__ const regs;
-
-    size_t num_passes() const;
 
     SubtileRenderer(const SubtileRenderer& other)=delete;
     SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
