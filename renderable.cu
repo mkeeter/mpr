@@ -35,121 +35,6 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename IntervalRegisters, typename ChoiceArray>
-__device__
-Interval walkI(const uint32_t index,
-        const Clause* __restrict__ clause_ptr,
-        const float* __restrict__ constant_ptr,
-        const uint32_t num_clauses,
-        IntervalRegisters* const __restrict__ regs,
-        ChoiceArray* __restrict__ choices)
-{
-    using namespace libfive::Opcode;
-
-    // We copy a chunk of the tape from constant to shared memory
-    constexpr unsigned SHARED_CLAUSE_SIZE = 256;
-    __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
-
-    for (uint32_t i=0; i < num_clauses; ++i) {
-        if ((i % SHARED_CLAUSE_SIZE) == 0) {
-            const uint32_t stride = blockDim.x * blockDim.y;
-            __syncthreads();
-            for (unsigned q=index; q < SHARED_CLAUSE_SIZE &&
-                                   i + q < num_clauses; q += stride) {
-                clauses[q] = clause_ptr[i + q];
-            }
-            __syncthreads();
-        }
-
-        const Clause c = clauses[i % SHARED_CLAUSE_SIZE];
-        // All clauses must have at least one argument, since constants
-        // and VAR_X/Y/Z are handled separately.
-        Interval lhs;
-        if (c.banks & 1) {
-            const float f = constant_ptr[c.lhs];
-            lhs.lower = f;
-            lhs.upper = f;
-        } else {
-            lhs = regs[c.lhs][index];
-        }
-
-        Interval rhs;
-        if (c.opcode >= OP_ADD) {
-            if (c.banks & 2) {
-                const float f = constant_ptr[c.rhs];
-                rhs.lower = f;
-                rhs.upper = f;
-            } else {
-                rhs = regs[c.rhs][index];
-            }
-        }
-
-        Interval out;
-        switch (c.opcode) {
-            case OP_SQUARE: out = lhs.square(); break;
-            case OP_SQRT: out = lhs.sqrt(); break;
-            case OP_NEG: out = -lhs; break;
-            // Skipping transcendental functions for now
-
-            case OP_ADD: out = lhs + rhs; break;
-            case OP_MUL: out = lhs * rhs; break;
-            case OP_DIV: out = lhs / rhs; break;
-            case OP_MIN: if (lhs.upper < rhs.lower) {
-                             if (choices) {
-                                 (*choices)[index] = 1;
-                             }
-                             out = lhs;
-                         } else if (rhs.upper < lhs.lower) {
-                             if (choices) {
-                                 (*choices)[index] = 2;
-                             }
-                             out = rhs;
-                         } else {
-                             if (choices) {
-                                 (*choices)[index] = 0;
-                             }
-                             out = lhs.min(rhs);
-                         }
-                         if (choices) {
-                             choices++;
-                         }
-                         break;
-            case OP_MAX: if (lhs.lower > rhs.upper) {
-                             if (choices) {
-                                 (*choices)[index] = 1;
-                             }
-                             out = lhs;
-                         } else if (rhs.lower > lhs.upper) {
-                             if (choices) {
-                                 (*choices)[index] = 2;
-                             }
-                             out = rhs;
-                         } else {
-                             if (choices) {
-                                 (*choices)[index] = 0;
-                             }
-                             out = lhs.max(rhs);
-                         }
-                         if (choices) {
-                             choices++;
-                         }
-                         break;
-            case OP_SUB: out = lhs - rhs; break;
-
-            // Skipping various hard functions here
-            default: break;
-        }
-
-        regs[c.out][index] = out;
-    }
-    // Copy output to standard register before exiting
-    const Clause c = clause_ptr[num_clauses - 1];
-    return regs[c.out][index];
-#undef STORE_LOCAL_CLAUSES
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 TileRenderer::TileRenderer(const Tape& tape, Image& image)
     : tape(tape), image(image),
       tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
@@ -467,16 +352,79 @@ void SubtileRenderer::check(const uint32_t subtile,
     storeAxes(index, subtile, v, subtiles, tape, regs);
 
     // Run actual evaluation
-    Interval result;
-    while (subtape_index) {
-        const uint32_t s = tiles.subtapes.start[subtape_index];
-        result = walkI(index,
-                       &tiles.subtapes.data[subtape_index][s],
-                       &tape.constant(0),
-                       LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s,
-                       regs, static_cast<uint8_t**>(nullptr));
+    uint32_t s = tiles.subtapes.start[subtape_index];
+    const Clause* __restrict__ tape = tiles.subtapes.data[subtape_index];
+    const float* __restrict__ constant_ptr = &this->tape.constant(0);
 
-        subtape_index = tiles.subtapes.next[subtape_index];
+    Interval result;
+    while (true) {
+        using namespace libfive::Opcode;
+
+        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+            const uint32_t next = tiles.subtapes.next[subtape_index];
+            if (next) {
+                subtape_index = next;
+                s = tiles.subtapes.start[subtape_index];
+                tape = tiles.subtapes.data[subtape_index];
+            } else {
+                result = regs[tape[s - 1].out][index];
+                break;
+            }
+        }
+        const Clause c = tape[s++];
+
+        // All clauses must have at least one argument, since constants
+        // and VAR_X/Y/Z are handled separately.
+        Interval lhs;
+        if (c.banks & 1) {
+            const float f = constant_ptr[c.lhs];
+            lhs.lower = f;
+            lhs.upper = f;
+        } else {
+            lhs = regs[c.lhs][index];
+        }
+
+        Interval rhs;
+        if (c.banks & 2) {
+            const float f = constant_ptr[c.rhs];
+            rhs.lower = f;
+            rhs.upper = f;
+        } else if (c.opcode >= OP_ADD) {
+            rhs = regs[c.rhs][index];
+        }
+
+        Interval out;
+        switch (c.opcode) {
+            case OP_SQUARE: out = lhs.square(); break;
+            case OP_SQRT: out = lhs.sqrt(); break;
+            case OP_NEG: out = -lhs; break;
+            // Skipping transcendental functions for now
+
+            case OP_ADD: out = lhs + rhs; break;
+            case OP_MUL: out = lhs * rhs; break;
+            case OP_DIV: out = lhs / rhs; break;
+            case OP_MIN: if (lhs.upper < rhs.lower) {
+                             out = lhs;
+                         } else if (rhs.upper < lhs.lower) {
+                             out = rhs;
+                         } else {
+                             out = lhs.min(rhs);
+                         }
+                         break;
+            case OP_MAX: if (lhs.lower > rhs.upper) {
+                             out = lhs;
+                         } else if (rhs.lower > lhs.upper) {
+                             out = rhs;
+                         } else {
+                             out = lhs.max(rhs);
+                         }
+                         break;
+            case OP_SUB: out = lhs - rhs; break;
+
+            // Skipping various hard functions here
+            default: break;
+        }
+        regs[c.out][index] = out;
     }
 
     // If this tile is unambiguously filled, then mark it at the end
@@ -635,12 +583,10 @@ __device__ void PixelRenderer::draw(
         }
 
         float rhs;
-        if (c.opcode >= OP_ADD) {
-            if (c.banks & 2) {
-                rhs = constant_ptr[c.rhs];
-            } else {
-                rhs = regs[c.rhs][threadIdx.x];
-            }
+        if (c.banks & 2) {
+            rhs = constant_ptr[c.rhs];
+        } else if (c.opcode >= OP_ADD) {
+            rhs = regs[c.rhs][threadIdx.x];
         }
 
         float out;
