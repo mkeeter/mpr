@@ -89,7 +89,8 @@ class PixelRenderer {
 public:
     PixelRenderer(const Tape& tape, Image& image);
 
-    using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE * 4];
+    using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
+                                 LIBFIVE_CUDA_RENDER_SUBTILES];
 
     // Draws the given tile, starting from the given subtape
     __device__ void draw(

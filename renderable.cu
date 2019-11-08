@@ -735,7 +735,7 @@ void Renderable::run(const View& view)
     // Build subtapes in memory for ambiguous tiles
     for (unsigned i=0; i < active_tiles; i += tile_stride) {
         TileRenderer_buildTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                                 32,
+                                 128,
                                  0, streams[0]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
@@ -764,9 +764,11 @@ void Renderable::run(const View& view)
     }
 
     // Do pixel-by-pixel rendering for active subtiles
-    for (unsigned i=0; i < active_subtiles; i += LIBFIVE_CUDA_RENDER_BLOCKS * 4) {
+    const uint32_t subtile_render_stride = LIBFIVE_CUDA_RENDER_BLOCKS * LIBFIVE_CUDA_RENDER_SUBTILES;
+    for (unsigned i=0; i < active_subtiles; i += subtile_render_stride) {
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
-                             LIBFIVE_CUDA_PIXELS_PER_SUBTILE * 4, 0, streams[0]>>>(
+                             LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
+                             LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
             pixel_renderer, tiles, subtiles, i, view);
         CHECK(cudaGetLastError());
     }

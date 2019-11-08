@@ -26,6 +26,9 @@
  *  (one per pixel in each tile) */
 #define LIBFIVE_CUDA_RENDER_BLOCKS 64
 
+/*  Number of subtiles per thread block */
+#define LIBFIVE_CUDA_RENDER_SUBTILES 4
+
 /*  This is the number of subtapes allocated.  Each subtape has room for some
  *  number of clauses, defined in the Subtape struct */
 #define LIBFIVE_CUDA_NUM_SUBTAPES 65536
