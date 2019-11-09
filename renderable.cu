@@ -73,15 +73,39 @@ void TileRenderer::check(const uint32_t tile, const View& v)
     const float* __restrict__ constant_ptr = &tape.constant(0);
     const auto num_clauses = tape.num_clauses;
 
+    // We copy a chunk of the tape from constant to shared memory
+    constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS;
+    __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
+    __shared__ float constant_lhs[SHARED_CLAUSE_SIZE];
+    __shared__ float constant_rhs[SHARED_CLAUSE_SIZE];
+
     for (uint32_t i=0; i < num_clauses; ++i) {
         using namespace libfive::Opcode;
 
-        const Clause c = clause_ptr[i];
+        if ((i % SHARED_CLAUSE_SIZE) == 0) {
+            __syncthreads();
+            const Clause c = clause_ptr[i + threadIdx.x];
+            if (c.banks & 1) {
+                constant_lhs[threadIdx.x] = constant_ptr[c.lhs];
+            }
+            if (c.banks & 2) {
+                constant_rhs[threadIdx.x] = constant_ptr[c.rhs];
+            }
+            clauses[threadIdx.x] = c;
+            __syncthreads();
+        }
+
+        // Skip unused tiles
+        if (tile == UINT32_MAX) {
+            continue;
+        }
+
+        const Clause c = clauses[i % SHARED_CLAUSE_SIZE];
         // All clauses must have at least one argument, since constants
         // and VAR_X/Y/Z are handled separately.
         Interval lhs;
         if (c.banks & 1) {
-            const float f = constant_ptr[c.lhs];
+            const float f = constant_lhs[i % SHARED_CLAUSE_SIZE];
             lhs.lower = f;
             lhs.upper = f;
         } else {
@@ -90,7 +114,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
 
         Interval rhs;
         if (c.banks & 2) {
-            const float f = constant_ptr[c.rhs];
+            const float f = constant_rhs[i % SHARED_CLAUSE_SIZE];
             rhs.lower = f;
             rhs.upper = f;
         } else if (c.opcode >= OP_ADD) {
@@ -138,19 +162,22 @@ void TileRenderer::check(const uint32_t tile, const View& v)
 
         regs[c.out][threadIdx.x] = out;
     }
-    // Copy output to standard register before exiting
-    const Clause c = clause_ptr[num_clauses - 1];
-    const Interval result = regs[c.out][threadIdx.x];
 
-    // If this tile is unambiguously filled, then mark it at the end
-    // of the tiles list
-    if (result.upper < 0.0f) {
-        tiles.insert_filled(tile);
-    }
+    if (tile != UINT32_MAX) {
+        // Copy output to standard register before exiting
+        const Clause c = clause_ptr[num_clauses - 1];
+        const Interval result = regs[c.out][threadIdx.x];
 
-    // If the tile is ambiguous, then record it as needing further refinement
-    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
-        tiles.insert_active(tile);
+        // If this tile is unambiguously filled, then mark it at the end
+        // of the tiles list
+        if (result.upper < 0.0f) {
+            tiles.insert_filled(tile);
+        }
+
+        // If the tile is ambiguous, then record it as needing further refinement
+        else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+            tiles.insert_active(tile);
+        }
     }
 }
 
@@ -165,9 +192,7 @@ __global__ void TileRenderer_check(TileRenderer* r,
     assert(gridDim.z == 1);
 
     const uint32_t tile = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    if (tile < r->tiles.total) {
-        r->check(tile, v);
-    }
+    r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
 }
 
 __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
