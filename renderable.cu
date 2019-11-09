@@ -203,7 +203,7 @@ __global__ void TileRenderer_check(TileRenderer* r,
     r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
 }
 
-__device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
+__device__ void TileRenderer::buildTape(const uint32_t tile)
 {
     // Pick a subset of the active array to use for this block
     auto active = this->active + blockIdx.x * tape.num_regs;
@@ -327,10 +327,11 @@ __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
         }
     }
 
-    // The last subtape may not be completely filled
-    tiles.subtapes.start[subtape_index] = s;
-
-    return subtape_index;
+    if (tile != UINT32_MAX) {
+        // The last subtape may not be completely filled
+        tiles.subtapes.start[subtape_index] = s;
+        tiles.head(tile) = subtape_index;
+    }
 }
 
 __global__ void TileRenderer_buildTape(TileRenderer* r, const uint32_t offset)
@@ -347,12 +348,7 @@ __global__ void TileRenderer_buildTape(TileRenderer* r, const uint32_t offset)
         ? r->tiles.active(i) : UINT32_MAX;
 
     // Build the tape (dummy tiles help by moving data around)
-    const uint32_t tape = r->buildTape(tile);
-
-    // Store the linked list of subtapes into the active tiles list
-    if (tile != UINT32_MAX) {
-        r->tiles.head(tile) = tape;
-    }
+    r->buildTape(tile);
 }
 
 __device__ void TileRenderer::drawFilled(const uint32_t tile)
