@@ -87,14 +87,16 @@ void TileRenderer::check(const uint32_t tile, const View& v)
 
         if ((i % SHARED_CLAUSE_SIZE) == 0) {
             __syncthreads();
-            const Clause c = clause_ptr[i + threadIdx.x];
-            if (c.banks & 1) {
-                constant_lhs[threadIdx.x] = constant_ptr[c.lhs];
+            if (i + threadIdx.x < num_clauses) {
+                const Clause c = clause_ptr[i + threadIdx.x];
+                if (c.banks & 1) {
+                    constant_lhs[threadIdx.x] = constant_ptr[c.lhs];
+                }
+                if (c.banks & 2) {
+                    constant_rhs[threadIdx.x] = constant_ptr[c.rhs];
+                }
+                clauses[threadIdx.x] = c;
             }
-            if (c.banks & 2) {
-                constant_rhs[threadIdx.x] = constant_ptr[c.rhs];
-            }
-            clauses[threadIdx.x] = c;
             __syncthreads();
         }
 
