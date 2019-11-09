@@ -4,16 +4,16 @@ __constant__ static uint64_t const_buffer[0x2000];
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename IntervalRegisters>
+template <typename R>
 __device__ void storeAxes(const uint32_t index, const uint32_t tile,
                           const View& v, const Tiles& tiles, const Tape& tape,
-                          IntervalRegisters* const __restrict__ regs)
+                          R* const __restrict__ lower,
+                          R* const __restrict__ upper)
 {
    // Prepopulate axis values
     const float x = tile / tiles.per_side;
     const float y = tile % tiles.per_side;
 
-    // TODO: put this into a separate function, since it's repeated
     Interval vs[3];
     const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
     vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
@@ -28,7 +28,8 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
 
     for (unsigned i=0; i < 3; ++i) {
         if (tape.axes.reg[i] != UINT16_MAX) {
-            regs[tape.axes.reg[i]][index] = vs[i];
+            lower[tape.axes.reg[i]][index] = vs[i].lower;
+            upper[tape.axes.reg[i]][index] = vs[i].upper;
         }
     }
 }
@@ -39,8 +40,9 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
     : tape(tape), image(image),
       tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
 
-      regs(CUDA_MALLOC(IntervalRegisters, LIBFIVE_CUDA_TILE_BLOCKS *
-                                          tape.num_regs)),
+      regs_lower(CUDA_MALLOC(Registers, LIBFIVE_CUDA_TILE_BLOCKS *
+                                        tape.num_regs * 2)),
+      regs_upper(regs_lower + LIBFIVE_CUDA_TILE_BLOCKS * tape.num_regs),
       active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_TILE_BLOCKS *
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
@@ -55,15 +57,16 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
 
 TileRenderer::~TileRenderer()
 {
-    CHECK(cudaFree(regs));
+    CHECK(cudaFree(regs_lower));
     CHECK(cudaFree(choices));
 }
 
 __device__
 void TileRenderer::check(const uint32_t tile, const View& v)
 {
-    auto regs = this->regs + tape.num_regs * blockIdx.x;
-    storeAxes(threadIdx.x, tile, v, tiles, tape, regs);
+    auto regs_lower = this->regs_lower + tape.num_regs * blockIdx.x;
+    auto regs_upper = this->regs_upper + tape.num_regs * blockIdx.x;
+    storeAxes(threadIdx.x, tile, v, tiles, tape, regs_lower, regs_upper);
 
     // Unpack a 1D offset into the data arrays
     auto choices = this->choices + tile / LIBFIVE_CUDA_TILE_THREADS
@@ -109,7 +112,8 @@ void TileRenderer::check(const uint32_t tile, const View& v)
             lhs.lower = f;
             lhs.upper = f;
         } else {
-            lhs = regs[c.lhs][threadIdx.x];
+            lhs.lower = regs_lower[c.lhs][threadIdx.x];
+            lhs.upper = regs_upper[c.lhs][threadIdx.x];
         }
 
         Interval rhs;
@@ -118,7 +122,8 @@ void TileRenderer::check(const uint32_t tile, const View& v)
             rhs.lower = f;
             rhs.upper = f;
         } else if (c.opcode >= OP_ADD) {
-            rhs = regs[c.rhs][threadIdx.x];
+            rhs.lower = regs_lower[c.rhs][threadIdx.x];
+            rhs.upper = regs_upper[c.rhs][threadIdx.x];
         }
 
         Interval out;
@@ -160,22 +165,23 @@ void TileRenderer::check(const uint32_t tile, const View& v)
             default: break;
         }
 
-        regs[c.out][threadIdx.x] = out;
+        regs_lower[c.out][threadIdx.x] = out.lower;
+        regs_upper[c.out][threadIdx.x] = out.upper;
     }
 
     if (tile != UINT32_MAX) {
         // Copy output to standard register before exiting
         const Clause c = clause_ptr[num_clauses - 1];
-        const Interval result = regs[c.out][threadIdx.x];
+        const float u = regs_upper[c.out][threadIdx.x];
 
         // If this tile is unambiguously filled, then mark it at the end
         // of the tiles list
-        if (result.upper < 0.0f) {
+        if (u < 0.0f) {
             tiles.insert_filled(tile);
         }
 
         // If the tile is ambiguous, then record it as needing further refinement
-        else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        else if (u >= 0.0f && regs_lower[c.out][threadIdx.x] <= 0.0f) {
             tiles.insert_active(tile);
         }
     }
@@ -390,8 +396,9 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
     : tape(tape), image(image), tiles(prev.tiles),
       subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
 
-      regs(CUDA_MALLOC(IntervalRegisters, LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                          sizeof(Interval) * tape.num_regs))
+      regs_lower(CUDA_MALLOC(Registers, LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                        tape.num_regs * 2)),
+      regs_upper(regs_lower + LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)
 {
     // Nothing to do here
 }
@@ -403,8 +410,9 @@ void SubtileRenderer::check(const uint32_t subtile,
 {
     const uint32_t index = threadIdx.x + threadIdx.y * blockDim.x;
 
-    auto regs = this->regs + tape.num_regs * blockIdx.x;
-    storeAxes(index, subtile, v, subtiles, tape, regs);
+    auto regs_lower = this->regs_lower + tape.num_regs * blockIdx.x;
+    auto regs_upper = this->regs_upper + tape.num_regs * blockIdx.x;
+    storeAxes(index, subtile, v, subtiles, tape, regs_lower, regs_upper);
 
     // Run actual evaluation
     uint32_t s = tiles.subtapes.start[subtape_index];
@@ -422,7 +430,8 @@ void SubtileRenderer::check(const uint32_t subtile,
                 s = tiles.subtapes.start[subtape_index];
                 tape = tiles.subtapes.data[subtape_index];
             } else {
-                result = regs[tape[s - 1].out][index];
+                result.lower = regs_lower[tape[s - 1].out][index];
+                result.upper = regs_upper[tape[s - 1].out][index];
                 break;
             }
         }
@@ -436,7 +445,8 @@ void SubtileRenderer::check(const uint32_t subtile,
             lhs.lower = f;
             lhs.upper = f;
         } else {
-            lhs = regs[c.lhs][index];
+            lhs.lower = regs_lower[c.lhs][index];
+            lhs.upper = regs_upper[c.lhs][index];
         }
 
         Interval rhs;
@@ -445,7 +455,8 @@ void SubtileRenderer::check(const uint32_t subtile,
             rhs.lower = f;
             rhs.upper = f;
         } else if (c.opcode >= OP_ADD) {
-            rhs = regs[c.rhs][index];
+            rhs.lower = regs_lower[c.rhs][index];
+            rhs.upper = regs_upper[c.rhs][index];
         }
 
         Interval out;
@@ -479,7 +490,8 @@ void SubtileRenderer::check(const uint32_t subtile,
             // Skipping various hard functions here
             default: break;
         }
-        regs[c.out][index] = out;
+        regs_lower[c.out][index] = out.lower;
+        regs_upper[c.out][index] = out.upper;
     }
 
     // If this tile is unambiguously filled, then mark it at the end
