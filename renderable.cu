@@ -214,22 +214,34 @@ __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
     uint32_t num_clauses = tape.num_clauses;
     active[tape[num_clauses - 1].out][threadIdx.x] = true;
 
-    // Claim a subtape to populate
-    uint32_t subtape_index = atomicAdd(&tiles.num_subtapes, 1);
-    assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
-
-    // Since we're reversing the tape, this is going to be the
-    // end of the linked list (i.e. next = 0)
-    tiles.subtapes.next[subtape_index] = 0;
+    uint32_t subtape_index = 0;
     uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+
+    // Claim a subtape to populate
+    if (tile != UINT32_MAX) {
+        subtape_index = atomicAdd(&tiles.num_subtapes, 1);
+        assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
+
+        // Since we're reversing the tape, this is going to be the
+        // end of the linked list (i.e. next = 0)
+        tiles.subtapes.next[subtape_index] = 0;
+    }
 
     // Walk from the root of the tape downwards
     const Clause* __restrict__ const clause_ptr = &tape[0];
     const uint32_t tile_index = tile % LIBFIVE_CUDA_TILE_THREADS;
     Clause* __restrict__ out = tiles.subtapes.data[subtape_index];
+
     for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
+
+        // Skip dummy tiles which don't actually do things
+        if (tile == UINT32_MAX) {
+            continue;
+        }
+
         Clause c = clause_ptr[num_clauses - i - 1];
+
         if (active[c.out][threadIdx.x]) {
             active[c.out][threadIdx.x] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
@@ -308,12 +320,16 @@ __global__ void TileRenderer_buildTape(TileRenderer* r, const uint32_t offset)
     assert(gridDim.z == 1);
 
     const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    if (i < r->tiles.num_active) {
-        // Pick out the next active tile
-        const uint32_t tile = r->tiles.active(i);
+    // Pick out the next active tile
+    const uint32_t tile = (i < r->tiles.num_active)
+        ? r->tiles.active(i) : UINT32_MAX;
 
-        // Store the linked list of subtapes into the active tiles list
-        r->tiles.head(tile) = r->buildTape(tile);
+    // Build the tape (dummy tiles help by moving data around)
+    const uint32_t tape = r->buildTape(tile);
+
+    // Store the linked list of subtapes into the active tiles list
+    if (tile != UINT32_MAX) {
+        r->tiles.head(tile) = tape;
     }
 }
 
@@ -751,7 +767,7 @@ void Renderable::run(const View& view)
     // Build subtapes in memory for ambiguous tiles
     for (unsigned i=0; i < active_tiles; i += tile_stride) {
         TileRenderer_buildTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                                 128,
+                                 LIBFIVE_CUDA_TILE_THREADS,
                                  0, streams[0]>>>(tile_renderer, i);
         CHECK(cudaGetLastError());
     }
