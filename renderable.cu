@@ -227,6 +227,11 @@ __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
         tiles.subtapes.next[subtape_index] = 0;
     }
 
+    // We copy a chunk of the tape from constant to shared memory
+    constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS;
+    __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
+    assert(LIBFIVE_CUDA_TILE_THREADS == blockDim.x);
+
     // Walk from the root of the tape downwards
     const Clause* __restrict__ const clause_ptr = &tape[0];
     const uint32_t tile_index = tile % LIBFIVE_CUDA_TILE_THREADS;
@@ -235,12 +240,21 @@ __device__ uint32_t TileRenderer::buildTape(const uint32_t tile)
     for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
 
+        if ((i % SHARED_CLAUSE_SIZE) == 0) {
+            __syncthreads();
+            const uint32_t j = num_clauses - i - 1 - threadIdx.x;
+            if (j < num_clauses) {
+                clauses[SHARED_CLAUSE_SIZE - threadIdx.x - 1] = clause_ptr[j];
+            }
+            __syncthreads();
+        }
+
         // Skip dummy tiles which don't actually do things
         if (tile == UINT32_MAX) {
             continue;
         }
 
-        Clause c = clause_ptr[num_clauses - i - 1];
+        Clause c = clauses[SHARED_CLAUSE_SIZE - (i % SHARED_CLAUSE_SIZE) - 1];
 
         if (active[c.out][threadIdx.x]) {
             active[c.out][threadIdx.x] = false;
