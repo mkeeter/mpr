@@ -28,11 +28,14 @@ public:
     //      Empty -> Does nothing
     __device__ void check(const uint32_t tile, const View& v);
 
-    // Builds a subtape for the given (active) tile, returning the head
-    __device__ uint32_t buildTape(const uint32_t tile);
+    // Builds a subtape for the given (active) tile
+    __device__ void buildTape(const uint32_t tile);
 
     // Fills in the given (filled) tile in the image
     __device__ void drawFilled(const uint32_t tile);
+
+    // Reverses the given tile's tape
+    __device__ void reverseTape(const uint32_t tile);
 
     const Tape& tape;
     Image& image;
@@ -58,6 +61,7 @@ public:
     // These are blocks of data which should be indexed as
     //      i[threadIdx.x + threadIdx.y * LIBFIVE_CUDA_SUBTILE_PER_TILE_SIDE]
     using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE];
+    using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILE_THREADS];
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
@@ -67,6 +71,9 @@ public:
             const View& v);
     __device__ void drawFilled(const uint32_t tile);
 
+    // Refines a tile tape into a subtile tape based on choices
+    __device__ void buildTape(const uint32_t subtile,
+                              const uint32_t tile);
     const Tape& tape;
     Image& image;
 
@@ -76,6 +83,8 @@ public:
 protected:
     Registers* __restrict__ const regs_lower;
     Registers* __restrict__ const regs_upper;
+    ActiveArray* __restrict__ const active;
+    uint8_t* __restrict__ const choices;
 
     SubtileRenderer(const SubtileRenderer& other)=delete;
     SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
@@ -85,20 +94,18 @@ protected:
 
 class PixelRenderer {
 public:
-    PixelRenderer(const Tape& tape, Image& image);
+    PixelRenderer(const Tape& tape, Image& image, const SubtileRenderer& prev);
 
     using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
                                  LIBFIVE_CUDA_RENDER_SUBTILES];
 
     // Draws the given tile, starting from the given subtape
-    __device__ void draw(
-            const uint32_t tile, const uint32_t total_tiles,
-            const Subtapes& subtapes, uint32_t subtape_index,
-            const View& v);
+    __device__ void draw(const uint32_t subtile, const View& v);
 
 protected:
     const Tape& tape;
     Image& image;
+    const Tiles& subtiles; // Reference to tiles generated in previous stage
 
     FloatRegisters* __restrict__ const regs;
 
