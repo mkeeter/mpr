@@ -969,7 +969,6 @@ void Renderable::run(const View& view)
         TileRenderer_check<<<LIBFIVE_CUDA_TILE_BLOCKS,
                              LIBFIVE_CUDA_TILE_THREADS,
                              0, streams[0]>>>(tile_renderer, i, view);
-        CHECK(cudaGetLastError());
     }
     CHECK(cudaStreamSynchronize(streams[0]));
 
@@ -983,7 +982,6 @@ void Renderable::run(const View& view)
         TileRenderer_drawFilled<<<LIBFIVE_CUDA_TILE_BLOCKS,
                                   LIBFIVE_CUDA_TILE_THREADS,
                                   0, streams[1]>>>(tile_renderer, i);
-        CHECK(cudaGetLastError());
     }
 
     // Build subtapes in memory for ambiguous tiles
@@ -991,7 +989,6 @@ void Renderable::run(const View& view)
         TileRenderer_buildTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
                                  LIBFIVE_CUDA_TILE_THREADS,
                                  0, streams[0]>>>(tile_renderer, i);
-        CHECK(cudaGetLastError());
     }
 
     // Refine ambiguous tiles from their subtapes
@@ -1012,7 +1009,7 @@ void Renderable::run(const View& view)
             LIBFIVE_CUDA_TILE_THREADS, 0, streams[0]>>>(
                     tile_renderer, i);
     }
-    cudaDeviceSynchronize();
+    CHECK(cudaStreamSynchronize(streams[0]));
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
     const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
@@ -1023,7 +1020,6 @@ void Renderable::run(const View& view)
                                      LIBFIVE_CUDA_SUBTILE_THREADS,
                                      0, streams[1]>>>(
             subtile_renderer, i);
-        CHECK(cudaGetLastError());
     }
 
     // Refine the subtapes again to shorten final pixel evaluation
@@ -1042,7 +1038,5 @@ void Renderable::run(const View& view)
                              LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
                              LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
             pixel_renderer, subtiles, i, view);
-        CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize();
 }
