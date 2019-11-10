@@ -26,7 +26,7 @@
 #define LIBFIVE_CUDA_SUBTILE_THREADS 256
 
 /*  Rendering is done with this many blocks */
-#define LIBFIVE_CUDA_RENDER_BLOCKS 64
+#define LIBFIVE_CUDA_RENDER_BLOCKS 256
 
 /*  Number of subtiles per thread block */
 #define LIBFIVE_CUDA_RENDER_SUBTILES 4
