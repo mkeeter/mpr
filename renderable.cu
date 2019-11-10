@@ -430,15 +430,17 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
     : tape(tape), image(image), tiles(prev.tiles),
       subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
 
-      regs_lower(CUDA_MALLOC(Registers, LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                        tape.num_regs * 2)),
+      data(CUDA_MALLOC(uint8_t,
+        LIBFIVE_CUDA_SUBTILE_BLOCKS * std::max(
+            tape.num_regs * 2 * sizeof(Registers),
+            tape.num_regs * sizeof(ActiveArray)) +
+        subtiles.total * tape.num_csg_choices)),
+
+      regs_lower((Registers*)data),
       regs_upper(regs_lower + LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs),
-      active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                      tape.num_regs)),
-      choices(tape.num_csg_choices ?
-              CUDA_MALLOC(uint8_t,
-                  subtiles.total * tape.num_csg_choices)
-              : nullptr)
+      active((ActiveArray*)(data)),
+      choices((uint8_t*)(regs_upper + LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                      tape.num_regs))
 {
     // Nothing to do here
 }

@@ -80,6 +80,8 @@ public:
     Tiles subtiles;     // New tiles generated in this stage
 
 protected:
+    uint8_t* const data;
+
     Registers* __restrict__ const regs_lower;
     Registers* __restrict__ const regs_upper;
     ActiveArray* __restrict__ const active;
