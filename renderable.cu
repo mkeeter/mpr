@@ -1003,7 +1003,9 @@ void Renderable::run(const View& view)
     }
 
     // Reverse tapes in preparation for refining them further
-    for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_SUBTILE_BLOCKS) {
+    const uint32_t reverse_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                    LIBFIVE_CUDA_TILE_THREADS;
+    for (unsigned i=0; i < active_tiles; i += reverse_stride) {
         TileRenderer_reverseTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
             LIBFIVE_CUDA_TILE_THREADS, 0, streams[0]>>>(
                     tile_renderer, i);
