@@ -448,11 +448,9 @@ void SubtileRenderer::check(const uint32_t subtile,
                             uint32_t subtape_index,
                             const View& v)
 {
-    const uint32_t index = threadIdx.x + threadIdx.y * blockDim.x;
-
     auto regs_lower = this->regs_lower + tape.num_regs * blockIdx.x;
     auto regs_upper = this->regs_upper + tape.num_regs * blockIdx.x;
-    storeAxes(index, subtile, v, subtiles, tape, regs_lower, regs_upper);
+    storeAxes(threadIdx.x, subtile, v, subtiles, tape, regs_lower, regs_upper);
 
     // Choices are stored on a per-tile basis, since they're used
     // when pushing into the tape.
@@ -474,8 +472,8 @@ void SubtileRenderer::check(const uint32_t subtile,
                 s = tiles.subtapes.start[subtape_index];
                 tape = tiles.subtapes.data[subtape_index];
             } else {
-                result.lower = regs_lower[tape[s - 1].out][index];
-                result.upper = regs_upper[tape[s - 1].out][index];
+                result.lower = regs_lower[tape[s - 1].out][threadIdx.x];
+                result.upper = regs_upper[tape[s - 1].out][threadIdx.x];
                 break;
             }
         }
@@ -489,8 +487,8 @@ void SubtileRenderer::check(const uint32_t subtile,
             lhs.lower = f;
             lhs.upper = f;
         } else {
-            lhs.lower = regs_lower[c.lhs][index];
-            lhs.upper = regs_upper[c.lhs][index];
+            lhs.lower = regs_lower[c.lhs][threadIdx.x];
+            lhs.upper = regs_upper[c.lhs][threadIdx.x];
         }
 
         Interval rhs;
@@ -499,8 +497,8 @@ void SubtileRenderer::check(const uint32_t subtile,
             rhs.lower = f;
             rhs.upper = f;
         } else if (c.opcode >= OP_ADD) {
-            rhs.lower = regs_lower[c.rhs][index];
-            rhs.upper = regs_upper[c.rhs][index];
+            rhs.lower = regs_lower[c.rhs][threadIdx.x];
+            rhs.upper = regs_upper[c.rhs][threadIdx.x];
         }
 
         Interval out;
@@ -541,8 +539,8 @@ void SubtileRenderer::check(const uint32_t subtile,
             // Skipping various hard functions here
             default: break;
         }
-        regs_lower[c.out][index] = out.lower;
-        regs_upper[c.out][index] = out.upper;
+        regs_lower[c.out][threadIdx.x] = out.lower;
+        regs_upper[c.out][threadIdx.x] = out.upper;
     }
 
     // If this tile is unambiguously filled, then mark it at the end
@@ -562,14 +560,17 @@ void SubtileRenderer_check(SubtileRenderer* r,
                            const uint32_t offset,
                            View v)
 {
-    // This should be a 2D kernel, with one thread per subtile
-    assert(blockDim.x == LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE);
-    assert(blockDim.y == LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE);
+    assert(blockDim.x % LIBFIVE_CUDA_SUBTILES_PER_TILE == 0);
+    assert(blockDim.y == 1);
     assert(blockDim.z == 1);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t i = blockIdx.x + offset;
+    // Pick an active tile from the list.  Each block executes multiple tiles!
+    const uint32_t stride = blockDim.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    const uint32_t sub = threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    const uint32_t i = offset + blockIdx.x * stride + sub;
+
     if (i < r->tiles.num_active) {
         // Pick out the next active tile
         // (this will be the same for every thread in a block)
@@ -577,12 +578,18 @@ void SubtileRenderer_check(SubtileRenderer* r,
         const uint32_t subtape_index = r->tiles.head(tile);
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile / r->tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
-        const uint32_t py = (tile % r->tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
+        const uint32_t px = (tile / r->tiles.per_side) *
+                            LIBFIVE_CUDA_TILE_SIZE_PX;
+        const uint32_t py = (tile % r->tiles.per_side) *
+                            LIBFIVE_CUDA_TILE_SIZE_PX;
 
         // Then convert from pixels into subtiles
-        const uint32_t tx = px / LIBFIVE_CUDA_SUBTILE_SIZE_PX + threadIdx.x;
-        const uint32_t ty = py / LIBFIVE_CUDA_SUBTILE_SIZE_PX + threadIdx.y;
+        const uint32_t p = threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE;
+        const uint32_t dx = p % LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE;
+        const uint32_t dy = p / LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE;
+
+        const uint32_t tx = px / LIBFIVE_CUDA_SUBTILE_SIZE_PX + dx;
+        const uint32_t ty = py / LIBFIVE_CUDA_SUBTILE_SIZE_PX + dy;
 
         // Finally, unconvert back into a single index
         const uint32_t subtile = ty + tx * r->subtiles.per_side;
@@ -988,10 +995,13 @@ void Renderable::run(const View& view)
     }
 
     // Refine ambiguous tiles from their subtapes
+
+    const uint32_t subtile_check_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                           LIBFIVE_CUDA_REFINE_TILES;
     for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_SUBTILE_BLOCKS) {
         SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-            dim3(LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE,
-                 LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE),
+            LIBFIVE_CUDA_SUBTILES_PER_TILE *
+            LIBFIVE_CUDA_REFINE_TILES,
             0, streams[0]>>>(
                     subtile_renderer, i, view);
     }

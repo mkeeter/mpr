@@ -60,7 +60,8 @@ public:
 
     // These are blocks of data which should be indexed as
     //      i[threadIdx.x + threadIdx.y * LIBFIVE_CUDA_SUBTILE_PER_TILE_SIDE]
-    using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE];
+    using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+                            LIBFIVE_CUDA_REFINE_TILES];
     using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILE_THREADS];
 
     // Same functions as in TileRenderer, but these take a subtape because

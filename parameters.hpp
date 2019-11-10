@@ -19,11 +19,13 @@
  *  (one per subtile in each tile) */
 #define LIBFIVE_CUDA_SUBTILE_BLOCKS 128
 
+/*  Number of tiles to refine simultaneously */
+#define LIBFIVE_CUDA_REFINE_TILES 1
+
 /*  Refining subtile tapes is done with this many threads */
 #define LIBFIVE_CUDA_SUBTILE_THREADS 256
 
-/*  Rendering is done with this many blocks, and PIXELS_PER_SUBTILE threads
- *  (one per pixel in each tile) */
+/*  Rendering is done with this many blocks */
 #define LIBFIVE_CUDA_RENDER_BLOCKS 64
 
 /*  Number of subtiles per thread block */
