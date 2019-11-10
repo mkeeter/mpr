@@ -970,7 +970,7 @@ void Renderable::run(const View& view)
                              LIBFIVE_CUDA_TILE_THREADS,
                              0, streams[0]>>>(tile_renderer, i, view);
     }
-    CHECK(cudaStreamSynchronize(streams[0]));
+    cudaDeviceSynchronize();
 
     // Pull a few variables back from the GPU
     const uint32_t filled_tiles = tiles->num_filled;
@@ -1009,7 +1009,7 @@ void Renderable::run(const View& view)
             LIBFIVE_CUDA_TILE_THREADS, 0, streams[0]>>>(
                     tile_renderer, i);
     }
-    CHECK(cudaStreamSynchronize(streams[0]));
+    cudaDeviceSynchronize();
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
     const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
