@@ -927,6 +927,7 @@ Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px)
 {
     auto out = CUDA_MALLOC(Renderable, 1);
     new (out) Renderable(tree, image_size_px);
+    cudaDeviceSynchronize();
     return Handle(out);
 }
 
@@ -1038,4 +1039,5 @@ void Renderable::run(const View& view)
                              LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
             pixel_renderer, subtiles, i, view);
     }
+    cudaDeviceSynchronize();
 }

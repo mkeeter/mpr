@@ -3,9 +3,6 @@
 #include <iostream>
 #include <fstream>
 
-// CUDA runtime
-#include <cuda_runtime.h>
-
 // libfive
 #include <libfive/tree/tree.hpp>
 #include <libfive/tree/archive.hpp>
@@ -33,12 +30,10 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
     auto r = Renderable::build(t, 2048);
-    cudaDeviceSynchronize();
 
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 10; ++i) {
+    for (unsigned i=0; i < 100; ++i) {
         r->run({{0, 0}, 1});
-        cudaDeviceSynchronize();
     }
     auto end_gpu = std::chrono::steady_clock::now();
     std::cout << "GPU rendering took " <<
