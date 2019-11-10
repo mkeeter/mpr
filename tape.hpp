@@ -27,8 +27,6 @@ struct Tape {
     };
     const Axes axes;
 
-    void sendToConstantMemory(const char* ptr);
-
 private:
     Tape(const char* data,
          uint16_t num_clauses, uint16_t num_constants,
@@ -41,8 +39,7 @@ private:
     /*  We allocate global data in bulk for the tape + constants */
     const char* data=nullptr;
 
-    /*  These are pointers into memory assigned in pointTo.
-     *  They may point to either global or constant memory */
+    /*  These are pointers into data */
     const Clause* __restrict__ tape=nullptr;
     const float* __restrict__ constants=nullptr;
 };

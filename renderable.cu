@@ -1,7 +1,5 @@
 #include "renderable.hpp"
 
-__constant__ static uint64_t const_buffer[0x2000];
-
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename R>
@@ -963,8 +961,6 @@ void Renderable::run(const View& view)
     tiles->reset();
     subtiles->reset();
     cudaMemset(image.data, 0, image.size_px * image.size_px);
-
-    tape.sendToConstantMemory((const char*)const_buffer);
 
     // Do per-tile evaluation to get filled / ambiguous tiles
     for (unsigned i=0; i < total_tiles; i += tile_stride) {

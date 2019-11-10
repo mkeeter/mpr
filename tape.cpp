@@ -156,7 +156,9 @@ Tape::Tape(const char* data,
            Axes axes)
     : num_clauses(num_clauses), num_constants(num_constants),
       num_regs(num_regs), num_csg_choices(num_csg_choices),
-      axes(axes), data(data)
+      axes(axes), data(data),
+      tape(reinterpret_cast<const Clause*>(data)),
+      constants(reinterpret_cast<const float*>(tape + num_clauses))
 {
     // Nothing to do here
 }
@@ -164,27 +166,15 @@ Tape::Tape(const char* data,
 Tape::Tape(Tape&& other)
     : num_clauses(other.num_clauses), num_constants(other.num_constants),
       num_regs(other.num_regs), num_csg_choices(other.num_csg_choices),
-      axes(other.axes), data(other.data)
+      axes(other.axes), data(other.data), tape(other.tape),
+      constants(other.constants)
 {
     other.data = nullptr;
+    other.tape = nullptr;
+    other.constants = nullptr;
 }
 
 Tape::~Tape()
 {
     CHECK(cudaFree((void*)data));
-}
-
-void Tape::sendToConstantMemory(const char* ptr)
-{
-    const char* dev_ptr;
-    CHECK(cudaGetSymbolAddress((void**)&dev_ptr, ptr));
-
-    tape = reinterpret_cast<const Clause*>(dev_ptr);
-    constants = reinterpret_cast<const float*>(
-            dev_ptr + sizeof(Clause) * num_clauses);
-
-    CHECK(cudaMemcpyToSymbol(ptr, data,
-            sizeof(Clause) * num_clauses +
-            sizeof(float)  * num_constants,
-            0, cudaMemcpyDeviceToDevice));
 }
