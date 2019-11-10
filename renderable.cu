@@ -992,10 +992,9 @@ void Renderable::run(const View& view)
     }
 
     // Refine ambiguous tiles from their subtapes
-
     const uint32_t subtile_check_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                           LIBFIVE_CUDA_REFINE_TILES;
-    for (unsigned i=0; i < active_tiles; i += LIBFIVE_CUDA_SUBTILE_BLOCKS) {
+                                          LIBFIVE_CUDA_REFINE_TILES;
+    for (unsigned i=0; i < active_tiles; i += subtile_check_stride) {
         SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
             LIBFIVE_CUDA_SUBTILES_PER_TILE *
             LIBFIVE_CUDA_REFINE_TILES,

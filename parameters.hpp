@@ -20,7 +20,7 @@
 #define LIBFIVE_CUDA_SUBTILE_BLOCKS 128
 
 /*  Number of tiles to refine simultaneously */
-#define LIBFIVE_CUDA_REFINE_TILES 1
+#define LIBFIVE_CUDA_REFINE_TILES 4
 
 /*  Refining subtile tapes is done with this many threads */
 #define LIBFIVE_CUDA_SUBTILE_THREADS 256
