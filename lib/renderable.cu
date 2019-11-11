@@ -461,6 +461,26 @@ void SubtileRenderer::check(const uint32_t subtile,
     const Clause* __restrict__ tape = tiles.subtapes.data[subtape_index];
     const float* __restrict__ constant_ptr = &this->tape.constant(0);
 
+#if 0
+    __shared__ Clause local[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+                            LIBFIVE_CUDA_REFINE_TILES];
+    Clause* __restrict__ local_tape = local
+        + (threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE) *
+           LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    const uint32_t q = threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    if (s + q < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE)
+    {
+        local_tape[q] = tape[s + q];
+    }
+    __syncthreads();
+    if (s >= LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE +
+             LIBFIVE_CUDA_SUBTILES_PER_TILE)
+    {
+        tape = local_tape - LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE +
+                            LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    }
+#endif
+
     Interval result;
     while (true) {
         using namespace libfive::Opcode;

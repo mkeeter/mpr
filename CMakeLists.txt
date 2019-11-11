@@ -6,6 +6,7 @@ add_subdirectory(libfive)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -fPIC -pedantic -Werror=switch -march=native")
 add_subdirectory(lib)
+
 add_executable(libfive-cuda-test libfive-cuda.cpp)
 set_target_properties(libfive-cuda-test PROPERTIES CXX_STANDARD 11)
 target_include_directories(libfive-cuda-test PUBLIC lib)
