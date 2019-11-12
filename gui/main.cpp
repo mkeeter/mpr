@@ -5,7 +5,8 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
-#include <stdio.h>
+#include "TextEditor.h"
+#include <cstdio>
 
 #include <GL/glew.h>    // Initialize with glewInit()
 #include <GLFW/glfw3.h>
@@ -58,6 +59,8 @@ int main(int, char**)
 
     io.Fonts->AddFontFromFileTTF("../gui/Inconsolata.ttf", 16.0f);
 
+    TextEditor editor;
+
     // Our state
     bool show_demo_window = true;
     bool show_another_window = false;
@@ -71,7 +74,7 @@ int main(int, char**)
         // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application.
         // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application.
         // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-        glfwWaitEvents();
+        glfwPollEvents();
 
         // Start the Dear ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
@@ -114,6 +117,10 @@ int main(int, char**)
                 show_another_window = false;
             ImGui::End();
         }
+
+        ImGui::Begin("Text editor");
+        editor.Render("TextEditor");
+        ImGui::End();
 
         // Rendering
         ImGui::Render();
