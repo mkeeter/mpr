@@ -12,8 +12,7 @@ set_target_properties(demo PROPERTIES CXX_STANDARD 11)
 target_include_directories(demo PRIVATE
     imgui
     imgui-color-text-edit)
-target_link_libraries(demo glfw)
-target_link_libraries(demo glew)
+target_link_libraries(demo glfw glew five-guile)
 
 find_package(OpenGL REQUIRED)
 target_link_libraries(demo ${OPENGL_LIBRARIES})
