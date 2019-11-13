@@ -190,7 +190,7 @@ int main(int, char**)
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
 
     // Create window with graphics context
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "Dear ImGui GLFW+OpenGL3 example", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "libfive-cuda demo", NULL, NULL);
     if (window == NULL)
         return 1;
     glfwMakeContextCurrent(window);
@@ -225,8 +225,12 @@ int main(int, char**)
     bool needs_eval = true;
 
     // Our state
-    bool show_demo_window = true;
+    bool show_demo_window = false;
     ImVec4 clear_color = ImVec4(0.0f, 0.0f, 0.0f, 1.00f);
+
+    // View matrix, as it were
+    ImVec2 center = ImVec2(0.0f, 0.0f);
+    float scale = 100.0f; // scale = pixels per model units
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -243,6 +247,49 @@ int main(int, char**)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        // Handle panning
+        if (ImGui::IsMouseDragging()) {
+            const auto drag = ImGui::GetMouseDragDelta();
+            center.x += drag.x / scale;
+            center.y += drag.y / scale;
+            ImGui::ResetMouseDragDelta();
+        }
+
+        const auto display_size = ImGui::GetIO().DisplaySize;
+
+        {   // Handle scrolling
+            const auto scroll = ImGui::GetIO().MouseWheel;
+            if (scroll) {
+                // Reset accumulated scroll
+                ImGui::GetIO().MouseWheel = 0.0f;
+
+                // Start position in world coordinates
+                auto mouse = ImGui::GetIO().MousePos;
+                const auto sx = (mouse.x - display_size.x / 2.0f) / scale;
+                const auto sy = (mouse.y - display_size.y / 2.0f) / scale;
+
+                scale *= powf(1.01f, scroll);
+
+                // End position in world coordinates
+                const auto ex = (mouse.x - display_size.x / 2.0f) / scale;
+                const auto ey = (mouse.y - display_size.y / 2.0f) / scale;
+
+                // Shift so that world position is constant
+                center.x += (ex - sx);
+                center.y += (ey - sy);
+            }
+        }
+
+        {   // Draw XY axes based on current position
+            const float cx = center.x * scale + display_size.x / 2.0f;
+            const float cy = center.y * scale + display_size.y / 2.0f;
+
+            auto g = ImGui::GetBackgroundDrawList();
+            g->AddLine({cx, cy}, {cx + scale, cy}, 0xFF0000FF);
+            g->AddLine({cx, cy}, {cx, cy - scale}, 0xFF00FF00);
+        }
+
+        // Draw main menu
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("View")) {
                 ImGui::Checkbox("Show demo window", &show_demo_window);
