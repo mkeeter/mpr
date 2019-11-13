@@ -700,7 +700,7 @@ bool TextEditor::HandleKeyboardInputs()
 	ImGuiIO& io = ImGui::GetIO();
 	auto shift = io.KeyShift;
 	auto ctrl = io.ConfigMacOSXBehaviors ? io.KeySuper : io.KeyCtrl;
-	auto alt = io.ConfigMacOSXBehaviors ? io.KeyCtrl : io.KeyAlt;
+	auto alt = io.KeyAlt;
 
 	if (ImGui::IsWindowFocused())
 	{
@@ -722,10 +722,14 @@ bool TextEditor::HandleKeyboardInputs()
 			MoveUp(1, shift);
 		else if (!ctrl && !alt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_DownArrow)))
 			MoveDown(1, shift);
-		else if (!alt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftArrow)))
-			MoveLeft(1, shift, ctrl);
-		else if (!alt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightArrow)))
-			MoveRight(1, shift, ctrl);
+		else if (ctrl && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftArrow)))
+			MoveHome(shift);
+		else if (ctrl && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightArrow)))
+			MoveEnd(shift);
+		else if (!ctrl && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_LeftArrow)))
+			MoveLeft(1, shift, alt);
+		else if (!ctrl && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_RightArrow)))
+			MoveRight(1, shift, alt);
 		else if (!alt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageUp)))
 			MoveUp(GetPageSize() - 4, shift);
 		else if (!alt && ImGui::IsKeyPressed(ImGui::GetKeyIndex(ImGuiKey_PageDown)))
