@@ -20,14 +20,10 @@ static void glfw_error_callback(int error, const char* description)
 }
 
 struct Range {
-    Range() : Range(-1, -1, -1, -1) {}
-    Range(int sr, int er, int sc, int ec) :
-        start_row(sr), end_row(er), start_col(sc), end_col(ec) {}
-
-    int start_row;
-    int end_row;
-    int start_col;
-    int end_col;
+    int start_row = -1;
+    int end_row = -1;
+    int start_col = -1;
+    int end_col = -1;
 };
 
 struct Interpreter {
@@ -67,16 +63,16 @@ eval-sandboxed
                 scm_from_locale_string(script.c_str()));
 
         //  Loop through the whole result list, looking for an invalid clause
-        bool valid = true;
-        for (auto r = result; !scm_is_null(r) && valid; r = scm_cdr(r)) {
-            valid &= scm_is_eq(scm_caar(r), scm_valid_sym);
+        result_valid = true;
+        for (auto r = result; !scm_is_null(r) && result_valid; r = scm_cdr(r)) {
+            result_valid &= scm_is_eq(scm_caar(r), scm_valid_sym);
         }
 
         // If there is at least one result, then we'll convert the last one
         // into a string (with special cases for various error forms)
         auto last = scm_is_null(result) ? nullptr
                                         : scm_cdr(scm_car(scm_last_pair(result)));
-        if (!valid) {
+        if (!result_valid) {
             /* last = '(before after key params) */
             auto before = scm_car(last);
             auto after = scm_cadr(last);
@@ -86,93 +82,56 @@ eval-sandboxed
             auto _stack = scm_car(scm_cddddr(last));
             SCM _str = nullptr;
 
-            if (scm_is_eq(key, scm_syntax_error_sym))
-            {
+            if (scm_is_eq(key, scm_syntax_error_sym)) {
                 _str = scm_simple_format(SCM_BOOL_F, scm_syntax_error_fmt,
                        scm_list_3(key, scm_cadr(params), scm_cadddr(params)));
-            }
-            else if (scm_is_eq(key, scm_numerical_overflow_sym))
-            {
+            } else if (scm_is_eq(key, scm_numerical_overflow_sym)) {
                 _str = scm_simple_format(SCM_BOOL_F, scm_numerical_overflow_fmt,
                        scm_list_3(key, scm_cadr(params), scm_car(params)));
-            }
-            else
-            {
+            } else {
                 _str = scm_simple_format(SCM_BOOL_F, scm_other_error_fmt,
                        scm_list_2(key, scm_simple_format(
                             SCM_BOOL_F, scm_cadr(params), scm_caddr(params))));
             }
-            if (!scm_is_false(scm_car(params)))
-            {
+            if (!scm_is_false(scm_car(params))) {
                 _str = scm_simple_format(SCM_BOOL_F, scm_in_function_fmt,
                                          scm_list_2(scm_car(params), _str));
             }
             auto str = scm_to_locale_string(_str);
             auto stack = scm_to_locale_string(_stack);
 
-            // TODO: something with this error
-            std::string err_str(str);
-            std::string err_stack(stack);
-            const int start_row = scm_to_int(scm_car(before));
-            const int end_row = scm_to_int(scm_car(after));
-            const int start_col = scm_to_int(scm_cdr(before));
-            const int end_col = scm_to_int(scm_cdr(after));
+            result_err_str = std::string(str);
+            result_err_stack = std::string(stack);
+            result_err_range.start_row = scm_to_int(scm_car(before));
+            result_err_range.end_row = scm_to_int(scm_car(after));
+            result_err_range.start_col = scm_to_int(scm_cdr(before));
+            result_err_range.end_col = scm_to_int(scm_cdr(after));
 
             free(str);
             free(stack);
-        }
-        else if (last) {
+        } else if (last) {
             char* str = nullptr;
             if (scm_to_int64(scm_length(last)) == 1) {
                 auto str = scm_to_locale_string(
                         scm_simple_format(SCM_BOOL_F, scm_result_fmt,
                                           scm_list_1(scm_car(last))));
 
-                // TODO: something with this
-                std::string result_str(str);
+                result_str = std::string(str);
             } else {
                 auto str = scm_to_locale_string(
                         scm_simple_format(SCM_BOOL_F, scm_result_fmt,
                                           scm_list_1(last)));
 
-                // TODO: something here
-                std::string result_str = std::string("(values") + str + ")";
+                result_str = std::string("(values") + str + ")";
             }
             free(str);
-        }
-        else
-        {
-            // TODO: use this
-            std::string result_str = "#<eof>";
+        } else {
+            result_str = "#<eof>";
         }
 
         // Then iterate over the results, picking out shapes
-        if (valid) {
+        if (result_valid) {
             //std::list<Shape*> shapes;
-
-            // Initialize variables and their textual positions
-            std::map<libfive::Tree::Id, float> vars;
-            std::map<libfive::Tree::Id, Range> var_pos;
-
-            {   // Walk through the global variable map
-                auto vs = scm_c_eval_string(R"(
-                    (use-modules (libfive sandbox))
-                    (hash-map->list (lambda (k v) v) vars) )");
-
-                for (auto v = vs; !scm_is_null(v); v = scm_cdr(v)) {
-                    auto data = scm_cdar(v);
-                    auto id = static_cast<libfive::Tree::Id>(
-                            libfive_tree_id(scm_get_tree(scm_car(data))));
-                    auto value = scm_to_double(scm_cadr(data));
-                    vars[id] = value;
-
-                    auto vp = scm_caddr(data);
-                    var_pos[id] = {scm_to_int(scm_car(vp)), 0,
-                                   scm_to_int(scm_cadr(vp)),
-                                   scm_to_int(scm_caddr(vp))};
-                }
-            }
-
             // Then walk through the result list, picking out trees
             while (!scm_is_null(result)) {
                 for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r)) {
@@ -207,6 +166,12 @@ eval-sandboxed
     SCM scm_other_error_fmt;
     SCM scm_result_fmt;
     SCM scm_in_function_fmt;
+
+    bool result_valid = false;
+    std::string result_str;
+    std::string result_err_str;
+    std::string result_err_stack;
+    Range result_err_range;
 };
 
 int main(int, char**)
@@ -255,6 +220,10 @@ int main(int, char**)
     // Create our text editor
     TextEditor editor;
 
+    // Create the interpreter
+    Interpreter interpreter;
+    bool needs_eval = true;
+
     // Our state
     bool show_demo_window = true;
     ImVec4 clear_color = ImVec4(0.0f, 0.0f, 0.0f, 1.00f);
@@ -287,9 +256,26 @@ int main(int, char**)
             ImGui::ShowDemoWindow(&show_demo_window);
 
         ImGui::Begin("Text editor");
-        if (editor.Render("TextEditor")) {
-            std::cout << editor.GetText() << "\n";
-        }
+            if (needs_eval) {
+                interpreter.eval(editor.GetText());
+            }
+            float size = ImGui::GetContentRegionAvail().y;
+            if (interpreter.result_valid) {
+                size -= ImGui::GetFrameHeight() *
+                        (std::count(interpreter.result_str.begin(),
+                                    interpreter.result_str.end(), '\n') + 1);
+            } else {
+                size -= ImGui::GetFrameHeight() *
+                        (std::count(interpreter.result_err_str.begin(),
+                                    interpreter.result_err_str.end(), '\n') + 1);
+            }
+
+            needs_eval = editor.Render("TextEditor", ImVec2(0, size));
+            if (interpreter.result_valid) {
+                ImGui::Text("%s", interpreter.result_str.c_str());
+            } else {
+                ImGui::Text("%s", interpreter.result_err_str.c_str());
+            }
         ImGui::End();
 
         // Rendering
