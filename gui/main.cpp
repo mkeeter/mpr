@@ -339,7 +339,13 @@ R"((sequence
         ImGui::Begin("Text editor");
             if (needs_eval) {
                 interpreter.eval(editor.GetText());
+                if (interpreter.result_valid) {
+                    for (auto& s : interpreter.shapes) {
+                        s.second->registerTexture(texture->tex);
+                    }
+                }
             }
+
             float size = ImGui::GetContentRegionAvail().y;
             if (interpreter.result_valid) {
                 size -= ImGui::GetFrameHeight() *
@@ -380,12 +386,13 @@ R"((sequence
                 auto before = platform_get_time();
                 s.second->run({{center.x, -center.y}, render_scale});
                 auto after = platform_get_time();
-                ImGui::Text("Render time: %u ms", (unsigned)(after - before));
+                ImGui::Text("Render time: %f s", (after - before) / 1e6);
 
                 before = platform_get_time();
-                texture_load_mono(texture, s.second->image.data);
+                glBindTexture(GL_TEXTURE_2D, 0);
+                s.second->copyToTexture();
                 after = platform_get_time();
-                ImGui::Text("Texture load time: %u ms", (unsigned)(after - before));
+                ImGui::Text("Texture load time: %f s", (after - before) / 1e6);
 
                 ImGui::Separator();
 

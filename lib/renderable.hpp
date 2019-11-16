@@ -1,4 +1,5 @@
 #pragma once
+#include <cuda_gl_interop.h>
 #include <cuda_runtime.h>
 #include <libfive/tree/tree.hpp>
 
@@ -132,6 +133,9 @@ public:
     ~Renderable();
     void run(const View& v);
 
+    void registerTexture(GLuint t);
+    void copyToTexture();
+
     Image image;
     Tape tape;
 
@@ -139,6 +143,8 @@ protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
 
     cudaStream_t streams[2];
+    cudaGraphicsResource* gl_tex;
+
     TileRenderer tile_renderer;
     SubtileRenderer subtile_renderer;
     PixelRenderer pixel_renderer;

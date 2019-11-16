@@ -940,6 +940,24 @@ __global__ void PixelRenderer_draw(PixelRenderer* r,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+__global__
+void Renderable_copyToTexture(Renderable* r, cudaSurfaceObject_t surf)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    const unsigned size = r->image.size_px;
+    if (x < size && y < size) {
+        const uint8_t c = r->image(x, size - y - 1);
+        if (c) {
+            surf2Dwrite(0x00FFFFFF | (c << 24), surf, x*4, y);
+        } else {
+            surf2Dwrite(0, surf, x*4, y);
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 void Renderable::Deleter::operator()(Renderable* r)
 {
@@ -1071,4 +1089,36 @@ void Renderable::run(const View& view)
             pixel_renderer, subtiles, i, view);
     }
     cudaDeviceSynchronize();
+}
+
+void Renderable::registerTexture(GLuint t)
+{
+    printf("Regsitering texture");
+    CHECK(cudaGraphicsGLRegisterImage(&gl_tex, t, GL_TEXTURE_2D,
+                                      cudaGraphicsMapFlagsWriteDiscard));
+}
+
+void Renderable::copyToTexture()
+{
+    cudaArray* array;
+    CHECK(cudaGraphicsMapResources(1, &gl_tex));
+    CHECK(cudaGraphicsSubResourceGetMappedArray(&array, gl_tex, 0, 0));
+
+    // Specify texture
+    struct cudaResourceDesc res_desc;
+    memset(&res_desc, 0, sizeof(res_desc));
+    res_desc.resType = cudaResourceTypeArray;
+    res_desc.res.array.array = array;
+
+    // Surface object??!
+    cudaSurfaceObject_t surf = 0;
+    CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
+
+    CHECK(cudaDeviceSynchronize());
+    Renderable_copyToTexture<<<dim3(256, 256), dim3(16, 16)>>>(this, surf);
+    CHECK(cudaGetLastError());
+
+    CHECK(cudaDeviceSynchronize());
+    CHECK(cudaDestroySurfaceObject(surf));
+    CHECK(cudaGraphicsUnmapResources(1, &gl_tex));
 }
