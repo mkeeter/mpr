@@ -56,6 +56,7 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
 TileRenderer::~TileRenderer()
 {
     CHECK(cudaFree(regs_lower));
+    CHECK(cudaFree(active));
     CHECK(cudaFree(choices));
 }
 
@@ -443,6 +444,11 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
     // Nothing to do here
 }
 
+SubtileRenderer::~SubtileRenderer()
+{
+    CHECK(cudaFree(data));
+}
+
 __device__
 void SubtileRenderer::check(const uint32_t subtile,
                             uint32_t subtape_index,
@@ -814,6 +820,11 @@ PixelRenderer::PixelRenderer(const Tape& tape, Image& image,
                        tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS))
 {
     // Nothing to do here
+}
+
+PixelRenderer::~PixelRenderer()
+{
+    CHECK(cudaFree(regs));
 }
 
 __device__ void PixelRenderer::draw(const uint32_t subtile, const View& v)

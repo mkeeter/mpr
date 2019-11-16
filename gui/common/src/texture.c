@@ -27,11 +27,12 @@ texture_t* texture_new(GLsizei width, GLsizei height) {
 void texture_load_mono(texture_t* texture, const uint8_t* data) {
     uint8_t* c = texture->buf;
     for (unsigned y=0; y < texture->height; ++y) {
+        const uint8_t* d = data + (texture->height - y - 1) * texture->width;
         for (unsigned x=0; x < texture->height; ++x) {
             *c++ = 255; // R
             *c++ = 255; // G
             *c++ = 255; // B
-            *c++ = *data++;
+            *c++ = *d++;
         }
     }
     glBindTexture(GL_TEXTURE_2D, texture->tex);

@@ -363,8 +363,7 @@ int main(int, char**)
                 ImGui::Columns(1);
                 ImGui::Separator();
 
-                s.second->run({{center.x, center.y}, render_scale});
-                printf("center.x: %f, center.y: %f\n", center.x, center.y);
+                s.second->run({{center.x, -center.y}, render_scale});
                 texture_load_mono(texture, s.second->image.data);
                 log_gl_error();
 

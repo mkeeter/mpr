@@ -57,6 +57,7 @@ protected:
 class SubtileRenderer {
 public:
     SubtileRenderer(const Tape& tape, Image& image, const TileRenderer& prev);
+    ~SubtileRenderer();
 
     using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE *
                             LIBFIVE_CUDA_REFINE_TILES];
@@ -96,6 +97,7 @@ protected:
 class PixelRenderer {
 public:
     PixelRenderer(const Tape& tape, Image& image, const SubtileRenderer& prev);
+    ~PixelRenderer();
 
     using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
                                  LIBFIVE_CUDA_RENDER_SUBTILES];
@@ -135,7 +137,6 @@ public:
 
 protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
-
 
     cudaStream_t streams[2];
     TileRenderer tile_renderer;
