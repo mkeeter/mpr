@@ -20,10 +20,15 @@ static void glfw_error_callback(int error, const char* description)
 }
 
 struct Range {
-    int start_row = -1;
-    int end_row = -1;
-    int start_col = -1;
-    int end_col = -1;
+    int start_row;
+    int end_row;
+    int start_col;
+    int end_col;
+};
+
+struct Shape {
+    libfive::Tree tree;
+    std::map<libfive::Tree::Id, float> vars;
 };
 
 struct Interpreter {
@@ -102,10 +107,10 @@ eval-sandboxed
 
             result_err_str = std::string(str);
             result_err_stack = std::string(stack);
-            result_err_range.start_row = scm_to_int(scm_car(before));
-            result_err_range.end_row = scm_to_int(scm_car(after));
-            result_err_range.start_col = scm_to_int(scm_cdr(before));
-            result_err_range.end_col = scm_to_int(scm_cdr(after));
+            result_err_range = {scm_to_int(scm_car(before)),
+                                scm_to_int(scm_car(after)),
+                                scm_to_int(scm_cdr(before)),
+                                scm_to_int(scm_cdr(after))};
 
             free(str);
             free(stack);
@@ -131,17 +136,36 @@ eval-sandboxed
 
         // Then iterate over the results, picking out shapes
         if (result_valid) {
-            //std::list<Shape*> shapes;
+            // Initialize variables and their textual positions
+            std::map<libfive::Tree::Id, float> vars;
+            std::map<libfive::Tree::Id, Range> var_pos;
+
+            {   // Walk through the global variable map
+                auto vs = scm_c_eval_string(R"(
+                    (use-modules (libfive sandbox))
+                    (hash-map->list (lambda (k v) v) vars) )");
+
+                for (auto v = vs; !scm_is_null(v); v = scm_cdr(v))
+                {
+                    auto data = scm_cdar(v);
+                    auto id = static_cast<libfive::Tree::Id>(
+                            libfive_tree_id(scm_get_tree(scm_car(data))));
+                    auto value = scm_to_double(scm_cadr(data));
+                    vars[id] = value;
+
+                    auto vp = scm_caddr(data);
+                    var_pos[id] = {scm_to_int(scm_car(vp)), 0,
+                                   scm_to_int(scm_cadr(vp)),
+                                   scm_to_int(scm_caddr(vp))};
+                }
+            }
+
             // Then walk through the result list, picking out trees
+            shapes.clear();
             while (!scm_is_null(result)) {
                 for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r)) {
                     if (scm_is_shape(scm_car(r))) {
-                        auto tree = scm_get_tree(scm_car(r));
-
-                        // TODO:
-                        //auto shape = new Shape(*tree, vars);
-                        //shape->moveToThread(QApplication::instance()->thread());
-                        //shapes.push_back(shape);
+                        shapes.push_back(*scm_get_tree(scm_car(r)));
                     }
                 }
                 result = scm_cdr(result);
@@ -172,6 +196,8 @@ eval-sandboxed
     std::string result_err_str;
     std::string result_err_stack;
     Range result_err_range;
+
+    std::list<libfive::Tree> shapes;
 };
 
 int main(int, char**)
@@ -247,17 +273,18 @@ int main(int, char**)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Handle panning
-        if (ImGui::IsMouseDragging()) {
-            const auto drag = ImGui::GetMouseDragDelta();
-            center.x += drag.x / scale;
-            center.y += drag.y / scale;
-            ImGui::ResetMouseDragDelta();
-        }
-
         const auto display_size = ImGui::GetIO().DisplaySize;
 
-        {   // Handle scrolling
+        // Handle panning
+        if (!ImGui::GetIO().WantCaptureMouse) {
+            if (ImGui::IsMouseDragging()) {
+                const auto drag = ImGui::GetMouseDragDelta();
+                center.x += drag.x / scale;
+                center.y += drag.y / scale;
+                ImGui::ResetMouseDragDelta();
+            }
+
+            // Handle scrolling
             const auto scroll = ImGui::GetIO().MouseWheel;
             if (scroll) {
                 // Reset accumulated scroll
@@ -322,6 +349,12 @@ int main(int, char**)
                 ImGui::Text("%s", interpreter.result_str.c_str());
             } else {
                 ImGui::Text("%s", interpreter.result_err_str.c_str());
+            }
+        ImGui::End();
+
+        ImGui::Begin("Shapes");
+            for (const auto& s : interpreter.shapes) {
+                ImGui::Text("Shape at %p", (void*)s.id());
             }
         ImGui::End();
 
