@@ -8,7 +8,8 @@
 #include "TextEditor.h"
 
 #include "base.h"
-#include "rect.h"
+#include "log.h"
+#include "texture.h"
 
 #include "libfive-guile.h"
 #include "renderable.hpp"
@@ -231,7 +232,7 @@ int main(int, char**)
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGuiIO& io = ImGui::GetIO();
 
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();
@@ -257,7 +258,7 @@ int main(int, char**)
     ImVec2 center = ImVec2(0.0f, 0.0f);
     float scale = 100.0f; // scale = pixels per model units
 
-    rect_t* rect = rect_new();
+    texture_t* texture = texture_new(1024, 1024);
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -274,10 +275,10 @@ int main(int, char**)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        const auto display_size = ImGui::GetIO().DisplaySize;
+        const auto display_size = io.DisplaySize;
 
         // Handle panning
-        if (!ImGui::GetIO().WantCaptureMouse) {
+        if (!io.WantCaptureMouse) {
             if (ImGui::IsMouseDragging()) {
                 const auto drag = ImGui::GetMouseDragDelta();
                 center.x += drag.x / scale;
@@ -286,13 +287,13 @@ int main(int, char**)
             }
 
             // Handle scrolling
-            const auto scroll = ImGui::GetIO().MouseWheel;
+            const auto scroll = io.MouseWheel;
             if (scroll) {
                 // Reset accumulated scroll
-                ImGui::GetIO().MouseWheel = 0.0f;
+                io.MouseWheel = 0.0f;
 
                 // Start position in world coordinates
-                auto mouse = ImGui::GetIO().MousePos;
+                auto mouse = io.MousePos;
                 const auto sx = (mouse.x - display_size.x / 2.0f) / scale;
                 const auto sy = (mouse.y - display_size.y / 2.0f) / scale;
 
@@ -308,15 +309,6 @@ int main(int, char**)
             }
         }
 
-        {   // Draw XY axes based on current position
-            const float cx = center.x * scale + display_size.x / 2.0f;
-            const float cy = center.y * scale + display_size.y / 2.0f;
-
-            auto g = ImGui::GetBackgroundDrawList();
-            g->AddLine({cx, cy}, {cx + scale, cy}, 0xFF0000FF);
-            g->AddLine({cx, cy}, {cx, cy - scale}, 0xFF00FF00);
-        }
-
         // Draw main menu
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("View")) {
@@ -326,10 +318,11 @@ int main(int, char**)
             ImGui::EndMainMenuBar();
         }
 
-        // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
-        if (show_demo_window)
+        if (show_demo_window) {
             ImGui::ShowDemoWindow(&show_demo_window);
+        }
 
+        // Draw the interpreter window and handle re-evaluation as needed
         ImGui::Begin("Text editor");
             if (needs_eval) {
                 interpreter.eval(editor.GetText());
@@ -353,6 +346,8 @@ int main(int, char**)
             }
         ImGui::End();
 
+        // Draw the shapes, and add them to the draw list
+        auto background = ImGui::GetBackgroundDrawList();
         ImGui::Begin("Shapes");
             for (const auto& s : interpreter.shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
@@ -366,7 +361,20 @@ int main(int, char**)
                 ImGui::Separator();
 
                 s.second->run({{0, 0}, 1});
+                texture_load_mono(texture, s.second->image.data);
+                log_gl_error();
+
+                background->AddImage((void*)(intptr_t)texture->tex, {0.0f, 0.0f}, {100.0f, 100.0f});
             }
+
+        {   // Draw XY axes based on current position
+            const float cx = center.x * scale + display_size.x / 2.0f;
+            const float cy = center.y * scale + display_size.y / 2.0f;
+
+            background->AddLine({cx, cy}, {cx + scale, cy}, 0xFF0000FF);
+            background->AddLine({cx, cy}, {cx, cy - scale}, 0xFF00FF00);
+        }
+
         ImGui::End();
 
         // Rendering
@@ -377,8 +385,6 @@ int main(int, char**)
         glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-        rect_draw(rect);
 
         glfwSwapBuffers(window);
     }

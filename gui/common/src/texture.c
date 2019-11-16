@@ -39,4 +39,5 @@ void texture_load_mono(texture_t* texture, const uint8_t* data) {
             texture->width, texture->height,
              GL_RGBA, GL_UNSIGNED_BYTE,
              texture->buf);
+    log_gl_error();
 }

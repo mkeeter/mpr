@@ -14,6 +14,7 @@ typedef struct texture_ {
 } texture_t;
 
 texture_t* texture_new(GLsizei width, GLsizei height);
+void texture_load_mono(texture_t* texture, const uint8_t* data);
 
 #ifdef __cplusplus
 }
