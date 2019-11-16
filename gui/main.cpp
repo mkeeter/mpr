@@ -7,17 +7,15 @@
 #include "imgui_impl_opengl3.h"
 #include "TextEditor.h"
 
-#include <cstdio>
-
-#include <GL/glew.h>    // Initialize with glewInit()
-#include <GLFW/glfw3.h>
+#include "base.h"
+#include "rect.h"
 
 #include "libfive-guile.h"
 #include "renderable.hpp"
 
 static void glfw_error_callback(int error, const char* description)
 {
-    fprintf(stderr, "Glfw Error %d: %s\n", error, description);
+    fprintf(stderr, "glfw Error %d: %s\n", error, description);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -259,8 +257,7 @@ int main(int, char**)
     ImVec2 center = ImVec2(0.0f, 0.0f);
     float scale = 100.0f; // scale = pixels per model units
 
-    GLuint vao;
-    glGenVertexArrays(1, &vao);
+    rect_t* rect = rect_new();
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -380,6 +377,8 @@ int main(int, char**)
         glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        rect_draw(rect);
 
         glfwSwapBuffers(window);
     }

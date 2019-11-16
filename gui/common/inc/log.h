@@ -55,7 +55,6 @@ FILE* log_preamble(log_type_t t, const char* file, int line);
         }                                                           \
     }                                                               \
 } while(0)
-#undef LOG_GL_ERR_CASE
 
 #ifdef __cplusplus
 }

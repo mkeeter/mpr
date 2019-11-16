@@ -34,7 +34,6 @@ void shader_check_link(GLuint program) {
     }
 }
 
-
 GLuint shader_link_vf(GLuint vs, GLuint fs) {
     GLuint program = glCreateProgram();
 
