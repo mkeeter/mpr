@@ -14,12 +14,12 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
 
     Interval vs[3];
     const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
-    vs[0].lower = 2.0f * (X.lower - 0.5f - v.center[0]) * v.scale;
-    vs[0].upper = 2.0f * (X.upper - 0.5f - v.center[0]) * v.scale;
+    vs[0].lower = 2.0f * (X.lower - 0.5f) * v.scale - v.center[0];
+    vs[0].upper = 2.0f * (X.upper - 0.5f) * v.scale - v.center[0];
 
     const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
-    vs[1].lower = 2.0f * (Y.lower - 0.5f - v.center[1]) * v.scale;
-    vs[1].upper = 2.0f * (Y.upper - 0.5f - v.center[1]) * v.scale;
+    vs[1].lower = 2.0f * (Y.lower - 0.5f) * v.scale - v.center[1];
+    vs[1].upper = 2.0f * (Y.upper - 0.5f) * v.scale - v.center[1];
 
     vs[2].lower = 0.0f;
     vs[2].upper = 0.0f;
@@ -835,8 +835,8 @@ __device__ void PixelRenderer::draw(const uint32_t subtile, const View& v)
         const float x = px / (image.size_px - 1.0f);
         const float y = py / (image.size_px - 1.0f);
         float vs[3];
-        vs[0] = 2.0f * (x - 0.5f - v.center[0]) * v.scale;
-        vs[1] = 2.0f * (y - 0.5f - v.center[1]) * v.scale;
+        vs[0] = 2.0f * (x - 0.5f) * v.scale - v.center[0];
+        vs[1] = 2.0f * (y - 0.5f) * v.scale - v.center[1];
         vs[2] = 0.0f;
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {

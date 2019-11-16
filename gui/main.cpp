@@ -163,7 +163,7 @@ eval-sandboxed
                 for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r)) {
                     if (scm_is_shape(scm_car(r))) {
                         auto t = *scm_get_tree(scm_car(r));
-                        shapes.insert({t.id(), Renderable::build(t, 1024)});
+                        shapes.insert({t.id(), Renderable::build(t, 2048)});
                     }
                 }
                 result = scm_cdr(result);
@@ -258,7 +258,7 @@ int main(int, char**)
     ImVec2 center = ImVec2(0.0f, 0.0f);
     float scale = 100.0f; // scale = pixels per model units
 
-    texture_t* texture = texture_new(1024, 1024);
+    texture_t* texture = texture_new(2048, 2048);
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -274,8 +274,6 @@ int main(int, char**)
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-
-        const auto display_size = io.DisplaySize;
 
         // Handle panning
         if (!io.WantCaptureMouse) {
@@ -294,14 +292,14 @@ int main(int, char**)
 
                 // Start position in world coordinates
                 auto mouse = io.MousePos;
-                const auto sx = (mouse.x - display_size.x / 2.0f) / scale;
-                const auto sy = (mouse.y - display_size.y / 2.0f) / scale;
+                const auto sx = (mouse.x - io.DisplaySize.x / 2.0f) / scale;
+                const auto sy = (mouse.y - io.DisplaySize.y / 2.0f) / scale;
 
                 scale *= powf(1.01f, scroll);
 
                 // End position in world coordinates
-                const auto ex = (mouse.x - display_size.x / 2.0f) / scale;
-                const auto ey = (mouse.y - display_size.y / 2.0f) / scale;
+                const auto ex = (mouse.x - io.DisplaySize.x / 2.0f) / scale;
+                const auto ey = (mouse.y - io.DisplaySize.y / 2.0f) / scale;
 
                 // Shift so that world position is constant
                 center.x += (ex - sx);
@@ -349,6 +347,11 @@ int main(int, char**)
         // Draw the shapes, and add them to the draw list
         auto background = ImGui::GetBackgroundDrawList();
         ImGui::Begin("Shapes");
+            const float max_pixels = fmax(io.DisplaySize.x, io.DisplaySize.y);
+            const float render_scale = max_pixels / scale / 2.0f;
+
+            const float cx = center.x * scale + io.DisplaySize.x / 2.0f;
+            const float cy = center.y * scale + io.DisplaySize.y / 2.0f;
             for (const auto& s : interpreter.shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
                 ImGui::Columns(2);
@@ -360,20 +363,21 @@ int main(int, char**)
                 ImGui::Columns(1);
                 ImGui::Separator();
 
-                s.second->run({{0, 0}, 1});
+                s.second->run({{center.x, center.y}, render_scale});
+                printf("center.x: %f, center.y: %f\n", center.x, center.y);
                 texture_load_mono(texture, s.second->image.data);
                 log_gl_error();
 
-                background->AddImage((void*)(intptr_t)texture->tex, {0.0f, 0.0f}, {100.0f, 100.0f});
+                background->AddImage((void*)(intptr_t)texture->tex,
+                        {io.DisplaySize.x / 2.0f - max_pixels / 2.0f,
+                         io.DisplaySize.y / 2.0f - max_pixels / 2.0f},
+                        {io.DisplaySize.x / 2.0f + max_pixels / 2.0f,
+                         io.DisplaySize.y / 2.0f + max_pixels / 2.0f});
             }
 
-        {   // Draw XY axes based on current position
-            const float cx = center.x * scale + display_size.x / 2.0f;
-            const float cy = center.y * scale + display_size.y / 2.0f;
-
-            background->AddLine({cx, cy}, {cx + scale, cy}, 0xFF0000FF);
-            background->AddLine({cx, cy}, {cx, cy - scale}, 0xFF00FF00);
-        }
+        // Draw XY axes based on current position
+        background->AddLine({cx, cy}, {cx + scale, cy}, 0xFF0000FF);
+        background->AddLine({cx, cy}, {cx, cy - scale}, 0xFF00FF00);
 
         ImGui::End();
 
