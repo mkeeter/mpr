@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
 
-project(libfive-cuda LANGUAGES CXX CUDA)
+project(libfive-cuda LANGUAGES C CXX CUDA)
 
 add_subdirectory(libfive)
 

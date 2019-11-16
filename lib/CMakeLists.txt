@@ -7,6 +7,7 @@ set_target_properties(five-cuda PROPERTIES CXX_STANDARD 11)
 
 target_include_directories(five-cuda PUBLIC
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    ${CMAKE_CURRENT_SOURCE_DIR}
     libfive/libfive/include
     ${EIGEN_INCLUDE_DIRS})
 target_link_libraries(five-cuda five)

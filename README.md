@@ -3,9 +3,6 @@ Experimental CUDA acceleration for `libfive`
 Not yet ready for public consumption!
 
 # Building
-First, build the `libfive` submodule in a folder named `build`.
-
-Then,
 ```
 mkdir build
 cd build

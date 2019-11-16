@@ -13,22 +13,20 @@
 #include <GLFW/glfw3.h>
 
 #include "libfive-guile.h"
+#include "renderable.hpp"
 
 static void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "Glfw Error %d: %s\n", error, description);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 struct Range {
     int start_row;
     int end_row;
     int start_col;
     int end_col;
-};
-
-struct Shape {
-    libfive::Tree tree;
-    std::map<libfive::Tree::Id, float> vars;
 };
 
 struct Interpreter {
@@ -165,7 +163,8 @@ eval-sandboxed
             while (!scm_is_null(result)) {
                 for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r)) {
                     if (scm_is_shape(scm_car(r))) {
-                        shapes.push_back(*scm_get_tree(scm_car(r)));
+                        auto t = *scm_get_tree(scm_car(r));
+                        shapes.insert({t.id(), Renderable::build(t, 1024)});
                     }
                 }
                 result = scm_cdr(result);
@@ -197,8 +196,10 @@ eval-sandboxed
     std::string result_err_stack;
     Range result_err_range;
 
-    std::list<libfive::Tree> shapes;
+    std::map<libfive::Tree::Id, Renderable::Handle> shapes;
 };
+
+////////////////////////////////////////////////////////////////////////////////
 
 int main(int, char**)
 {
@@ -257,6 +258,9 @@ int main(int, char**)
     // View matrix, as it were
     ImVec2 center = ImVec2(0.0f, 0.0f);
     float scale = 100.0f; // scale = pixels per model units
+
+    GLuint vao;
+    glGenVertexArrays(1, &vao);
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -354,7 +358,17 @@ int main(int, char**)
 
         ImGui::Begin("Shapes");
             for (const auto& s : interpreter.shapes) {
-                ImGui::Text("Shape at %p", (void*)s.id());
+                ImGui::Text("Shape at %p", (void*)s.first);
+                ImGui::Columns(2);
+                ImGui::Text("%u clauses", s.second->tape.num_clauses);
+                ImGui::Text("%u registers", s.second->tape.num_regs);
+                ImGui::NextColumn();
+                ImGui::Text("%u constants", s.second->tape.num_constants);
+                ImGui::Text("%u CSG nodes", s.second->tape.num_csg_choices);
+                ImGui::Columns(1);
+                ImGui::Separator();
+
+                s.second->run({{0, 0}, 1});
             }
         ImGui::End();
 

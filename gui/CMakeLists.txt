@@ -1,5 +1,10 @@
 add_executable(demo MACOSX_BUNDLE
     main.cpp
+
+    common/src/shader.c
+    common/src/log.c
+    common/platform/posix.c
+
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
     imgui/imgui_draw.cpp
@@ -10,9 +15,14 @@ add_executable(demo MACOSX_BUNDLE
 
 set_target_properties(demo PROPERTIES CXX_STANDARD 11)
 target_include_directories(demo PRIVATE
+    common/inc
     imgui
     imgui-color-text-edit)
-target_link_libraries(demo glfw glew five-guile)
+target_link_libraries(demo glfw glew five-guile five-cuda)
 
-find_package(OpenGL REQUIRED)
-target_link_libraries(demo ${OPENGL_LIBRARIES})
+if (APPLE)
+    # Hack because target_link_libraries injects -frameworks OpenGL into the CUDA
+    # linker call, which fails because nvcc doesn't know about that argument
+    set_property(TARGET demo APPEND_STRING PROPERTY LINK_FLAGS " -framework OpenGL")
+    set_property(TARGET demo PROPERTY BUILD_RPATH ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
+endif()
