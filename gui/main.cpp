@@ -9,6 +9,7 @@
 
 #include "base.h"
 #include "log.h"
+#include "platform.h"
 #include "texture.h"
 
 #include "libfive-guile.h"
@@ -245,6 +246,20 @@ int main(int, char**)
 
     // Create our text editor
     TextEditor editor;
+    editor.SetText(
+R"((sequence
+   (text (string-append
+    "I'll break my staff\n"
+    "Bury it certain fathoms\n"
+    "   in the earth\n"
+    "And deeper than did\n"
+    "   ever plummet sound\n"
+    "I'll drown my book!"))
+   (extrude-z -0.1 0.1)
+   (move [-6.5 2.5])
+   (scale-x 0.125)
+   (scale-y 0.125)
+) )");
 
     // Create the interpreter
     Interpreter interpreter;
@@ -361,11 +376,18 @@ int main(int, char**)
                 ImGui::Text("%u constants", s.second->tape.num_constants);
                 ImGui::Text("%u CSG nodes", s.second->tape.num_csg_choices);
                 ImGui::Columns(1);
-                ImGui::Separator();
 
+                auto before = platform_get_time();
                 s.second->run({{center.x, -center.y}, render_scale});
+                auto after = platform_get_time();
+                ImGui::Text("Render time: %u ms", (unsigned)(after - before));
+
+                before = platform_get_time();
                 texture_load_mono(texture, s.second->image.data);
-                log_gl_error();
+                after = platform_get_time();
+                ImGui::Text("Texture load time: %u ms", (unsigned)(after - before));
+
+                ImGui::Separator();
 
                 background->AddImage((void*)(intptr_t)texture->tex,
                         {io.DisplaySize.x / 2.0f - max_pixels / 2.0f,
