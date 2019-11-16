@@ -27,6 +27,8 @@ struct Tape {
     };
     const Axes axes;
 
+    void print(std::ostream& o=std::cout);
+
 private:
     Tape(const char* data,
          uint16_t num_clauses, uint16_t num_constants,

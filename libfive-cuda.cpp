@@ -30,6 +30,7 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
     }
     auto r = Renderable::build(t, 2048);
+    r->tape.print();
 
     auto start_gpu = std::chrono::steady_clock::now();
     for (unsigned i=0; i < 100; ++i) {

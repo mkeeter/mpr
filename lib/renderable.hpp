@@ -131,11 +131,11 @@ public:
     void run(const View& v);
 
     Image image;
+    Tape tape;
 
 protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
 
-    Tape tape;
 
     cudaStream_t streams[2];
     TileRenderer tile_renderer;

@@ -117,19 +117,6 @@ Tape Tape::build(libfive::Tree tree) {
 
         const uint16_t out = getRegister(c.id());
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
-
-        std::cout << libfive::Opcode::toString(c->op) << " ";
-        if (banks & 1) {
-            std::cout << constant_data[lhs] << "f ";
-        } else {
-            std::cout << lhs << " ";
-        }
-        if (banks & 2) {
-            std::cout << constant_data[rhs] << "f ";
-        } else {
-            std::cout << rhs << " ";
-        }
-        std::cout << " -> " << out << "\n";
     }
 
     auto data = CUDA_MALLOC(char, sizeof(Clause) * flat.size() +
@@ -177,4 +164,24 @@ Tape::Tape(Tape&& other)
 Tape::~Tape()
 {
     CHECK(cudaFree((void*)data));
+}
+
+void Tape::print(std::ostream& o)
+{
+    for (unsigned i=0; i < num_clauses; ++i) {
+        const Clause c = tape[i];
+        const auto op = static_cast<libfive::Opcode::Opcode>(c.opcode);
+        o << libfive::Opcode::toString(op) << " ";
+        if (c.banks & 1) {
+            o << constants[c.lhs] << "f ";
+        } else {
+            o << c.lhs << " ";
+        }
+        if (c.banks & 2) {
+            o << constants[c.rhs] << "f ";
+        } else {
+            o << c.rhs << " ";
+        }
+        o << " -> " << c.out << "\n";
+    }
 }
