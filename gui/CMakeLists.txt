@@ -1,12 +1,6 @@
 add_executable(demo MACOSX_BUNDLE
     main.cpp
 
-    common/src/log.c
-    common/src/shader.c
-    common/src/texture.c
-
-    common/platform/posix.c
-
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
     imgui/imgui_draw.cpp

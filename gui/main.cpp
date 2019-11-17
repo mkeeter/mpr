@@ -7,7 +7,8 @@
 #include "imgui_impl_opengl3.h"
 #include "TextEditor.h"
 
-#include "platform.h"
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
 
 #include "libfive-guile.h"
 #include "renderable.hpp"
@@ -376,7 +377,7 @@ R"((sequence
 
             const float cx = center.x * scale + io.DisplaySize.x / 2.0f;
             const float cy = center.y * scale + io.DisplaySize.y / 2.0f;
-            bool first = true;
+            bool append = false;
             for (const auto& s : interpreter.shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
                 ImGui::Columns(2);
@@ -387,16 +388,20 @@ R"((sequence
                 ImGui::Text("%u CSG nodes", s.second->tape.num_csg_choices);
                 ImGui::Columns(1);
 
-                auto before = platform_get_time();
-                    s.second->run({{center.x, -center.y}, render_scale});
-                auto after = platform_get_time();
-                ImGui::Text("Render time: %f s", (after - before) / 1e6);
+                {   // Timed rendering pass
+                    using namespace std::chrono;
+                    auto start = high_resolution_clock::now();
+                        s.second->run({{center.x, -center.y}, render_scale});
+                    auto end = high_resolution_clock::now();
+                    auto dt = duration_cast<microseconds>(end - start);
+                    ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
-                before = platform_get_time();
-                    s.second->copyToTexture(cuda_tex, !first);
-                    first = false;
-                after = platform_get_time();
-                ImGui::Text("Texture load time: %f s", (after - before) / 1e6);
+                    start = high_resolution_clock::now();
+                        s.second->copyToTexture(cuda_tex, append);
+                    end = high_resolution_clock::now();
+                    dt = duration_cast<microseconds>(end - start);
+                    ImGui::Text("Texture load time: %f s", dt.count() / 1e6);
+                }
 
                 ImGui::Separator();
 
@@ -405,6 +410,10 @@ R"((sequence
                          io.DisplaySize.y / 2.0f - max_pixels / 2.0f},
                         {io.DisplaySize.x / 2.0f + max_pixels / 2.0f,
                          io.DisplaySize.y / 2.0f + max_pixels / 2.0f});
+
+                // Later render passes will only append to the texture,
+                // instead of writing both filled and empty pixels.
+                append = true;
             }
 
         // Draw XY axes based on current position
