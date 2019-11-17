@@ -65,7 +65,7 @@ public:
     // they're refining a tile into subtiles
     __device__ void check(
             const uint32_t subtile,
-            uint32_t subtape_index,
+            const uint32_t tile,
             const View& v);
     __device__ void drawFilled(const uint32_t tile);
 

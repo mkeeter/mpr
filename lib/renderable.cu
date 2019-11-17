@@ -424,7 +424,7 @@ SubtileRenderer::~SubtileRenderer()
 
 __device__
 void SubtileRenderer::check(const uint32_t subtile,
-                            uint32_t subtape_index,
+                            const uint32_t tile,
                             const View& v)
 {
     auto regs_lower = this->regs_lower + tape.num_regs * blockIdx.x;
@@ -436,40 +436,59 @@ void SubtileRenderer::check(const uint32_t subtile,
     auto choices = this->choices + subtile * tape.num_csg_choices;
 
     // Run actual evaluation
+    uint32_t subtape_index = tiles.head(tile);
     uint32_t s = tiles.subtapes.start[subtape_index];
     const Clause* __restrict__ tape = tiles.subtapes.data[subtape_index];
     const float* __restrict__ constant_ptr = &this->tape.constant(0);
 
-#if 0
-    __shared__ Clause local[LIBFIVE_CUDA_SUBTILES_PER_TILE *
-                            LIBFIVE_CUDA_REFINE_TILES];
-    Clause* __restrict__ local_tape = local
-        + (threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE) *
-           LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    uint32_t next = tiles.subtapes.next[subtape_index];
+    uint32_t next_start = tiles.subtapes.start[next];
+    uint32_t length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+
+    // We copy LIBFIVE_CUDA_SUBTILES_PER_TILE clauses from each active tape
+    // into shared memory, to speed up the first pass a little bit.  Beyond
+    // that point, tapes diverge in size, so we can't realiably sync threads.
+    __shared__ Clause local[LIBFIVE_CUDA_REFINE_TILES]
+                           [LIBFIVE_CUDA_SUBTILES_PER_TILE];
+    const auto u = threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
     const uint32_t q = threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE;
-    if (s + q < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE)
-    {
-        local_tape[q] = tape[s + q];
+    if (s + q < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+        local[u][q] = tape[s + q];
     }
+
+    {   // If this chunk is larger than the short cached tape, then
+        // we'll set the next chunk to re-enter this chunk at a
+        // later point to finish it up.
+        const auto chunk_length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s;
+        if (chunk_length > LIBFIVE_CUDA_SUBTILES_PER_TILE) {
+            length = LIBFIVE_CUDA_SUBTILES_PER_TILE;
+            next = subtape_index;
+            next_start = s + length;
+        } else {
+            // Otherwise, we'll finish the entire cached subtape
+            length = chunk_length;
+        }
+    }
+
+    // Reassign the first tape to our chunk of shared memory
+    tape = local[u];
+    s = 0;
     __syncthreads();
-    if (s >= LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE +
-             LIBFIVE_CUDA_SUBTILES_PER_TILE)
-    {
-        tape = local_tape - LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE +
-                            LIBFIVE_CUDA_SUBTILES_PER_TILE;
-    }
-#endif
 
     Interval result;
     while (true) {
         using namespace libfive::Opcode;
 
-        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
-            const uint32_t next = tiles.subtapes.next[subtape_index];
+        if (s == length) {
             if (next) {
                 subtape_index = next;
-                s = tiles.subtapes.start[subtape_index];
+                s = next_start;
                 tape = tiles.subtapes.data[subtape_index];
+
+                // Preload these values
+                next = tiles.subtapes.next[subtape_index];
+                next_start = tiles.subtapes.start[next];
+                length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
             } else {
                 result.lower = regs_lower[tape[s - 1].out][threadIdx.x];
                 result.upper = regs_upper[tape[s - 1].out][threadIdx.x];
@@ -574,7 +593,6 @@ void SubtileRenderer_check(SubtileRenderer* r,
         // Pick out the next active tile
         // (this will be the same for every thread in a block)
         const uint32_t tile = r->tiles.active(i);
-        const uint32_t subtape_index = r->tiles.head(tile);
 
         // Convert from tile position to pixels
         const uint32_t px = (tile / r->tiles.per_side) *
@@ -593,7 +611,7 @@ void SubtileRenderer_check(SubtileRenderer* r,
         // Finally, unconvert back into a single index
         const uint32_t subtile = ty + tx * r->subtiles.per_side;
 
-        r->check(subtile, subtape_index, v);
+        r->check(subtile, tile, v);
     }
 }
 
