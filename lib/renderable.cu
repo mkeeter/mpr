@@ -45,9 +45,7 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
               CUDA_MALLOC(ChoiceArray,
-                  (tiles.total + LIBFIVE_CUDA_TILE_THREADS - 1) /
-                      LIBFIVE_CUDA_TILE_THREADS *
-                  tape.num_csg_choices)
+                LIBFIVE_CUDA_TILE_BLOCKS * tape.num_csg_choices)
               : nullptr)
 {
     // Nothing to do here
@@ -68,8 +66,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
     storeAxes(threadIdx.x, tile, v, tiles, tape, regs_lower, regs_upper);
 
     // Unpack a 1D offset into the data arrays
-    auto choices = this->choices + tile / LIBFIVE_CUDA_TILE_THREADS
-                                        * tape.num_csg_choices;
+    auto choices = this->choices + tape.num_csg_choices * blockIdx.x;
 
     const Clause* __restrict__ clause_ptr = &tape[0];
     const float* __restrict__ constant_ptr = &tape.constant(0);
@@ -170,6 +167,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
         regs_upper[c.out][threadIdx.x] = out.upper;
     }
 
+    uint32_t build_tape_tile = UINT32_MAX;
     if (tile != UINT32_MAX) {
         // Copy output to standard register before exiting
         const Clause c = clause_ptr[num_clauses - 1];
@@ -184,26 +182,15 @@ void TileRenderer::check(const uint32_t tile, const View& v)
         // If the tile is ambiguous, then record it as needing further refinement
         else if (u >= 0.0f && regs_lower[c.out][threadIdx.x] <= 0.0f) {
             tiles.insert_active(tile);
+            build_tape_tile = tile;
         }
     }
-}
 
-__global__ void TileRenderer_check(TileRenderer* r,
-                                   const uint32_t offset,
-                                   View v)
-{
-    // This should be a 1D kernel
-    assert(blockDim.y == 1);
-    assert(blockDim.z == 1);
-    assert(gridDim.y == 1);
-    assert(gridDim.z == 1);
+    ////////////////////////////////////////////////////////////////////////////
+    // Now, we build a tape for this tile (if it's active).  If it isn't active,
+    // then we use the thread to help copy stuff to shared memory, but don't
+    // write any tape data out.
 
-    const uint32_t tile = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
-}
-
-__device__ void TileRenderer::buildTape(const uint32_t tile)
-{
     // Pick a subset of the active array to use for this block
     auto active = this->active + blockIdx.x * tape.num_regs;
 
@@ -213,20 +200,16 @@ __device__ void TileRenderer::buildTape(const uint32_t tile)
 
     // Pick an offset CSG choices array, pointing to the last
     // set of choices (we'll walk this back as we process the tape)
-    auto choices = (this->choices + tile / LIBFIVE_CUDA_TILE_THREADS
-                                         * tape.num_csg_choices)
-                    + tape.num_csg_choices;
     uint32_t num_choices = 0;
 
     // Mark the root of the tree as true
-    uint32_t num_clauses = tape.num_clauses;
     active[tape[num_clauses - 1].out][threadIdx.x] = true;
 
     uint32_t subtape_index = 0;
     uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
 
     // Claim a subtape to populate
-    if (tile != UINT32_MAX) {
+    if (build_tape_tile != UINT32_MAX) {
         subtape_index = atomicAdd(&tiles.num_subtapes, 1);
         assert(subtape_index < LIBFIVE_CUDA_NUM_SUBTAPES);
 
@@ -235,14 +218,7 @@ __device__ void TileRenderer::buildTape(const uint32_t tile)
         tiles.subtapes.next[subtape_index] = 0;
     }
 
-    // We copy a chunk of the tape from constant to shared memory
-    constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS;
-    __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
-    assert(LIBFIVE_CUDA_TILE_THREADS == blockDim.x);
-
     // Walk from the root of the tape downwards
-    const Clause* __restrict__ const clause_ptr = &tape[0];
-    const uint32_t tile_index = tile % LIBFIVE_CUDA_TILE_THREADS;
     Clause* __restrict__ out = tiles.subtapes.data[subtape_index];
 
     for (uint32_t i=0; i < num_clauses; i++) {
@@ -258,16 +234,15 @@ __device__ void TileRenderer::buildTape(const uint32_t tile)
         }
 
         // Skip dummy tiles which don't actually do things
-        if (tile == UINT32_MAX) {
+        if (build_tape_tile == UINT32_MAX) {
             continue;
         }
-
         Clause c = clauses[SHARED_CLAUSE_SIZE - (i % SHARED_CLAUSE_SIZE) - 1];
 
         if (active[c.out][threadIdx.x]) {
             active[c.out][threadIdx.x] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice = (*(--choices))[tile_index];
+                const uint8_t choice = (*(--choices))[threadIdx.x];
                 if (choice == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs][threadIdx.x] = true;
@@ -328,29 +303,26 @@ __device__ void TileRenderer::buildTape(const uint32_t tile)
         }
     }
 
-    if (tile != UINT32_MAX) {
+    if (build_tape_tile != UINT32_MAX) {
         // The last subtape may not be completely filled
         tiles.subtapes.start[subtape_index] = s;
-        tiles.head(tile) = subtape_index;
-        tiles.choices(tile) = num_choices;
+        tiles.head(build_tape_tile) = subtape_index;
+        tiles.choices(build_tape_tile) = num_choices;
     }
 }
 
-__global__ void TileRenderer_buildTape(TileRenderer* r, const uint32_t offset)
+__global__ void TileRenderer_check(TileRenderer* r,
+                                   const uint32_t offset,
+                                   View v)
 {
-    // This is a 1D kernel which consumes a tile and writes out its tape
+    // This should be a 1D kernel
     assert(blockDim.y == 1);
     assert(blockDim.z == 1);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    // Pick out the next active tile
-    const uint32_t tile = (i < r->tiles.num_active)
-        ? r->tiles.active(i) : UINT32_MAX;
-
-    // Build the tape (dummy tiles help by moving data around)
-    r->buildTape(tile);
+    const uint32_t tile = threadIdx.x + blockIdx.x * blockDim.x + offset;
+    r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
 }
 
 __device__ void TileRenderer::drawFilled(const uint32_t tile)
@@ -1030,13 +1002,6 @@ void Renderable::run(const View& view)
         TileRenderer_drawFilled<<<LIBFIVE_CUDA_TILE_BLOCKS,
                                   LIBFIVE_CUDA_TILE_THREADS,
                                   0, streams[1]>>>(tile_renderer, i);
-    }
-
-    // Build subtapes in memory for ambiguous tiles
-    for (unsigned i=0; i < active_tiles; i += tile_stride) {
-        TileRenderer_buildTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                                 LIBFIVE_CUDA_TILE_THREADS,
-                                 0, streams[0]>>>(tile_renderer, i);
     }
 
     // Refine ambiguous tiles from their subtapes

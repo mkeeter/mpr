@@ -25,12 +25,9 @@ public:
 
     // Evaluates the given tile.
     //      Filled -> Pushes it to the list of filed tiles
-    //      Ambiguous -> Pushes it to the list of active tiles
+    //      Ambiguous -> Pushes it to the list of active tiles and builds tape
     //      Empty -> Does nothing
     __device__ void check(const uint32_t tile, const View& v);
-
-    // Builds a subtape for the given (active) tile
-    __device__ void buildTape(const uint32_t tile);
 
     // Fills in the given (filled) tile in the image
     __device__ void drawFilled(const uint32_t tile);
