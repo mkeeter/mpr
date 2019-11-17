@@ -362,43 +362,10 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
     }
 }
 
-__device__ void TileRenderer::reverseTape(const uint32_t tile)
-{
-    uint32_t subtape_index = tiles.head(tile);
-    uint32_t prev = 0;
-
-    while (true) {
-        const uint32_t next = tiles.subtapes.next[subtape_index];
-        tiles.subtapes.next[subtape_index] = prev;
-        if (next == 0) {
-            break;
-        } else {
-            prev = subtape_index;
-            subtape_index = next;
-        }
-    }
-    tiles.head(tile) = subtape_index;
-}
-
-__global__ void TileRenderer_reverseTape(TileRenderer* r, const uint32_t offset)
-{
-    // This is a 1D kernel which consumes a tile and writes out its tape
-    assert(blockDim.y == 1);
-    assert(blockDim.z == 1);
-    assert(gridDim.y == 1);
-    assert(gridDim.z == 1);
-
-    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    // Pick out the next active tile
-    if (i < r->tiles.num_active) {
-        r->reverseTape(r->tiles.active(i));
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
-                                 const TileRenderer& prev)
+                                 TileRenderer& prev)
     : tape(tape), image(image), tiles(prev.tiles),
       subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
 
@@ -570,6 +537,24 @@ void SubtileRenderer::check(const uint32_t subtile,
     // If the tile is ambiguous, then record it as needing further refinement
     else if (result.lower <= 0.0f && result.upper >= 0.0f) {
         subtiles.insert_active(subtile);
+    }
+
+    // Reverse the tape
+    if ((threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE) == 0) {
+        uint32_t subtape_index = tiles.head(tile);
+        uint32_t prev = 0;
+
+        while (true) {
+            const uint32_t next = tiles.subtapes.next[subtape_index];
+            tiles.subtapes.next[subtape_index] = prev;
+            if (next == 0) {
+                break;
+            } else {
+                prev = subtape_index;
+                subtape_index = next;
+            }
+        }
+        tiles.head(tile) = subtape_index;
     }
 }
 
@@ -1034,14 +1019,6 @@ void Renderable::run(const View& view)
                     subtile_renderer, i, view);
     }
 
-    // Reverse tapes in preparation for refining them further
-    const uint32_t reverse_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                    LIBFIVE_CUDA_TILE_THREADS;
-    for (unsigned i=0; i < active_tiles; i += reverse_stride) {
-        TileRenderer_reverseTape<<<LIBFIVE_CUDA_TILE_BLOCKS,
-            LIBFIVE_CUDA_TILE_THREADS, 0, streams[0]>>>(
-                    tile_renderer, i);
-    }
     cudaDeviceSynchronize();
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;

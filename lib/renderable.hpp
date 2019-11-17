@@ -27,13 +27,11 @@ public:
     //      Filled -> Pushes it to the list of filed tiles
     //      Ambiguous -> Pushes it to the list of active tiles and builds tape
     //      Empty -> Does nothing
+    //  Reverses the tapes
     __device__ void check(const uint32_t tile, const View& v);
 
     // Fills in the given (filled) tile in the image
     __device__ void drawFilled(const uint32_t tile);
-
-    // Reverses the given tile's tape
-    __device__ void reverseTape(const uint32_t tile);
 
     const Tape& tape;
     Image& image;
@@ -54,7 +52,7 @@ protected:
 
 class SubtileRenderer {
 public:
-    SubtileRenderer(const Tape& tape, Image& image, const TileRenderer& prev);
+    SubtileRenderer(const Tape& tape, Image& image, TileRenderer& prev);
     ~SubtileRenderer();
 
     using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE *
@@ -75,8 +73,8 @@ public:
     const Tape& tape;
     Image& image;
 
-    const Tiles& tiles; // Reference to tiles generated in previous stage
-    Tiles subtiles;     // New tiles generated in this stage
+    Tiles& tiles;   // Reference to tiles generated in previous stage
+    Tiles subtiles; // New tiles generated in this stage
 
 protected:
     uint8_t* const data;
