@@ -133,8 +133,8 @@ public:
     ~Renderable();
     void run(const View& v);
 
-    void registerTexture(GLuint t);
-    void copyToTexture();
+    static cudaGraphicsResource* registerTexture(GLuint t);
+    void copyToTexture(cudaGraphicsResource* gl_tex, bool append);
 
     Image image;
     Tape tape;
@@ -143,7 +143,6 @@ protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
 
     cudaStream_t streams[2];
-    cudaGraphicsResource* gl_tex;
 
     TileRenderer tile_renderer;
     SubtileRenderer subtile_renderer;

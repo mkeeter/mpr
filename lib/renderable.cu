@@ -941,7 +941,7 @@ __global__ void PixelRenderer_draw(PixelRenderer* r,
 
 ////////////////////////////////////////////////////////////////////////////////
 __global__
-void Renderable_copyToTexture(Renderable* r, cudaSurfaceObject_t surf)
+void Renderable_copyToTexture(Renderable* r, bool append, cudaSurfaceObject_t surf)
 {
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -951,7 +951,7 @@ void Renderable_copyToTexture(Renderable* r, cudaSurfaceObject_t surf)
         const uint8_t c = r->image(x, size - y - 1);
         if (c) {
             surf2Dwrite(0x00FFFFFF | (c << 24), surf, x*4, y);
-        } else {
+        } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
     }
@@ -1091,14 +1091,15 @@ void Renderable::run(const View& view)
     cudaDeviceSynchronize();
 }
 
-void Renderable::registerTexture(GLuint t)
+cudaGraphicsResource* Renderable::registerTexture(GLuint t)
 {
-    printf("Regsitering texture");
+    cudaGraphicsResource* gl_tex;
     CHECK(cudaGraphicsGLRegisterImage(&gl_tex, t, GL_TEXTURE_2D,
                                       cudaGraphicsMapFlagsWriteDiscard));
+    return gl_tex;
 }
 
-void Renderable::copyToTexture()
+void Renderable::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
 {
     cudaArray* array;
     CHECK(cudaGraphicsMapResources(1, &gl_tex));
@@ -1115,7 +1116,8 @@ void Renderable::copyToTexture()
     CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
     CHECK(cudaDeviceSynchronize());
-    Renderable_copyToTexture<<<dim3(256, 256), dim3(16, 16)>>>(this, surf);
+    Renderable_copyToTexture<<<dim3(256, 256), dim3(16, 16)>>>(
+            this, append, surf);
     CHECK(cudaGetLastError());
 
     CHECK(cudaDeviceSynchronize());

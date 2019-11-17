@@ -7,10 +7,7 @@
 #include "imgui_impl_opengl3.h"
 #include "TextEditor.h"
 
-#include "base.h"
-#include "log.h"
 #include "platform.h"
-#include "texture.h"
 
 #include "libfive-guile.h"
 #include "renderable.hpp"
@@ -273,7 +270,18 @@ R"((sequence
     ImVec2 center = ImVec2(0.0f, 0.0f);
     float scale = 100.0f; // scale = pixels per model units
 
-    texture_t* texture = texture_new(2048, 2048);
+    // Generate a texture which we'll draw into
+    GLuint gl_tex;
+    glGenTextures(1, &gl_tex);
+    glBindTexture(GL_TEXTURE_2D, gl_tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2048, 2048, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+    auto cuda_tex = Renderable::registerTexture(gl_tex);
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -339,11 +347,6 @@ R"((sequence
         ImGui::Begin("Text editor");
             if (needs_eval) {
                 interpreter.eval(editor.GetText());
-                if (interpreter.result_valid) {
-                    for (auto& s : interpreter.shapes) {
-                        s.second->registerTexture(texture->tex);
-                    }
-                }
             }
 
             float size = ImGui::GetContentRegionAvail().y;
@@ -373,6 +376,7 @@ R"((sequence
 
             const float cx = center.x * scale + io.DisplaySize.x / 2.0f;
             const float cy = center.y * scale + io.DisplaySize.y / 2.0f;
+            bool first = true;
             for (const auto& s : interpreter.shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
                 ImGui::Columns(2);
@@ -384,19 +388,19 @@ R"((sequence
                 ImGui::Columns(1);
 
                 auto before = platform_get_time();
-                s.second->run({{center.x, -center.y}, render_scale});
+                    s.second->run({{center.x, -center.y}, render_scale});
                 auto after = platform_get_time();
                 ImGui::Text("Render time: %f s", (after - before) / 1e6);
 
                 before = platform_get_time();
-                glBindTexture(GL_TEXTURE_2D, 0);
-                s.second->copyToTexture();
+                    s.second->copyToTexture(cuda_tex, !first);
+                    first = false;
                 after = platform_get_time();
                 ImGui::Text("Texture load time: %f s", (after - before) / 1e6);
 
                 ImGui::Separator();
 
-                background->AddImage((void*)(intptr_t)texture->tex,
+                background->AddImage((void*)(intptr_t)gl_tex,
                         {io.DisplaySize.x / 2.0f - max_pixels / 2.0f,
                          io.DisplaySize.y / 2.0f - max_pixels / 2.0f},
                         {io.DisplaySize.x / 2.0f + max_pixels / 2.0f,
