@@ -4,7 +4,7 @@ struct Tiles {
     Tiles(const uint32_t image_size_px, const uint32_t tile_size_px)
         : per_side(image_size_px / tile_size_px),
           total(per_side * per_side),
-          data(CUDA_MALLOC(uint32_t, 3 * total))
+          data(CUDA_MALLOC(uint32_t, 2 * total))
     {
         reset();
     }
@@ -19,8 +19,6 @@ struct Tiles {
         { return data[i]; }
     __host__ __device__ uint32_t head(uint32_t t) const
         { return data[total + t]; }
-    __host__ __device__ uint32_t choices(uint32_t t) const
-        { return data[2*total + t]; }
 
     __host__ __device__ uint32_t& filled(uint32_t i)
         { return data[total - i - 1]; }
@@ -28,8 +26,6 @@ struct Tiles {
         { return data[i]; }
     __host__ __device__ uint32_t& head(uint32_t t)
         { return data[total + t]; }
-    __host__ __device__ uint32_t& choices(uint32_t t)
-        { return data[2*total + t]; }
 
 #ifdef __CUDACC__
     __device__ void insert_filled(uint32_t t) {

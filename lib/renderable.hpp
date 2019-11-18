@@ -57,7 +57,10 @@ public:
 
     using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE *
                             LIBFIVE_CUDA_REFINE_TILES];
-    using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILE_THREADS];
+    using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+                                LIBFIVE_CUDA_REFINE_TILES];
+    using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+                                LIBFIVE_CUDA_REFINE_TILES];
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
@@ -82,7 +85,7 @@ protected:
     Registers* __restrict__ const regs_lower;
     Registers* __restrict__ const regs_upper;
     ActiveArray* __restrict__ const active;
-    uint8_t* __restrict__ const choices;
+    ChoiceArray* __restrict__ const choices;
 
     SubtileRenderer(const SubtileRenderer& other)=delete;
     SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
