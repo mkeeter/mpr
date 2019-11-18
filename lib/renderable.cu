@@ -363,15 +363,12 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
     : tape(tape), image(image), tiles(prev.tiles),
       subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
 
-      data(CUDA_MALLOC(uint8_t,
-        LIBFIVE_CUDA_SUBTILE_BLOCKS * std::max(
-            tape.num_regs * 2 * sizeof(Registers),
-            tape.num_regs * sizeof(ActiveArray)) +
-        subtiles.total * tape.num_csg_choices)),
-
-      regs_lower((Registers*)data),
+      regs_lower(CUDA_MALLOC(Registers,
+        LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs * 2)),
       regs_upper(regs_lower + LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs),
-      active((ActiveArray*)(data)),
+
+      active(CUDA_MALLOC(ActiveArray,
+                  LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
       choices(tape.num_csg_choices ?
               CUDA_MALLOC(ChoiceArray,
                   LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_csg_choices)
@@ -382,7 +379,8 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
 
 SubtileRenderer::~SubtileRenderer()
 {
-    CHECK(cudaFree(data));
+    CHECK(cudaFree(regs_lower));
+    CHECK(cudaFree(active));
     CHECK(cudaFree(choices));
 }
 
@@ -523,19 +521,6 @@ void SubtileRenderer::check(const uint32_t subtile,
         regs_upper[c.out][threadIdx.x] = out.upper;
     }
 
-    // If this tile is unambiguously filled, then mark it at the end
-    // of the tiles list
-    auto build_tape_subtile = UINT32_MAX;
-    if (result.upper < 0.0f) {
-        subtiles.insert_filled(subtile);
-    }
-
-    // If the tile is ambiguous, then record it as needing further refinement
-    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
-        subtiles.insert_active(subtile);
-        build_tape_subtile = subtile;
-    }
-
     ////////////////////////////////////////////////////////////////////////////
 
     // Reverse the tape
@@ -555,9 +540,21 @@ void SubtileRenderer::check(const uint32_t subtile,
         }
         tiles.head(tile) = subtape_index;
     }
-
     __syncthreads();
-    if (build_tape_subtile == UINT32_MAX) {
+
+    // If this tile is unambiguously filled, then mark it at the end
+    // of the tiles list
+    if (result.upper < 0.0f) {
+        subtiles.insert_filled(subtile);
+        return;
+    }
+
+    // If the tile is ambiguous, then record it as needing further refinement
+    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+        subtiles.insert_active(subtile);
+    }
+
+    else {
         return;
     }
 
