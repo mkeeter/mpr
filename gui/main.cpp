@@ -2,6 +2,8 @@
 // If you are new to dear imgui, see examples/README.txt and documentation at the top of imgui.cpp.
 // (GLFW is a cross-platform general purpose library for handling windows, inputs, OpenGL/Vulkan graphics context creation, etc.)
 
+#include <fstream>
+
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -199,7 +201,7 @@ eval-sandboxed
 
 ////////////////////////////////////////////////////////////////////////////////
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
     // Setup window
     glfwSetErrorCallback(glfw_error_callback);
@@ -244,20 +246,20 @@ int main(int, char**)
 
     // Create our text editor
     TextEditor editor;
-    editor.SetText(
-R"((sequence
-   (text (string-append
-    "I'll break my staff\n"
-    "Bury it certain fathoms\n"
-    "   in the earth\n"
-    "And deeper than did\n"
-    "   ever plummet sound\n"
-    "I'll drown my book!"))
-   (extrude-z -0.1 0.1)
-   (move [-6.5 2.5])
-   (scale-x 0.125)
-   (scale-y 0.125)
-) )");
+    if (argc > 1) {
+        std::ifstream input(argv[1]);
+        if (input.is_open()) {
+            std::vector<std::string> lines;
+            std::string line;
+            while (std::getline(input, line)) {
+                lines.emplace_back(std::move(line));
+            }
+            input.close();
+            editor.SetTextLines(lines);
+        } else {
+            std::cerr << "Could not open file '" << argv[1] << "'\n";
+        }
+    }
 
     // Create the interpreter
     Interpreter interpreter;
