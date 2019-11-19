@@ -128,8 +128,8 @@ void TileRenderer::check(const uint32_t tile, const View& v)
         Interval out;
         uint8_t choice = 0;
         switch (c.opcode) {
-            case OP_SQUARE: out = lhs.square(); break;
-            case OP_SQRT: out = lhs.sqrt(); break;
+            case OP_SQUARE: out = square(lhs); break;
+            case OP_SQRT: out = sqrt(lhs); break;
             case OP_NEG: out = -lhs; break;
             // Skipping transcendental functions for now
 
@@ -143,7 +143,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
                              choice = 2;
                              out = rhs;
                          } else {
-                             out = lhs.min(rhs);
+                             out = min(lhs, rhs);
                          }
                          (*choices++)[threadIdx.x] = choice;
                          break;
@@ -154,7 +154,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
                              choice = 2;
                              out = rhs;
                          } else {
-                             out = lhs.max(rhs);
+                             out = max(lhs, rhs);
                          }
                          (*choices++)[threadIdx.x] = choice;
                          break;
@@ -486,8 +486,8 @@ void SubtileRenderer::check(const uint32_t subtile,
         Interval out;
         uint8_t choice = 0;
         switch (c.opcode) {
-            case OP_SQUARE: out = lhs.square(); break;
-            case OP_SQRT: out = lhs.sqrt(); break;
+            case OP_SQUARE: out = square(lhs); break;
+            case OP_SQRT: out = sqrt(lhs); break;
             case OP_NEG: out = -lhs; break;
             // Skipping transcendental functions for now
 
@@ -501,7 +501,7 @@ void SubtileRenderer::check(const uint32_t subtile,
                              out = rhs;
                              choice = 2;
                          } else {
-                             out = lhs.min(rhs);
+                             out = min(lhs, rhs);
                          }
                          (*choices++)[threadIdx.x] = choice;
                          break;
@@ -512,7 +512,7 @@ void SubtileRenderer::check(const uint32_t subtile,
                              out = rhs;
                              choice = 2;
                          } else {
-                             out = lhs.max(rhs);
+                             out = max(lhs, rhs);
                          }
                          (*choices++)[threadIdx.x] = choice;
                          break;
