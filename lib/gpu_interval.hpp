@@ -7,11 +7,11 @@ struct Interval {
     float upper;
 
 #ifdef __CUDACC__
-    __device__ inline Interval operator+(const Interval& other) {
+    __device__ inline Interval operator+(const Interval& other) const {
         return {__fadd_rd(lower, other.lower), __fadd_ru(upper, other.upper)};
     }
 
-    __device__ inline Interval operator*(const Interval& other) {
+    __device__ inline Interval operator*(const Interval& other) const {
         if (lower < 0.0f) {
             if (upper > 0.0f) {
                 if (other.lower < 0.0f) {
@@ -74,8 +74,10 @@ struct Interval {
         }
     }
 
-    __device__ inline Interval operator/(const Interval& other) {
-        if (upper < 0.0f) {
+    __device__ inline Interval operator/(const Interval& other) const {
+        if (other.lower <= 0.0f && other.upper >= 0.0f) {
+            return {-CUDART_INF_F, CUDART_INF_F};
+        } else if (upper < 0.0f) {
             if (other.upper < 0.0f) {
                 return { __fdiv_rd(upper, other.lower),
                          __fdiv_ru(lower, other.upper) };

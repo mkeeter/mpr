@@ -172,16 +172,20 @@ void TileRenderer::check(const uint32_t tile, const View& v)
     if (tile != UINT32_MAX) {
         // Copy output to standard register before exiting
         const Clause c = clause_ptr[num_clauses - 1];
-        const float u = regs_upper[c.out][threadIdx.x];
+        const Interval result = {regs_lower[c.out][threadIdx.x],
+                                 regs_upper[c.out][threadIdx.x]};
 
         // If this tile is unambiguously filled, then mark it at the end
         // of the tiles list
-        if (u < 0.0f) {
+        if (result.upper < 0.0f) {
             tiles.insert_filled(tile);
         }
 
         // If the tile is ambiguous, then record it as needing further refinement
-        else if (u >= 0.0f && regs_lower[c.out][threadIdx.x] <= 0.0f) {
+        else if ((result.lower <= 0.0f && result.upper >= 0.0f)
+                || isnan(result.lower)
+                || isnan(result.upper))
+        {
             tiles.insert_active(tile);
             build_tape_tile = tile;
         }
@@ -550,7 +554,10 @@ void SubtileRenderer::check(const uint32_t subtile,
     }
 
     // If the tile is ambiguous, then record it as needing further refinement
-    else if (result.lower <= 0.0f && result.upper >= 0.0f) {
+    else if ((result.lower <= 0.0f && result.upper >= 0.0f)
+            || isnan(result.lower)
+            || isnan(result.upper))
+    {
         subtiles.insert_active(subtile);
     }
 
