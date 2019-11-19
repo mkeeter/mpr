@@ -246,6 +246,7 @@ int main(int argc, char** argv)
 
     // Create our text editor
     TextEditor editor;
+    bool from_file = false;
     if (argc > 1) {
         std::ifstream input(argv[1]);
         if (input.is_open()) {
@@ -256,6 +257,7 @@ int main(int argc, char** argv)
             }
             input.close();
             editor.SetTextLines(lines);
+            from_file = true;
         } else {
             std::cerr << "Could not open file '" << argv[1] << "'\n";
         }
@@ -285,6 +287,8 @@ int main(int argc, char** argv)
                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
     auto cuda_tex = Renderable::registerTexture(gl_tex);
+
+    bool just_saved = false;
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -330,6 +334,25 @@ int main(int argc, char** argv)
                 // Shift so that world position is constant
                 center.x += (ex - sx);
                 center.y += (ey - sy);
+            }
+        }
+
+        if (!io.WantCaptureKeyboard) {
+            if (io.KeySuper && io.KeysDown[GLFW_KEY_S]) {
+                if (!just_saved && from_file) {
+                    std::ofstream output(argv[1]);
+                    if (output.is_open()) {
+                        for (auto& line: editor.GetTextLines()) {
+                            output << line << "\n";
+                        }
+                        output.close();
+                    } else {
+                        std::cerr << "Failed to save to '" << argv[1] << "'\n";
+                    }
+                    just_saved = true;
+                }
+            } else {
+                just_saved = false;
             }
         }
 
