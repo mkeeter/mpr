@@ -78,7 +78,7 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
       tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
 
       regs(CUDA_MALLOC(Registers, LIBFIVE_CUDA_TILE_BLOCKS *
-                                        tape.num_regs)),
+                                      tape.num_regs)),
       active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_TILE_BLOCKS *
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
