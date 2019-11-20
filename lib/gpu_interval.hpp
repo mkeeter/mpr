@@ -3,18 +3,52 @@
 #include <math_constants.h>
 
 struct Interval {
+    __device__ Interval() : lower(0.0f), upper(0.0f) {}
+    __device__ Interval(float f) : lower(f), upper(f) {}
+    __device__ Interval(float a, float b) : lower(a), upper(b) {}
     float lower;
     float upper;
-
-    __device__ inline Interval operator-() const {
-        return {-upper, -lower};
-    }
 };
 
 #ifdef __CUDACC__
+
+__device__ inline float upper(const Interval& x) {
+    return x.upper;
+}
+
+__device__ inline float upper(const float& x) {
+    return x;
+}
+
+__device__ inline float lower(const Interval& x) {
+    return x.lower;
+}
+
+__device__ inline float lower(const float& x) {
+    return x;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+__device__ inline Interval operator-(const Interval& x) {
+    return {-x.upper, -x.lower};
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 __device__ inline Interval operator+(const Interval& x, const Interval& y) {
     return {__fadd_rd(x.lower, y.lower), __fadd_ru(x.upper, y.upper)};
 }
+
+__device__ inline Interval operator+(const Interval& x, const float& y) {
+    return {__fadd_rd(x.lower, y), __fadd_ru(x.upper, y)};
+}
+
+__device__ inline Interval operator+(const float& y, const Interval& x) {
+    return x + y;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 __device__ inline Interval operator*(const Interval& x, const Interval& y) {
     if (x.lower < 0.0f) {
@@ -79,6 +113,20 @@ __device__ inline Interval operator*(const Interval& x, const Interval& y) {
     }
 }
 
+__device__ inline Interval operator*(const Interval& x, const float& y) {
+    if (y < 0.0f) {
+        return {__fmul_rd(x.upper, y), __fmul_ru(x.lower, y)};
+    } else {
+        return {__fmul_rd(x.lower, y), __fmul_ru(x.upper, y)};
+    }
+}
+
+__device__ inline Interval operator*(const float& x, const Interval& y) {
+    return y * x;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 __device__ inline Interval operator/(const Interval& x, const Interval& y) {
     if (y.lower <= 0.0f && y.upper >= 0.0f) {
         return {-CUDART_INF_F, CUDART_INF_F};
@@ -109,14 +157,46 @@ __device__ inline Interval operator/(const Interval& x, const Interval& y) {
     }
 }
 
+__device__ inline Interval operator/(const Interval& x, const float& y) {
+    if (y < 0.0f) {
+        return { __fdiv_rd(x.upper, y), __fdiv_ru(x.lower, y) };
+    } else if (y > 0.0f) {
+        return { __fdiv_rd(x.lower, y), __fdiv_ru(x.upper, y) };
+    } else {
+        return {-CUDART_INF_F, CUDART_INF_F};
+    }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+
 __device__ inline Interval min(const Interval& x, const Interval& y) {
     return {fminf(x.lower, y.lower), fminf(x.upper, y.upper)};
 }
+
+__device__ inline Interval min(const Interval& x, const float& y) {
+    return {fminf(x.lower, y), fminf(x.upper, y)};
+}
+
+__device__ inline Interval min(const float& x, const Interval& y) {
+    return min(y, x);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 __device__ inline Interval max(const Interval& x, const Interval& y) {
     return {fmaxf(x.lower, y.lower), fmaxf(x.upper, y.upper)};
 }
 
+__device__ inline Interval max(const Interval& x, const float& y) {
+    return {fmaxf(x.lower, y), fmaxf(x.upper, y)};
+}
+
+__device__ inline Interval max(const float& x, const Interval& y) {
+    return max(y, x);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 __device__ inline Interval square(const Interval& x) {
     if (x.upper < 0.0f) {
@@ -130,8 +210,22 @@ __device__ inline Interval square(const Interval& x) {
     }
 }
 
+__device__ inline float square(const float& x) {
+    return x * x;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 __device__ inline Interval operator-(const Interval& x, const Interval& y) {
     return {__fsub_rd(x.lower, y.upper), __fsub_ru(x.upper, y.lower)};
+}
+
+__device__ inline Interval operator-(const Interval& x, const float& y) {
+    return {__fsub_rd(x.lower, y), __fsub_ru(x.upper, y)};
+}
+
+__device__ inline Interval operator-(const float& x, const Interval& y) {
+    return {__fsub_rd(x, y.upper), __fsub_ru(x, y.lower)};
 }
 
 __device__ inline Interval sqrt(const Interval& x) {

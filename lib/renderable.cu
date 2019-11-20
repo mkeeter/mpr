@@ -33,6 +33,47 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     }
 }
 
+template <typename A, typename B, typename C>
+__device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, C*& choices)
+{
+    using namespace libfive::Opcode;
+    switch (op) {
+        case OP_SQUARE: return square(lhs);
+        case OP_SQRT: return sqrt(lhs);
+        case OP_NEG: return -lhs;
+        // Skipping transcendental functions for now
+
+        case OP_ADD: return lhs + rhs;
+        case OP_MUL: return lhs * rhs;
+        case OP_DIV: return lhs / rhs;
+        case OP_MIN: if (upper(lhs) < lower(rhs)) {
+                         (*choices++)[threadIdx.x] = 1;
+                         return lhs;
+                     } else if (upper(rhs) < lower(lhs)) {
+                         (*choices++)[threadIdx.x] = 2;
+                         return rhs;
+                     } else {
+                         (*choices++)[threadIdx.x] = 0;
+                         return min(lhs, rhs);
+                     }
+        case OP_MAX: if (lower(lhs) > upper(rhs)) {
+                         (*choices++)[threadIdx.x] = 1;
+                         return lhs;
+                     } else if (lower(rhs) > upper(lhs)) {
+                         (*choices++)[threadIdx.x] = 2;
+                         return rhs;
+                     } else {
+                         (*choices++)[threadIdx.x] = 0;
+                         return max(lhs, rhs);
+                     }
+        case OP_SUB: return lhs - rhs;
+
+        // Skipping various hard functions here
+        default: break;
+    }
+    return {0.0f, 0.0f};
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 TileRenderer::TileRenderer(const Tape& tape, Image& image)
@@ -125,44 +166,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
             rhs.upper = regs_upper[c.rhs][threadIdx.x];
         }
 
-        Interval out;
-        uint8_t choice = 0;
-        switch (c.opcode) {
-            case OP_SQUARE: out = square(lhs); break;
-            case OP_SQRT: out = sqrt(lhs); break;
-            case OP_NEG: out = -lhs; break;
-            // Skipping transcendental functions for now
-
-            case OP_ADD: out = lhs + rhs; break;
-            case OP_MUL: out = lhs * rhs; break;
-            case OP_DIV: out = lhs / rhs; break;
-            case OP_MIN: if (lhs.upper < rhs.lower) {
-                             choice = 1;
-                             out = lhs;
-                         } else if (rhs.upper < lhs.lower) {
-                             choice = 2;
-                             out = rhs;
-                         } else {
-                             out = min(lhs, rhs);
-                         }
-                         (*choices++)[threadIdx.x] = choice;
-                         break;
-            case OP_MAX: if (lhs.lower > rhs.upper) {
-                             choice = 1;
-                             out = lhs;
-                         } else if (rhs.lower > lhs.upper) {
-                             choice = 2;
-                             out = rhs;
-                         } else {
-                             out = max(lhs, rhs);
-                         }
-                         (*choices++)[threadIdx.x] = choice;
-                         break;
-            case OP_SUB: out = lhs - rhs; break;
-
-            // Skipping various hard functions here
-            default: break;
-        }
+        Interval out = intervalOp(c.opcode, lhs, rhs, choices);
 
         regs_lower[c.out][threadIdx.x] = out.lower;
         regs_upper[c.out][threadIdx.x] = out.upper;
@@ -483,44 +487,7 @@ void SubtileRenderer::check(const uint32_t subtile,
             rhs.upper = regs_upper[c.rhs][threadIdx.x];
         }
 
-        Interval out;
-        uint8_t choice = 0;
-        switch (c.opcode) {
-            case OP_SQUARE: out = square(lhs); break;
-            case OP_SQRT: out = sqrt(lhs); break;
-            case OP_NEG: out = -lhs; break;
-            // Skipping transcendental functions for now
-
-            case OP_ADD: out = lhs + rhs; break;
-            case OP_MUL: out = lhs * rhs; break;
-            case OP_DIV: out = lhs / rhs; break;
-            case OP_MIN: if (lhs.upper < rhs.lower) {
-                             out = lhs;
-                             choice = 1;
-                         } else if (rhs.upper < lhs.lower) {
-                             out = rhs;
-                             choice = 2;
-                         } else {
-                             out = min(lhs, rhs);
-                         }
-                         (*choices++)[threadIdx.x] = choice;
-                         break;
-            case OP_MAX: if (lhs.lower > rhs.upper) {
-                             out = lhs;
-                             choice = 1;
-                         } else if (rhs.lower > lhs.upper) {
-                             out = rhs;
-                             choice = 2;
-                         } else {
-                             out = max(lhs, rhs);
-                         }
-                         (*choices++)[threadIdx.x] = choice;
-                         break;
-            case OP_SUB: out = lhs - rhs; break;
-
-            // Skipping various hard functions here
-            default: break;
-        }
+        Interval out = intervalOp(c.opcode, lhs, rhs, choices);
         regs_lower[c.out][threadIdx.x] = out.lower;
         regs_upper[c.out][threadIdx.x] = out.upper;
     }
