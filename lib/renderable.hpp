@@ -19,7 +19,7 @@ public:
     ~TileRenderer();
 
     // These are blocks of data which should be indexed as i[threadIdx.x]
-    using Registers = float[LIBFIVE_CUDA_TILE_THREADS];
+    using Registers = Interval[LIBFIVE_CUDA_TILE_THREADS];
     using ChoiceArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
     using ActiveArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
 
@@ -39,8 +39,7 @@ public:
     Tiles tiles;
 
 protected:
-    Registers* __restrict__ const regs_lower;
-    Registers* __restrict__ const regs_upper;
+    Registers* __restrict__ const regs;
     ActiveArray* __restrict__ const active;
     ChoiceArray* __restrict__ const choices;
 
@@ -55,8 +54,8 @@ public:
     SubtileRenderer(const Tape& tape, Image& image, TileRenderer& prev);
     ~SubtileRenderer();
 
-    using Registers = float[LIBFIVE_CUDA_SUBTILES_PER_TILE *
-                            LIBFIVE_CUDA_REFINE_TILES];
+    using Registers = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+                               LIBFIVE_CUDA_REFINE_TILES];
     using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
                                 LIBFIVE_CUDA_REFINE_TILES];
     using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
@@ -80,8 +79,7 @@ public:
     Tiles subtiles; // New tiles generated in this stage
 
 protected:
-    Registers* __restrict__ const regs_lower;
-    Registers* __restrict__ const regs_upper;
+    Registers* __restrict__ const regs;
     ActiveArray* __restrict__ const active;
     ChoiceArray* __restrict__ const choices;
 

@@ -6,8 +6,7 @@
 template <typename R>
 __device__ void storeAxes(const uint32_t index, const uint32_t tile,
                           const View& v, const Tiles& tiles, const Tape& tape,
-                          R* const __restrict__ lower,
-                          R* const __restrict__ upper)
+                          R* const __restrict__ regs)
 {
    // Prepopulate axis values
     const float x = tile / tiles.per_side;
@@ -15,20 +14,18 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
 
     Interval vs[3];
     const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
-    vs[0].lower = 2.0f * (X.lower - 0.5f) * v.scale - v.center[0];
-    vs[0].upper = 2.0f * (X.upper - 0.5f) * v.scale - v.center[0];
+    vs[0] = {2.0f * (X.lower() - 0.5f) * v.scale - v.center[0],
+             2.0f * (X.upper() - 0.5f) * v.scale - v.center[0]};
 
     const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
-    vs[1].lower = 2.0f * (Y.lower - 0.5f) * v.scale - v.center[1];
-    vs[1].upper = 2.0f * (Y.upper - 0.5f) * v.scale - v.center[1];
+    vs[1] = {2.0f * (Y.lower() - 0.5f) * v.scale - v.center[1],
+             2.0f * (Y.upper() - 0.5f) * v.scale - v.center[1]};
 
-    vs[2].lower = 0.0f;
-    vs[2].upper = 0.0f;
+    vs[2] = {0.0f, 0.0f};
 
     for (unsigned i=0; i < 3; ++i) {
         if (tape.axes.reg[i] != UINT16_MAX) {
-            lower[tape.axes.reg[i]][index] = vs[i].lower;
-            upper[tape.axes.reg[i]][index] = vs[i].upper;
+            regs[tape.axes.reg[i]][index] = vs[i];
         }
     }
 }
@@ -80,9 +77,8 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
     : tape(tape), image(image),
       tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
 
-      regs_lower(CUDA_MALLOC(Registers, LIBFIVE_CUDA_TILE_BLOCKS *
-                                        tape.num_regs * 2)),
-      regs_upper(regs_lower + LIBFIVE_CUDA_TILE_BLOCKS * tape.num_regs),
+      regs(CUDA_MALLOC(Registers, LIBFIVE_CUDA_TILE_BLOCKS *
+                                        tape.num_regs)),
       active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_TILE_BLOCKS *
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
@@ -95,7 +91,7 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
 
 TileRenderer::~TileRenderer()
 {
-    CHECK(cudaFree(regs_lower));
+    CHECK(cudaFree(regs));
     CHECK(cudaFree(active));
     CHECK(cudaFree(choices));
 }
@@ -103,9 +99,8 @@ TileRenderer::~TileRenderer()
 __device__
 void TileRenderer::check(const uint32_t tile, const View& v)
 {
-    auto regs_lower = this->regs_lower + tape.num_regs * blockIdx.x;
-    auto regs_upper = this->regs_upper + tape.num_regs * blockIdx.x;
-    storeAxes(threadIdx.x, tile, v, tiles, tape, regs_lower, regs_upper);
+    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    storeAxes(threadIdx.x, tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
     auto choices = this->choices + tape.num_csg_choices * blockIdx.x;
@@ -144,51 +139,49 @@ void TileRenderer::check(const uint32_t tile, const View& v)
         }
 
         const Clause c = clauses[i % SHARED_CLAUSE_SIZE];
-        // All clauses must have at least one argument, since constants
-        // and VAR_X/Y/Z are handled separately.
-        Interval lhs;
-        if (c.banks & 1) {
-            const float f = constant_lhs[i % SHARED_CLAUSE_SIZE];
-            lhs.lower = f;
-            lhs.upper = f;
-        } else {
-            lhs.lower = regs_lower[c.lhs][threadIdx.x];
-            lhs.upper = regs_upper[c.lhs][threadIdx.x];
+        Interval out;
+        switch (c.banks) {
+            case 0: // Interval op Interval
+                out = intervalOp<Interval, Interval>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        regs[c.rhs][threadIdx.x], choices);
+                break;
+            case 1: // Constant op Interval
+                out = intervalOp<float, Interval>(c.opcode,
+                        constant_lhs[i % SHARED_CLAUSE_SIZE],
+                        regs[c.rhs][threadIdx.x], choices);
+                break;
+            case 2: // Interval op Constant
+                out = intervalOp<Interval, float>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        constant_rhs[i % SHARED_CLAUSE_SIZE], choices);
+                break;
+            case 3: // Constant op Constant
+                out = intervalOp<float, float>(c.opcode,
+                        constant_lhs[i % SHARED_CLAUSE_SIZE],
+                        constant_rhs[i % SHARED_CLAUSE_SIZE], choices);
+                break;
         }
 
-        Interval rhs;
-        if (c.banks & 2) {
-            const float f = constant_rhs[i % SHARED_CLAUSE_SIZE];
-            rhs.lower = f;
-            rhs.upper = f;
-        } else if (c.opcode >= OP_ADD) {
-            rhs.lower = regs_lower[c.rhs][threadIdx.x];
-            rhs.upper = regs_upper[c.rhs][threadIdx.x];
-        }
-
-        Interval out = intervalOp(c.opcode, lhs, rhs, choices);
-
-        regs_lower[c.out][threadIdx.x] = out.lower;
-        regs_upper[c.out][threadIdx.x] = out.upper;
+        regs[c.out][threadIdx.x] = out;
     }
 
     uint32_t build_tape_tile = UINT32_MAX;
     if (tile != UINT32_MAX) {
         // Copy output to standard register before exiting
         const Clause c = clause_ptr[num_clauses - 1];
-        const Interval result = {regs_lower[c.out][threadIdx.x],
-                                 regs_upper[c.out][threadIdx.x]};
+        const Interval result = regs[c.out][threadIdx.x];
 
         // If this tile is unambiguously filled, then mark it at the end
         // of the tiles list
-        if (result.upper < 0.0f) {
+        if (result.upper() < 0.0f) {
             tiles.insert_filled(tile);
         }
 
         // If the tile is ambiguous, then record it as needing further refinement
-        else if ((result.lower <= 0.0f && result.upper >= 0.0f)
-                || isnan(result.lower)
-                || isnan(result.upper))
+        else if ((result.lower() <= 0.0f && result.upper() >= 0.0f)
+                || isnan(result.lower())
+                || isnan(result.upper()))
         {
             tiles.insert_active(tile);
             build_tape_tile = tile;
@@ -371,9 +364,8 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
     : tape(tape), image(image), tiles(prev.tiles),
       subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
 
-      regs_lower(CUDA_MALLOC(Registers,
-        LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs * 2)),
-      regs_upper(regs_lower + LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs),
+      regs(CUDA_MALLOC(Registers,
+        LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
 
       active(CUDA_MALLOC(ActiveArray,
                   LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
@@ -387,7 +379,7 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
 
 SubtileRenderer::~SubtileRenderer()
 {
-    CHECK(cudaFree(regs_lower));
+    CHECK(cudaFree(regs));
     CHECK(cudaFree(active));
     CHECK(cudaFree(choices));
 }
@@ -397,9 +389,8 @@ void SubtileRenderer::check(const uint32_t subtile,
                             const uint32_t tile,
                             const View& v)
 {
-    auto regs_lower = this->regs_lower + tape.num_regs * blockIdx.x;
-    auto regs_upper = this->regs_upper + tape.num_regs * blockIdx.x;
-    storeAxes(threadIdx.x, subtile, v, subtiles, tape, regs_lower, regs_upper);
+    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    storeAxes(threadIdx.x, subtile, v, subtiles, tape, regs);
 
     auto choices = this->choices + tape.num_csg_choices * blockIdx.x;
 
@@ -458,38 +449,37 @@ void SubtileRenderer::check(const uint32_t subtile,
                 next_start = tiles.subtapes.start[next];
                 length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
             } else {
-                result.lower = regs_lower[tape[s - 1].out][threadIdx.x];
-                result.upper = regs_upper[tape[s - 1].out][threadIdx.x];
+                result = regs[tape[s - 1].out][threadIdx.x];
                 break;
             }
         }
         const Clause c = tape[s++];
 
-        // All clauses must have at least one argument, since constants
-        // and VAR_X/Y/Z are handled separately.
-        Interval lhs;
-        if (c.banks & 1) {
-            const float f = constant_ptr[c.lhs];
-            lhs.lower = f;
-            lhs.upper = f;
-        } else {
-            lhs.lower = regs_lower[c.lhs][threadIdx.x];
-            lhs.upper = regs_upper[c.lhs][threadIdx.x];
+        Interval out;
+        switch (c.banks) {
+            case 0: // Interval op Interval
+                out = intervalOp<Interval, Interval>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        regs[c.rhs][threadIdx.x], choices);
+                break;
+            case 1: // Constant op Interval
+                out = intervalOp<float, Interval>(c.opcode,
+                        constant_ptr[c.lhs],
+                        regs[c.rhs][threadIdx.x], choices);
+                break;
+            case 2: // Interval op Constant
+                out = intervalOp<Interval, float>(c.opcode,
+                         regs[c.lhs][threadIdx.x],
+                         constant_ptr[c.rhs], choices);
+                break;
+            case 3: // Constant op Constant
+                out = intervalOp<float, float>(c.opcode,
+                        constant_ptr[c.lhs],
+                        constant_ptr[c.rhs], choices);
+                break;
         }
 
-        Interval rhs;
-        if (c.banks & 2) {
-            const float f = constant_ptr[c.rhs];
-            rhs.lower = f;
-            rhs.upper = f;
-        } else if (c.opcode >= OP_ADD) {
-            rhs.lower = regs_lower[c.rhs][threadIdx.x];
-            rhs.upper = regs_upper[c.rhs][threadIdx.x];
-        }
-
-        Interval out = intervalOp(c.opcode, lhs, rhs, choices);
-        regs_lower[c.out][threadIdx.x] = out.lower;
-        regs_upper[c.out][threadIdx.x] = out.upper;
+        regs[c.out][threadIdx.x] = out;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -515,15 +505,15 @@ void SubtileRenderer::check(const uint32_t subtile,
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
-    if (result.upper < 0.0f) {
+    if (result.upper() < 0.0f) {
         subtiles.insert_filled(subtile);
         return;
     }
 
     // If the tile is ambiguous, then record it as needing further refinement
-    else if ((result.lower <= 0.0f && result.upper >= 0.0f)
-            || isnan(result.lower)
-            || isnan(result.upper))
+    else if ((result.lower() <= 0.0f && result.upper() >= 0.0f)
+            || isnan(result.lower())
+            || isnan(result.upper()))
     {
         subtiles.insert_active(subtile);
     }
