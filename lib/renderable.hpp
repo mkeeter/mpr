@@ -20,7 +20,7 @@ public:
 
     // These are blocks of data which should be indexed as i[threadIdx.x]
     using Registers = Interval[LIBFIVE_CUDA_TILE_THREADS];
-    using ChoiceArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
+    using ChoiceArray = uint64_t[LIBFIVE_CUDA_TILE_THREADS];
     using ActiveArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
 
     // Evaluates the given tile.
@@ -58,8 +58,8 @@ public:
                                LIBFIVE_CUDA_REFINE_TILES];
     using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
                                 LIBFIVE_CUDA_REFINE_TILES];
-    using ChoiceArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
-                                LIBFIVE_CUDA_REFINE_TILES];
+    using ChoiceArray = uint64_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+                                 LIBFIVE_CUDA_REFINE_TILES];
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles

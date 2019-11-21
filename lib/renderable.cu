@@ -30,8 +30,9 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     }
 }
 
-template <typename A, typename B, typename C>
-__device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, C*& choices)
+template <typename A, typename B>
+__device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs,
+                                      uint64_t& choice, uint8_t choice_index)
 {
     using namespace libfive::Opcode;
     switch (op) {
@@ -44,23 +45,21 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, C*& choices)
         case OP_MUL: return lhs * rhs;
         case OP_DIV: return lhs / rhs;
         case OP_MIN: if (upper(lhs) < lower(rhs)) {
-                         (*choices++)[threadIdx.x] = 1;
+                         choice |= (1UL << choice_index);
                          return lhs;
                      } else if (upper(rhs) < lower(lhs)) {
-                         (*choices++)[threadIdx.x] = 2;
+                         choice |= (2UL << choice_index);
                          return rhs;
                      } else {
-                         (*choices++)[threadIdx.x] = 0;
                          return min(lhs, rhs);
                      }
         case OP_MAX: if (lower(lhs) > upper(rhs)) {
-                         (*choices++)[threadIdx.x] = 1;
+                         choice |= (1UL << choice_index);
                          return lhs;
                      } else if (lower(rhs) > upper(lhs)) {
-                         (*choices++)[threadIdx.x] = 2;
+                         choice |= (2UL << choice_index);
                          return rhs;
                      } else {
-                         (*choices++)[threadIdx.x] = 0;
                          return max(lhs, rhs);
                      }
         case OP_SUB: return lhs - rhs;
@@ -83,7 +82,8 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
                                       tape.num_regs)),
       choices(tape.num_csg_choices ?
               CUDA_MALLOC(ChoiceArray,
-                LIBFIVE_CUDA_TILE_BLOCKS * tape.num_csg_choices)
+                    LIBFIVE_CUDA_TILE_BLOCKS *
+                    ((tape.num_csg_choices + 31) / 32))
               : nullptr)
 {
     // Nothing to do here
@@ -103,7 +103,9 @@ void TileRenderer::check(const uint32_t tile, const View& v)
     storeAxes(threadIdx.x, tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
-    auto choices = this->choices + tape.num_csg_choices * blockIdx.x;
+    auto choices = this->choices + ((tape.num_csg_choices + 31) / 32) * blockIdx.x;
+    uint64_t choice = 0;
+    uint8_t choice_index = 0;
 
     const Clause* __restrict__ clause_ptr = &tape[0];
     const float* __restrict__ constant_ptr = &tape.constant(0);
@@ -144,23 +146,35 @@ void TileRenderer::check(const uint32_t tile, const View& v)
             case 0: // Interval op Interval
                 out = intervalOp<Interval, Interval>(c.opcode,
                         regs[c.lhs][threadIdx.x],
-                        regs[c.rhs][threadIdx.x], choices);
+                        regs[c.rhs][threadIdx.x],
+                        choice, choice_index);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, Interval>(c.opcode,
                         constant_lhs[i % SHARED_CLAUSE_SIZE],
-                        regs[c.rhs][threadIdx.x], choices);
+                        regs[c.rhs][threadIdx.x],
+                        choice, choice_index);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<Interval, float>(c.opcode,
                         regs[c.lhs][threadIdx.x],
-                        constant_rhs[i % SHARED_CLAUSE_SIZE], choices);
+                        constant_rhs[i % SHARED_CLAUSE_SIZE],
+                        choice, choice_index);
                 break;
             case 3: // Constant op Constant
                 out = intervalOp<float, float>(c.opcode,
                         constant_lhs[i % SHARED_CLAUSE_SIZE],
-                        constant_rhs[i % SHARED_CLAUSE_SIZE], choices);
+                        constant_rhs[i % SHARED_CLAUSE_SIZE],
+                        choice, choice_index);
                 break;
+        }
+        if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            choice_index += 2;
+            if (choice_index == sizeof(choice) * 8) {
+                (*(choices++))[threadIdx.x] = choice;
+                choice = 0;
+                choice_index = 0;
+            }
         }
 
         regs[c.out][threadIdx.x] = out;
@@ -237,11 +251,19 @@ void TileRenderer::check(const uint32_t tile, const View& v)
         }
         Clause c = clauses[SHARED_CLAUSE_SIZE - (i % SHARED_CLAUSE_SIZE) - 1];
 
+        if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            if (choice_index == 0) {
+                choice_index = sizeof(choice) * 8;
+                choice = (*(--choices))[threadIdx.x];
+            }
+            choice_index -= 2;
+        }
+
         if (active[c.out][threadIdx.x]) {
             active[c.out][threadIdx.x] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice = (*(--choices))[threadIdx.x];
-                if (choice == 1) {
+                const uint8_t choice_ = (choice >> choice_index) & 3;
+                if (choice_ == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs][threadIdx.x] = true;
                         if (c.lhs == c.out) {
@@ -253,7 +275,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
                         c.rhs = c.lhs;
                         c.banks = 3;
                     }
-                } else if (choice == 2) {
+                } else if (choice_ == 2) {
                     if (!(c.banks & 2)) {
                         active[c.rhs][threadIdx.x] = true;
                         if (c.rhs == c.out) {
@@ -265,7 +287,7 @@ void TileRenderer::check(const uint32_t tile, const View& v)
                         c.lhs = c.rhs;
                         c.banks = 3;
                     }
-                } else if (choice == 0) {
+                } else if (choice_ == 0) {
                     if (!(c.banks & 1)) {
                         active[c.lhs][threadIdx.x] = true;
                     }
@@ -295,8 +317,6 @@ void TileRenderer::check(const uint32_t tile, const View& v)
                 out = tiles.subtapes.data[subtape_index];
             }
             out[--s] = c;
-        } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            --choices;
         }
     }
 
@@ -371,7 +391,8 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
                   LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
       choices(tape.num_csg_choices ?
               CUDA_MALLOC(ChoiceArray,
-                  LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_csg_choices)
+                  LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                  ((tape.num_csg_choices + 31) / 32))
               : nullptr)
 {
     // Nothing to do here
@@ -392,7 +413,9 @@ void SubtileRenderer::check(const uint32_t subtile,
     auto regs = this->regs + tape.num_regs * blockIdx.x;
     storeAxes(threadIdx.x, subtile, v, subtiles, tape, regs);
 
-    auto choices = this->choices + tape.num_csg_choices * blockIdx.x;
+    auto choices = this->choices + ((tape.num_csg_choices + 31) / 32) * blockIdx.x;
+    uint64_t choice = 0;
+    uint32_t choice_index = 0;
 
     // Run actual evaluation
     uint32_t subtape_index = tiles.head(tile);
@@ -460,23 +483,31 @@ void SubtileRenderer::check(const uint32_t subtile,
             case 0: // Interval op Interval
                 out = intervalOp<Interval, Interval>(c.opcode,
                         regs[c.lhs][threadIdx.x],
-                        regs[c.rhs][threadIdx.x], choices);
+                        regs[c.rhs][threadIdx.x], choice, choice_index);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, Interval>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs][threadIdx.x], choices);
+                        regs[c.rhs][threadIdx.x], choice, choice_index);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<Interval, float>(c.opcode,
                          regs[c.lhs][threadIdx.x],
-                         constant_ptr[c.rhs], choices);
+                         constant_ptr[c.rhs], choice, choice_index);
                 break;
             case 3: // Constant op Constant
                 out = intervalOp<float, float>(c.opcode,
                         constant_ptr[c.lhs],
-                        constant_ptr[c.rhs], choices);
+                        constant_ptr[c.rhs], choice, choice_index);
                 break;
+        }
+        if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            choice_index += 2;
+            if (choice_index == sizeof(choice) * 8) {
+                (*(choices++))[threadIdx.x] = choice;
+                choice = 0;
+                choice_index = 0;
+            }
         }
 
         regs[c.out][threadIdx.x] = out;
@@ -568,11 +599,19 @@ void SubtileRenderer::check(const uint32_t subtile,
         }
         Clause c = in_tape[--in_s];
 
+        if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            if (choice_index == 0) {
+                choice_index = sizeof(choice) * 8;
+                choice = (*(--choices))[threadIdx.x];
+            }
+            choice_index -= 2;
+        }
+
         if (active[c.out][threadIdx.x]) {
             active[c.out][threadIdx.x] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice = (*(--choices))[threadIdx.x];
-                if (choice == 1) {
+                const uint8_t choice_ = (choice >> choice_index) & 3;
+                if (choice_ == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs][threadIdx.x] = true;
                         if (c.lhs == c.out) {
@@ -584,7 +623,7 @@ void SubtileRenderer::check(const uint32_t subtile,
                         c.rhs = c.lhs;
                         c.banks = 3;
                     }
-                } else if (choice == 2) {
+                } else if (choice_ == 2) {
                     if (!(c.banks & 2)) {
                         active[c.rhs][threadIdx.x] = true;
                         if (c.rhs == c.out) {
@@ -596,7 +635,7 @@ void SubtileRenderer::check(const uint32_t subtile,
                         c.lhs = c.rhs;
                         c.banks = 3;
                     }
-                } else if (choice == 0) {
+                } else if (choice_ == 0) {
                     if (!(c.banks & 1)) {
                         active[c.lhs][threadIdx.x] = true;
                     }
@@ -604,7 +643,7 @@ void SubtileRenderer::check(const uint32_t subtile,
                         active[c.rhs][threadIdx.x] = true;
                     }
                 } else {
-                    printf("Bad choice %u\n", choice);
+                    printf("Bad choice %u\n", choice_);
                     assert(false);
                 }
             } else {
@@ -629,8 +668,6 @@ void SubtileRenderer::check(const uint32_t subtile,
             }
 
             out_tape[--out_s] = c;
-        } else if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            --choices;
         }
     }
 
