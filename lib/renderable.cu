@@ -643,7 +643,6 @@ void SubtileRenderer::check(const uint32_t subtile,
                         active[c.rhs][threadIdx.x] = true;
                     }
                 } else {
-                    printf("Bad choice %u\n", choice_);
                     assert(false);
                 }
             } else {
