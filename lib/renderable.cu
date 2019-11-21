@@ -9,8 +9,8 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
                           R* const __restrict__ regs)
 {
    // Prepopulate axis values
-    const float x = tile / tiles.per_side;
-    const float y = tile % tiles.per_side;
+    const float x = tile % tiles.per_side;
+    const float y = tile / tiles.per_side;
 
     Interval vs[3];
     const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
@@ -354,8 +354,8 @@ TileRenderer<TILE_SIZE_PX, DIMENSION>::drawFilled(const uint32_t tile)
     static_assert(TILE_SIZE_PX % 16 == 0, "Invalid tile size");
 
     // Convert from tile position to pixels
-    const uint32_t px = (tile / tiles.per_side) * TILE_SIZE_PX;
-    const uint32_t py = (tile % tiles.per_side) * TILE_SIZE_PX;
+    const uint32_t px = (tile % tiles.per_side) * TILE_SIZE_PX;
+    const uint32_t py = (tile / tiles.per_side) * TILE_SIZE_PX;
 
     uint4* pix = reinterpret_cast<uint4*>(&image[px + py * image.size_px]);
     const uint4 fill = make_uint4(0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0);
@@ -711,8 +711,8 @@ void SubtileRenderer_check(
         const uint32_t tile = r->tiles.active(i);
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile / r->tiles.per_side) * TILE_SIZE_PX;
-        const uint32_t py = (tile % r->tiles.per_side) * TILE_SIZE_PX;
+        const uint32_t px = (tile % r->tiles.per_side) * TILE_SIZE_PX;
+        const uint32_t py = (tile / r->tiles.per_side) * TILE_SIZE_PX;
 
         // Then convert from pixels into subtiles
         const uint32_t p = threadIdx.x % r->subtilesPerTile();
@@ -723,7 +723,7 @@ void SubtileRenderer_check(
         const uint32_t ty = py / SUBTILE_SIZE_PX + dy;
 
         // Finally, unconvert back into a single index
-        const uint32_t subtile = ty + tx * r->subtiles.per_side;
+        const uint32_t subtile = ty * r->subtiles.per_side + tx;
 
         r->check(subtile, tile, v);
     }
@@ -738,8 +738,8 @@ SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::drawFilled(
     static_assert(SUBTILE_SIZE_PX % 8 == 0, "Invalid tile size");
 
     // Convert from tile position to pixels
-    const uint32_t px = (tile / subtiles.per_side) * SUBTILE_SIZE_PX;
-    const uint32_t py = (tile % subtiles.per_side) * SUBTILE_SIZE_PX;
+    const uint32_t px = (tile % subtiles.per_side) * SUBTILE_SIZE_PX;
+    const uint32_t py = (tile / subtiles.per_side) * SUBTILE_SIZE_PX;
 
     uint2* pix = reinterpret_cast<uint2*>(&image[px + py * image.size_px]);
     const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
@@ -802,8 +802,8 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     auto regs = this->regs + tape.num_regs * blockIdx.x;
 
     // Convert from tile position to pixels
-    uint32_t px = (subtile / subtiles.per_side) * SUBTILE_SIZE_PX + dx;
-    uint32_t py = (subtile % subtiles.per_side) * SUBTILE_SIZE_PX + dy;
+    uint32_t px = (subtile % subtiles.per_side) * SUBTILE_SIZE_PX + dx;
+    uint32_t py = (subtile / subtiles.per_side) * SUBTILE_SIZE_PX + dy;
 
     {   // Prepopulate axis values
         const float x = px / (image.size_px - 1.0f);
