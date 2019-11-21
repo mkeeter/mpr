@@ -1,5 +1,9 @@
 #include "check.hpp"
-#include "ipow.hpp"
+
+static constexpr unsigned __host__ __device__ pow(unsigned p, unsigned n)
+{
+    return n ? p * pow(p, n - 1) : 1;
+}
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 struct Tiles {
