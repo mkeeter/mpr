@@ -379,9 +379,8 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
-                                 TileRenderer& prev)
-    : tape(tape), image(image), tiles(prev.tiles),
+SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image, Tiles<64, 2>& prev)
+    : tape(tape), image(image), tiles(prev),
       subtiles(image.size_px),
 
       regs(CUDA_MALLOC(Registers,
@@ -755,9 +754,8 @@ __global__ void SubtileRenderer_drawFilled(SubtileRenderer* r, const uint32_t of
 
 ////////////////////////////////////////////////////////////////////////////////
 
-PixelRenderer::PixelRenderer(const Tape& tape, Image& image,
-                             const SubtileRenderer& prev)
-    : tape(tape), image(image), subtiles(prev.subtiles),
+PixelRenderer::PixelRenderer(const Tape& tape, Image& image, const Tiles<8, 2>& prev)
+    : tape(tape), image(image), subtiles(prev),
       regs(CUDA_MALLOC(FloatRegisters,
                        tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS))
 {
@@ -927,8 +925,8 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       tape(std::move(Tape::build(tree))),
 
       tile_renderer(tape, image),
-      subtile_renderer(tape, image, tile_renderer),
-      pixel_renderer(tape, image, subtile_renderer)
+      subtile_renderer(tape, image, tile_renderer.tiles),
+      pixel_renderer(tape, image, subtile_renderer.subtiles)
 {
     CHECK(cudaStreamCreate(&streams[0]));
     CHECK(cudaStreamCreate(&streams[1]));

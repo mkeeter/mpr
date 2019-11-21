@@ -51,7 +51,7 @@ protected:
 
 class SubtileRenderer {
 public:
-    SubtileRenderer(const Tape& tape, Image& image, TileRenderer& prev);
+    SubtileRenderer(const Tape& tape, Image& image, Tiles<64, 2>& prev);
     ~SubtileRenderer();
 
     using Registers = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE *
@@ -91,7 +91,7 @@ protected:
 
 class PixelRenderer {
 public:
-    PixelRenderer(const Tape& tape, Image& image, const SubtileRenderer& prev);
+    PixelRenderer(const Tape& tape, Image& image, const Tiles<8, 2>& prev);
     ~PixelRenderer();
 
     using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
