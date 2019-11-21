@@ -3,9 +3,9 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename R>
+template <typename R, unsigned T, unsigned D>
 __device__ void storeAxes(const uint32_t index, const uint32_t tile,
-                          const View& v, const Tiles& tiles, const Tape& tape,
+                          const View& v, const Tiles<T, D>& tiles, const Tape& tape,
                           R* const __restrict__ regs)
 {
    // Prepopulate axis values
@@ -74,7 +74,7 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs,
 
 TileRenderer::TileRenderer(const Tape& tape, Image& image)
     : tape(tape), image(image),
-      tiles(image.size_px, LIBFIVE_CUDA_TILE_SIZE_PX),
+      tiles(image.size_px),
 
       regs(CUDA_MALLOC(Registers, LIBFIVE_CUDA_TILE_BLOCKS *
                                       tape.num_regs)),
@@ -382,7 +382,7 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
 SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image,
                                  TileRenderer& prev)
     : tape(tape), image(image), tiles(prev.tiles),
-      subtiles(image.size_px, LIBFIVE_CUDA_SUBTILE_SIZE_PX),
+      subtiles(image.size_px),
 
       regs(CUDA_MALLOC(Registers,
         LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
@@ -860,7 +860,7 @@ __device__ void PixelRenderer::draw(const uint32_t subtile, const View& v)
 }
 
 __global__ void PixelRenderer_draw(PixelRenderer* r,
-                                   const Tiles* subtiles,
+                                   const Tiles<8, 2>* subtiles,
                                    const uint32_t offset, View v)
 {
     // We assume one thread per pixel in a tile

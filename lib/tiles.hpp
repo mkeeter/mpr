@@ -1,9 +1,11 @@
 #include "check.hpp"
+#include "ipow.hpp"
 
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 struct Tiles {
-    Tiles(const uint32_t image_size_px, const uint32_t tile_size_px)
-        : per_side(image_size_px / tile_size_px),
-          total(per_side * per_side),
+    Tiles(const uint32_t image_size_px)
+        : per_side(image_size_px / TILE_SIZE_PX),
+          total(pow(per_side, DIMENSION)),
           data(CUDA_MALLOC(uint32_t, 2 * total))
     {
         reset();

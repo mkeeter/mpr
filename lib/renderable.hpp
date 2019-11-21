@@ -36,7 +36,7 @@ public:
     const Tape& tape;
     Image& image;
 
-    Tiles tiles;
+    Tiles<64, 2> tiles;
 
 protected:
     Registers* __restrict__ const regs;
@@ -75,8 +75,8 @@ public:
     const Tape& tape;
     Image& image;
 
-    Tiles& tiles;   // Reference to tiles generated in previous stage
-    Tiles subtiles; // New tiles generated in this stage
+    Tiles<64, 2>& tiles;   // Reference to tiles generated in previous stage
+    Tiles<8, 2> subtiles; // New tiles generated in this stage
 
 protected:
     Registers* __restrict__ const regs;
@@ -103,7 +103,7 @@ public:
 protected:
     const Tape& tape;
     Image& image;
-    const Tiles& subtiles; // Reference to tiles generated in previous stage
+    const Tiles<8, 2>& subtiles; // Reference to tiles generated in previous stage
 
     FloatRegisters* __restrict__ const regs;
 
