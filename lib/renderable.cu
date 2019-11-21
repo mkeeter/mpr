@@ -72,7 +72,9 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-TileRenderer::TileRenderer(const Tape& tape, Image& image)
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
+TileRenderer<TILE_SIZE_PX, DIMENSION>::TileRenderer(
+        const Tape& tape, Image& image)
     : tape(tape), image(image),
       tiles(image.size_px),
 
@@ -89,15 +91,18 @@ TileRenderer::TileRenderer(const Tape& tape, Image& image)
     // Nothing to do here
 }
 
-TileRenderer::~TileRenderer()
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
+TileRenderer<TILE_SIZE_PX, DIMENSION>::~TileRenderer()
 {
     CHECK(cudaFree(regs));
     CHECK(cudaFree(active));
     CHECK(cudaFree(choices));
 }
 
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 __device__
-void TileRenderer::check(const uint32_t tile, const View& v)
+void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
+        const uint32_t tile, const View& v)
 {
     auto regs = this->regs + tape.num_regs * blockIdx.x;
     storeAxes(threadIdx.x, tile, v, tiles, tape, regs);
@@ -327,9 +332,9 @@ void TileRenderer::check(const uint32_t tile, const View& v)
     }
 }
 
-__global__ void TileRenderer_check(TileRenderer* r,
-                                   const uint32_t offset,
-                                   View v)
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
+__global__ void TileRenderer_check(TileRenderer<TILE_SIZE_PX, DIMENSION>* r,
+                                   const uint32_t offset, View v)
 {
     // This should be a 1D kernel
     assert(blockDim.y == 1);
@@ -341,27 +346,31 @@ __global__ void TileRenderer_check(TileRenderer* r,
     r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
 }
 
-__device__ void TileRenderer::drawFilled(const uint32_t tile)
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
+__device__ void
+TileRenderer<TILE_SIZE_PX, DIMENSION>::drawFilled(const uint32_t tile)
 {
-    static_assert(LIBFIVE_CUDA_TILE_SIZE_PX >= 16, "Tiles are too small");
-    static_assert(LIBFIVE_CUDA_TILE_SIZE_PX % 16 == 0, "Invalid tile size");
+    static_assert(TILE_SIZE_PX >= 16, "Tiles are too small");
+    static_assert(TILE_SIZE_PX % 16 == 0, "Invalid tile size");
 
     // Convert from tile position to pixels
-    const uint32_t px = (tile / tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
-    const uint32_t py = (tile % tiles.per_side) * LIBFIVE_CUDA_TILE_SIZE_PX;
+    const uint32_t px = (tile / tiles.per_side) * TILE_SIZE_PX;
+    const uint32_t py = (tile % tiles.per_side) * TILE_SIZE_PX;
 
     uint4* pix = reinterpret_cast<uint4*>(&image[px + py * image.size_px]);
     const uint4 fill = make_uint4(0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0);
-    for (unsigned y=0; y < LIBFIVE_CUDA_TILE_SIZE_PX; y++) {
-        for (unsigned x=0; x < LIBFIVE_CUDA_TILE_SIZE_PX; x += 16) {
+    for (unsigned y=0; y < TILE_SIZE_PX; y++) {
+        for (unsigned x=0; x < TILE_SIZE_PX; x += 16) {
             *pix = fill;
             pix++;
         }
-        pix += (image.size_px - LIBFIVE_CUDA_TILE_SIZE_PX) / 16;
+        pix += (image.size_px - TILE_SIZE_PX) / 16;
     }
 }
 
-__global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
+__global__ void TileRenderer_drawFilled(
+        TileRenderer<TILE_SIZE_PX, DIMENSION>* r, const uint32_t offset)
 {
     // Each thread picks a block and fills in the whole thing
     assert(blockDim.y == 1);
@@ -379,7 +388,9 @@ __global__ void TileRenderer_drawFilled(TileRenderer* r, const uint32_t offset)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image, Tiles<64, 2>& prev)
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::SubtileRenderer(
+        const Tape& tape, Image& image, Tiles<TILE_SIZE_PX, DIMENSION>& prev)
     : tape(tape), image(image), tiles(prev),
       subtiles(image.size_px),
 
@@ -397,17 +408,18 @@ SubtileRenderer::SubtileRenderer(const Tape& tape, Image& image, Tiles<64, 2>& p
     // Nothing to do here
 }
 
-SubtileRenderer::~SubtileRenderer()
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::~SubtileRenderer()
 {
     CHECK(cudaFree(regs));
     CHECK(cudaFree(active));
     CHECK(cudaFree(choices));
 }
 
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 __device__
-void SubtileRenderer::check(const uint32_t subtile,
-                            const uint32_t tile,
-                            const View& v)
+void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
+        const uint32_t subtile, const uint32_t tile, const View& v)
 {
     auto regs = this->regs + tape.num_regs * blockIdx.x;
     storeAxes(threadIdx.x, subtile, v, subtiles, tape, regs);
@@ -674,10 +686,11 @@ void SubtileRenderer::check(const uint32_t subtile,
     subtiles.head(subtile) = out_subtape_index;
 }
 
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 __global__
-void SubtileRenderer_check(SubtileRenderer* r,
-                           const uint32_t offset,
-                           View v)
+void SubtileRenderer_check(
+        SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>* r,
+        const uint32_t offset, View v)
 {
     assert(blockDim.x % LIBFIVE_CUDA_SUBTILES_PER_TILE == 0);
     assert(blockDim.y == 1);
@@ -716,7 +729,10 @@ void SubtileRenderer_check(SubtileRenderer* r,
     }
 }
 
-__device__ void SubtileRenderer::drawFilled(const uint32_t tile)
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+__device__ void
+SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::drawFilled(
+        const uint32_t tile)
 {
     static_assert(LIBFIVE_CUDA_TILE_SIZE_PX >= 8, "Tiles are too small");
     static_assert(LIBFIVE_CUDA_TILE_SIZE_PX % 8 == 0, "Invalid tile size");
@@ -736,7 +752,10 @@ __device__ void SubtileRenderer::drawFilled(const uint32_t tile)
     }
 }
 
-__global__ void SubtileRenderer_drawFilled(SubtileRenderer* r, const uint32_t offset)
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+__global__ void SubtileRenderer_drawFilled(
+        SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>* r,
+        const uint32_t offset)
 {
     // Each thread picks a block and fills in the whole thing
     assert(blockDim.y == 1);

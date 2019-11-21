@@ -13,6 +13,7 @@
 #include "tiles.hpp"
 #include "view.hpp"
 
+template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 class TileRenderer {
 public:
     TileRenderer(const Tape& tape, Image& image);
@@ -36,7 +37,7 @@ public:
     const Tape& tape;
     Image& image;
 
-    Tiles<64, 2> tiles;
+    Tiles<TILE_SIZE_PX, DIMENSION> tiles;
 
 protected:
     Registers* __restrict__ const regs;
@@ -49,16 +50,27 @@ protected:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 class SubtileRenderer {
 public:
-    SubtileRenderer(const Tape& tape, Image& image, Tiles<64, 2>& prev);
+    SubtileRenderer(const Tape& tape, Image& image,
+                    Tiles<TILE_SIZE_PX, DIMENSION>& prev);
     ~SubtileRenderer();
 
-    using Registers = Interval[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+    constexpr static unsigned __host__ __device__ subtilesPerTileSide() {
+        static_assert(TILE_SIZE_PX % SUBTILE_SIZE_PX == 0,
+                      "Cannot evenly divide tiles into subtiles");
+        return TILE_SIZE_PX / SUBTILE_SIZE_PX;
+    }
+    constexpr static unsigned __host__ __device__ subtilesPerTile() {
+        return pow(subtilesPerTileSide(), DIMENSION);
+    }
+
+    using Registers = Interval[subtilesPerTile() *
                                LIBFIVE_CUDA_REFINE_TILES];
-    using ActiveArray = uint8_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+    using ActiveArray = uint8_t[subtilesPerTile() *
                                 LIBFIVE_CUDA_REFINE_TILES];
-    using ChoiceArray = uint64_t[LIBFIVE_CUDA_SUBTILES_PER_TILE *
+    using ChoiceArray = uint64_t[subtilesPerTile() *
                                  LIBFIVE_CUDA_REFINE_TILES];
 
     // Same functions as in TileRenderer, but these take a subtape because
@@ -75,8 +87,11 @@ public:
     const Tape& tape;
     Image& image;
 
-    Tiles<64, 2>& tiles;   // Reference to tiles generated in previous stage
-    Tiles<8, 2> subtiles; // New tiles generated in this stage
+    // Reference to tiles generated in previous stage
+    Tiles<TILE_SIZE_PX, DIMENSION>& tiles;
+
+    // New tiles generated in this stage
+    Tiles<SUBTILE_SIZE_PX, DIMENSION> subtiles;
 
 protected:
     Registers* __restrict__ const regs;
@@ -92,7 +107,8 @@ protected:
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 class PixelRenderer {
 public:
-    PixelRenderer(const Tape& tape, Image& image, const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
+    PixelRenderer(const Tape& tape, Image& image,
+                  const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
     ~PixelRenderer();
 
     constexpr static unsigned __host__ __device__ pixelsPerSubtile() {
@@ -145,8 +161,8 @@ protected:
 
     cudaStream_t streams[2];
 
-    TileRenderer tile_renderer;
-    SubtileRenderer subtile_renderer;
+    TileRenderer<64, 2> tile_renderer;
+    SubtileRenderer<64, 8, 2> subtile_renderer;
     PixelRenderer<8, 2> pixel_renderer;
 
     Renderable(const Renderable& other)=delete;
