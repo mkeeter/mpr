@@ -1,15 +1,5 @@
 #pragma once
 
-/*  Defines how many pixels are on the side of each tile and subtile */
-#define LIBFIVE_CUDA_TILE_SIZE_PX 64
-#define LIBFIVE_CUDA_SUBTILE_SIZE_PX 8
-#define LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE \
-    (LIBFIVE_CUDA_TILE_SIZE_PX / LIBFIVE_CUDA_SUBTILE_SIZE_PX)
-#define LIBFIVE_CUDA_SUBTILES_PER_TILE \
-    (LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE * LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE)
-#define LIBFIVE_CUDA_PIXELS_PER_SUBTILE \
-    (LIBFIVE_CUDA_SUBTILE_SIZE_PX * LIBFIVE_CUDA_SUBTILE_SIZE_PX)
-
 /*  All tile operations are done with this many blocks and threads,
  *  looping to consume all available tiles */
 #define LIBFIVE_CUDA_TILE_BLOCKS 16

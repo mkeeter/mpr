@@ -441,6 +441,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // We copy LIBFIVE_CUDA_SUBTILES_PER_TILE clauses from each active tape
     // into shared memory, to speed up the first pass a little bit.  Beyond
     // that point, tapes diverge in size, so we can't realiably sync threads.
+#if 0
     __shared__ Clause local[LIBFIVE_CUDA_REFINE_TILES]
                            [LIBFIVE_CUDA_SUBTILES_PER_TILE];
     const auto u = threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
@@ -467,6 +468,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     tape = local[u];
     s = 0;
     __syncthreads();
+#endif
 
     Interval result;
     while (true) {
@@ -527,7 +529,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     ////////////////////////////////////////////////////////////////////////////
 
     // Reverse the tape
-    if ((threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE) == 0) {
+    if ((threadIdx.x % subtilesPerTile()) == 0) {
         uint32_t subtape_index = tiles.head(tile);
         uint32_t prev = 0;
 
@@ -692,15 +694,15 @@ void SubtileRenderer_check(
         SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>* r,
         const uint32_t offset, View v)
 {
-    assert(blockDim.x % LIBFIVE_CUDA_SUBTILES_PER_TILE == 0);
+    assert(blockDim.x % r->subtilesPerTile() == 0);
     assert(blockDim.y == 1);
     assert(blockDim.z == 1);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
     // Pick an active tile from the list.  Each block executes multiple tiles!
-    const uint32_t stride = blockDim.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
-    const uint32_t sub = threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
+    const uint32_t stride = blockDim.x / r->subtilesPerTile();
+    const uint32_t sub = threadIdx.x / r->subtilesPerTile();
     const uint32_t i = offset + blockIdx.x * stride + sub;
 
     if (i < r->tiles.num_active) {
@@ -709,18 +711,16 @@ void SubtileRenderer_check(
         const uint32_t tile = r->tiles.active(i);
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile / r->tiles.per_side) *
-                            LIBFIVE_CUDA_TILE_SIZE_PX;
-        const uint32_t py = (tile % r->tiles.per_side) *
-                            LIBFIVE_CUDA_TILE_SIZE_PX;
+        const uint32_t px = (tile / r->tiles.per_side) * TILE_SIZE_PX;
+        const uint32_t py = (tile % r->tiles.per_side) * TILE_SIZE_PX;
 
         // Then convert from pixels into subtiles
-        const uint32_t p = threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE;
-        const uint32_t dx = p % LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE;
-        const uint32_t dy = p / LIBFIVE_CUDA_SUBTILES_PER_TILE_SIDE;
+        const uint32_t p = threadIdx.x % r->subtilesPerTile();
+        const uint32_t dx = p % r->subtilesPerTileSide();
+        const uint32_t dy = p / r->subtilesPerTileSide();
 
-        const uint32_t tx = px / LIBFIVE_CUDA_SUBTILE_SIZE_PX + dx;
-        const uint32_t ty = py / LIBFIVE_CUDA_SUBTILE_SIZE_PX + dy;
+        const uint32_t tx = px / SUBTILE_SIZE_PX + dx;
+        const uint32_t ty = py / SUBTILE_SIZE_PX + dy;
 
         // Finally, unconvert back into a single index
         const uint32_t subtile = ty + tx * r->subtiles.per_side;
@@ -734,21 +734,21 @@ __device__ void
 SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::drawFilled(
         const uint32_t tile)
 {
-    static_assert(LIBFIVE_CUDA_TILE_SIZE_PX >= 8, "Tiles are too small");
-    static_assert(LIBFIVE_CUDA_TILE_SIZE_PX % 8 == 0, "Invalid tile size");
+    static_assert(SUBTILE_SIZE_PX >= 8, "Tiles are too small");
+    static_assert(SUBTILE_SIZE_PX % 8 == 0, "Invalid tile size");
 
     // Convert from tile position to pixels
-    const uint32_t px = (tile / subtiles.per_side) * LIBFIVE_CUDA_SUBTILE_SIZE_PX;
-    const uint32_t py = (tile % subtiles.per_side) * LIBFIVE_CUDA_SUBTILE_SIZE_PX;
+    const uint32_t px = (tile / subtiles.per_side) * SUBTILE_SIZE_PX;
+    const uint32_t py = (tile % subtiles.per_side) * SUBTILE_SIZE_PX;
 
     uint2* pix = reinterpret_cast<uint2*>(&image[px + py * image.size_px]);
     const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
-    for (unsigned y=0; y < LIBFIVE_CUDA_SUBTILE_SIZE_PX; y++) {
-        for (unsigned x=0; x < LIBFIVE_CUDA_SUBTILE_SIZE_PX; x += 8) {
+    for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
+        for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 8) {
             *pix = fill;
             pix++;
         }
-        pix += (image.size_px - LIBFIVE_CUDA_SUBTILE_SIZE_PX) / 8;
+        pix += (image.size_px - SUBTILE_SIZE_PX) / 8;
     }
 }
 
@@ -1001,7 +1001,7 @@ void Renderable::run(const View& view)
                                           LIBFIVE_CUDA_REFINE_TILES;
     for (unsigned i=0; i < active_tiles; i += subtile_check_stride) {
         SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-            LIBFIVE_CUDA_SUBTILES_PER_TILE *
+            subtile_renderer->subtilesPerTile() *
             LIBFIVE_CUDA_REFINE_TILES,
             0, streams[0]>>>(
                     subtile_renderer, i, view);
@@ -1025,7 +1025,7 @@ void Renderable::run(const View& view)
                                            LIBFIVE_CUDA_RENDER_SUBTILES;
     for (unsigned i=0; i < active_subtiles; i += subtile_render_stride) {
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
-                             LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
+                             pixel_renderer->pixelsPerSubtile() *
                              LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
             pixel_renderer, i, view);
     }
