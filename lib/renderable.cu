@@ -754,7 +754,10 @@ __global__ void SubtileRenderer_drawFilled(SubtileRenderer* r, const uint32_t of
 
 ////////////////////////////////////////////////////////////////////////////////
 
-PixelRenderer::PixelRenderer(const Tape& tape, Image& image, const Tiles<8, 2>& prev)
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::PixelRenderer(
+        const Tape& tape, Image& image,
+        const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev)
     : tape(tape), image(image), subtiles(prev),
       regs(CUDA_MALLOC(FloatRegisters,
                        tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS))
@@ -762,25 +765,26 @@ PixelRenderer::PixelRenderer(const Tape& tape, Image& image, const Tiles<8, 2>& 
     // Nothing to do here
 }
 
-PixelRenderer::~PixelRenderer()
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::~PixelRenderer()
 {
     CHECK(cudaFree(regs));
 }
 
-__device__ void PixelRenderer::draw(const uint32_t subtile, const View& v)
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+__device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
+        const uint32_t subtile, const View& v)
 {
-    const uint32_t pixel = threadIdx.x % LIBFIVE_CUDA_PIXELS_PER_SUBTILE;
-    const uint32_t dx = pixel % LIBFIVE_CUDA_SUBTILE_SIZE_PX;
-    const uint32_t dy = pixel / LIBFIVE_CUDA_SUBTILE_SIZE_PX;
+    const uint32_t pixel = threadIdx.x % pixelsPerSubtile();
+    const uint32_t dx = pixel % SUBTILE_SIZE_PX;
+    const uint32_t dy = pixel / SUBTILE_SIZE_PX;
 
     // Pick an index into the register array
     auto regs = this->regs + tape.num_regs * blockIdx.x;
 
     // Convert from tile position to pixels
-    uint32_t px = (subtile / subtiles.per_side) *
-                   LIBFIVE_CUDA_SUBTILE_SIZE_PX + dx;
-    uint32_t py = (subtile % subtiles.per_side) *
-                   LIBFIVE_CUDA_SUBTILE_SIZE_PX + dy;
+    uint32_t px = (subtile / subtiles.per_side) * SUBTILE_SIZE_PX + dx;
+    uint32_t py = (subtile % subtiles.per_side) * SUBTILE_SIZE_PX + dy;
 
     {   // Prepopulate axis values
         const float x = px / (image.size_px - 1.0f);
@@ -857,24 +861,25 @@ __device__ void PixelRenderer::draw(const uint32_t subtile, const View& v)
     }
 }
 
-__global__ void PixelRenderer_draw(PixelRenderer* r,
-                                   const Tiles<8, 2>* subtiles,
-                                   const uint32_t offset, View v)
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+__global__ void PixelRenderer_draw(
+        PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>* r,
+        const uint32_t offset, View v)
 {
-    // We assume one thread per pixel in a tile
-    assert(blockDim.x % LIBFIVE_CUDA_SUBTILE_SIZE_PX == 0);
+    // We assume one thread per pixel in a set of tiles
+    assert(blockDim.x % SUBTILE_SIZE_PX == 0);
     assert(blockDim.y == 1);
     assert(blockDim.z == 1);
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
     // Pick an active tile from the list.  Each block executes multiple tiles!
-    const uint32_t stride = blockDim.x / LIBFIVE_CUDA_PIXELS_PER_SUBTILE;
-    const uint32_t sub = threadIdx.x / LIBFIVE_CUDA_PIXELS_PER_SUBTILE;
+    const uint32_t stride = blockDim.x / r->pixelsPerSubtile();
+    const uint32_t sub = threadIdx.x / r->pixelsPerSubtile();
     const uint32_t i = offset + blockIdx.x * stride + sub;
 
-    if (i < subtiles->num_active) {
-        const uint32_t subtile = subtiles->active(i);
+    if (i < r->subtiles.num_active) {
+        const uint32_t subtile = r->subtiles.active(i);
         r->draw(subtile, v);
     }
 }
@@ -938,12 +943,12 @@ void Renderable::run(const View& view)
 
     // Record this local variable because otherwise it looks up memory
     // that has been loaned to the GPU and not synchronized.
-    TileRenderer* tile_renderer = &this->tile_renderer;
+    auto tile_renderer = &this->tile_renderer;
     const uint32_t total_tiles = tile_renderer->tiles.total;
     const uint32_t tile_stride = LIBFIVE_CUDA_TILE_THREADS *
                                  LIBFIVE_CUDA_TILE_BLOCKS;
-    SubtileRenderer* subtile_renderer = &this->subtile_renderer;
-    PixelRenderer* pixel_renderer = &this->pixel_renderer;
+    auto subtile_renderer = &this->subtile_renderer;
+    auto pixel_renderer = &this->pixel_renderer;
     auto tiles = &tile_renderer->tiles;
     auto subtiles = &subtile_renderer->subtiles;
 
@@ -1003,7 +1008,7 @@ void Renderable::run(const View& view)
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
                              LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
                              LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
-            pixel_renderer, subtiles, i, view);
+            pixel_renderer, i, view);
     }
     cudaDeviceSynchronize();
 }

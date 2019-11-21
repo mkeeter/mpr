@@ -89,22 +89,29 @@ protected:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 class PixelRenderer {
 public:
-    PixelRenderer(const Tape& tape, Image& image, const Tiles<8, 2>& prev);
+    PixelRenderer(const Tape& tape, Image& image, const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
     ~PixelRenderer();
 
-    using FloatRegisters = float[LIBFIVE_CUDA_PIXELS_PER_SUBTILE *
+    constexpr static unsigned __host__ __device__ pixelsPerSubtile() {
+        return pow(SUBTILE_SIZE_PX, DIMENSION);
+    }
+
+    using FloatRegisters = float[pixelsPerSubtile() *
                                  LIBFIVE_CUDA_RENDER_SUBTILES];
 
     // Draws the given tile, starting from the given subtape
     __device__ void draw(const uint32_t subtile, const View& v);
 
-protected:
     const Tape& tape;
     Image& image;
-    const Tiles<8, 2>& subtiles; // Reference to tiles generated in previous stage
 
+    // Reference to tiles generated in previous stage
+    const Tiles<SUBTILE_SIZE_PX, DIMENSION>& subtiles;
+
+protected:
     FloatRegisters* __restrict__ const regs;
 
     PixelRenderer(const PixelRenderer& other)=delete;
@@ -140,7 +147,7 @@ protected:
 
     TileRenderer tile_renderer;
     SubtileRenderer subtile_renderer;
-    PixelRenderer pixel_renderer;
+    PixelRenderer<8, 2> pixel_renderer;
 
     Renderable(const Renderable& other)=delete;
     Renderable& operator=(const Renderable& other)=delete;
