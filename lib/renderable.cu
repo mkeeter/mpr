@@ -1,6 +1,8 @@
 #include <cassert>
 #include "renderable.hpp"
 
+#define USE_SHARED_MEMORY 0
+
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename R, unsigned T, unsigned D>
@@ -19,7 +21,7 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     Interval vs[3];
     vs[0] = 2.0f * (X - 0.5f) * v.scale - v.center[0];
     vs[1] = 2.0f * (Y - 0.5f) * v.scale - v.center[1];
-    vs[2] = {0.0f, 0.0f};
+    vs[2] = Z;
 
     for (unsigned i=0; i < 3; ++i) {
         if (tape.axes.reg[i] != UINT16_MAX) {
@@ -115,14 +117,17 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     const auto num_clauses = tape.num_clauses;
 
     // We copy a chunk of the tape from constant to shared memory
+#if USE_SHARED_MEMORY
     constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS;
     __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
     __shared__ float constant_lhs[SHARED_CLAUSE_SIZE];
     __shared__ float constant_rhs[SHARED_CLAUSE_SIZE];
+#endif
 
     for (uint32_t i=0; i < num_clauses; ++i) {
         using namespace libfive::Opcode;
 
+#if USE_SHARED_MEMORY
         if ((i % SHARED_CLAUSE_SIZE) == 0) {
             __syncthreads();
             if (i + threadIdx.x < num_clauses) {
@@ -137,12 +142,14 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
             }
             __syncthreads();
         }
+#endif
 
         // Skip unused tiles
         if (tile == UINT32_MAX) {
             continue;
         }
 
+#if USE_SHARED_MEMORY
         const Clause c = clauses[i % SHARED_CLAUSE_SIZE];
         Interval out;
         switch (c.banks) {
@@ -171,6 +178,37 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                         choice, choice_index);
                 break;
         }
+#else
+        const Clause c = clause_ptr[i];
+        Interval out;
+        switch (c.banks) {
+            case 0: // Interval op Interval
+                out = intervalOp<Interval, Interval>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        regs[c.rhs][threadIdx.x],
+                        choice, choice_index);
+                break;
+            case 1: // Constant op Interval
+                out = intervalOp<float, Interval>(c.opcode,
+                        constant_ptr[c.lhs],
+                        regs[c.rhs][threadIdx.x],
+                        choice, choice_index);
+                break;
+            case 2: // Interval op Constant
+                out = intervalOp<Interval, float>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        constant_ptr[c.rhs],
+                        choice, choice_index);
+                break;
+            case 3: // Constant op Constant
+                out = intervalOp<float, float>(c.opcode,
+                        constant_ptr[c.lhs],
+                        constant_ptr[c.rhs],
+                        choice, choice_index);
+                break;
+        }
+#endif
+
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             choice_index += 2;
             if (choice_index == sizeof(choice) * 8) {
@@ -239,6 +277,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
 
+#if USE_SHARED_MEMORY
         if ((i % SHARED_CLAUSE_SIZE) == 0) {
             __syncthreads();
             const uint32_t j = num_clauses - i - 1 - threadIdx.x;
@@ -247,12 +286,18 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
             }
             __syncthreads();
         }
+#endif
 
         // Skip dummy tiles which don't actually do things
         if (build_tape_tile == UINT32_MAX) {
             continue;
         }
+
+#if USE_SHARED_MEMORY
         Clause c = clauses[SHARED_CLAUSE_SIZE - (i % SHARED_CLAUSE_SIZE) - 1];
+#else
+        Clause c = clause_ptr[num_clauses - i - 1];
+#endif
 
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             if (choice_index == 0) {
@@ -438,11 +483,18 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // We copy LIBFIVE_CUDA_SUBTILES_PER_TILE clauses from each active tape
     // into shared memory, to speed up the first pass a little bit.  Beyond
     // that point, tapes diverge in size, so we can't realiably sync threads.
-#if 0
+#if USE_SHARED_MEMORY
+    // We can't use a constexpr function in the array size, so we manually
+    // unroll the pow function here
     __shared__ Clause local[LIBFIVE_CUDA_REFINE_TILES]
-                           [LIBFIVE_CUDA_SUBTILES_PER_TILE];
-    const auto u = threadIdx.x / LIBFIVE_CUDA_SUBTILES_PER_TILE;
-    const uint32_t q = threadIdx.x % LIBFIVE_CUDA_SUBTILES_PER_TILE;
+                           [(TILE_SIZE_PX / SUBTILE_SIZE_PX) *
+                            (TILE_SIZE_PX / SUBTILE_SIZE_PX) *
+                            ((DIMENSION == 3)
+                               ? (TILE_SIZE_PX / SUBTILE_SIZE_PX)
+                               : 1)
+                           ];
+    const auto u = threadIdx.x / subtilesPerTile();
+    const uint32_t q = threadIdx.x % subtilesPerTile();
     if (s + q < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
         local[u][q] = tape[s + q];
     }
@@ -451,8 +503,8 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         // we'll set the next chunk to re-enter this chunk at a
         // later point to finish it up.
         const auto chunk_length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s;
-        if (chunk_length > LIBFIVE_CUDA_SUBTILES_PER_TILE) {
-            length = LIBFIVE_CUDA_SUBTILES_PER_TILE;
+        if (chunk_length > subtilesPerTile()) {
+            length = subtilesPerTile();
             next = subtape_index;
             next_start = s + length;
         } else {
@@ -813,7 +865,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         float vs[3];
         vs[0] = 2.0f * (x - 0.5f) * v.scale - v.center[0];
         vs[1] = 2.0f * (y - 0.5f) * v.scale - v.center[1];
-        vs[2] = 0.0f * z;
+        vs[2] = z;
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
                 regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
