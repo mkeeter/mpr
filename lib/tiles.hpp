@@ -40,16 +40,16 @@ struct Tiles {
 
     __device__ float3 tileToLowerPos(uint32_t t) const {
         const auto f = unpackFloat(t);
-        return make_float3(f.x / per_side,
-                           f.y / per_side,
-                           f.z / per_side);
+        return make_float3(2.0f * ((f.x / per_side) - 0.5f),
+                           2.0f * ((f.y / per_side) - 0.5f),
+                           2.0f * ((f.z / per_side) - 0.5f));
     }
 
     __device__ float3 tileToUpperPos(uint32_t t) const {
         const auto f = unpackFloat(t);
-        return make_float3((f.x + 1.0f) / per_side,
-                           (f.y + 1.0f) / per_side,
-                           (f.z + 1.0f) / per_side);
+        return make_float3(2.0f * ((f.x + 1.0f) / per_side - 0.5f),
+                           2.0f * ((f.y + 1.0f) / per_side - 0.5f),
+                           2.0f * ((f.z + 1.0f) / per_side - 0.5f));
     }
 
     __host__ __device__ uint32_t filled(uint32_t i) const

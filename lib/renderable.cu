@@ -19,9 +19,9 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     Interval Z(lower.z, upper.z);
 
     Interval vs[3];
-    vs[0] = 2.0f * (X - 0.5f) * v.scale - v.center[0];
-    vs[1] = 2.0f * (Y - 0.5f) * v.scale - v.center[1];
-    vs[2] = (D == 3) * 2.0f * (Z - 0.5f);
+    vs[0] = X * v.scale - v.center[0];
+    vs[1] = Y * v.scale - v.center[1];
+    vs[2] = (D == 3) * Z;
 
     for (unsigned i=0; i < 3; ++i) {
         if (tape.axes.reg[i] != UINT16_MAX) {
