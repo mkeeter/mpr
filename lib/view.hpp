@@ -1,4 +1,4 @@
 struct View {
-    float center[2];
+    float center[3];
     float scale;
 };

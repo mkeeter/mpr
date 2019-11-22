@@ -18,15 +18,16 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     Interval Y(lower.y, upper.y);
     Interval Z(lower.z, upper.z);
 
-    Interval vs[3];
-    vs[0] = X * v.scale - v.center[0];
-    vs[1] = Y * v.scale - v.center[1];
-    vs[2] = (D == 3) * Z;
-
-    for (unsigned i=0; i < 3; ++i) {
-        if (tape.axes.reg[i] != UINT16_MAX) {
-            regs[tape.axes.reg[i]][index] = vs[i];
-        }
+    if (tape.axes.reg[0] != UINT16_MAX) {
+        regs[tape.axes.reg[0]][index] = X * v.scale - v.center[0];
+    }
+    if (tape.axes.reg[1] != UINT16_MAX) {
+        regs[tape.axes.reg[1]][index] = Y * v.scale - v.center[1];
+    }
+    if (tape.axes.reg[2] != UINT16_MAX) {
+        regs[tape.axes.reg[2]][index] = (D == 3)
+            ? (Z * v.scale - v.center[2])
+            : Interval{v.center[2], v.center[2]};
     }
 }
 
@@ -859,17 +860,18 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     const uint3 p = subtiles.lowerCornerVoxel(subtile);
 
     {   // Prepopulate axis values
-        const float x = (p.x + d.x + 0.5f) / image.size_px;
-        const float y = (p.y + d.y + 0.5f) / image.size_px;
-        const float z = (p.z + d.z + 0.5f) / image.size_px;
-        float vs[3];
-        vs[0] = 2.0f * (x - 0.5f) * v.scale - v.center[0];
-        vs[1] = 2.0f * (y - 0.5f) * v.scale - v.center[1];
-        vs[2] = (DIMENSION == 3) * 2.0f * (z - 0.5f);
-        for (unsigned i=0; i < 3; ++i) {
-            if (tape.axes.reg[i] != UINT16_MAX) {
-                regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
-            }
+        float3 f = subtiles.voxelPos(make_uint3(
+                    p.x + d.x, p.y + d.y, p.z + d.z));
+        if (tape.axes.reg[0] != UINT16_MAX) {
+            regs[tape.axes.reg[0]][threadIdx.x] = f.x * v.scale - v.center[0];
+        }
+        if (tape.axes.reg[1] != UINT16_MAX) {
+            regs[tape.axes.reg[1]][threadIdx.x] = f.y * v.scale - v.center[1];
+        }
+        if (tape.axes.reg[2] != UINT16_MAX) {
+            regs[tape.axes.reg[2]][threadIdx.x] = (DIMENSION == 3)
+                ? (f.z * v.scale)
+                : v.center[2];
         }
     }
 

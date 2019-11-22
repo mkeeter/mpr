@@ -26,6 +26,13 @@ struct Tiles {
                           i.z * TILE_SIZE_PX);
     }
 
+    __device__ float3 voxelPos(uint3 v) const {
+        return make_float3(
+        2.0f * ((v.x + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f),
+        2.0f * ((v.y + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f),
+        2.0f * ((v.z + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f));
+    }
+
     __device__ uint3 unpack(uint32_t t) const {
         return make_uint3(
             t % per_side,
