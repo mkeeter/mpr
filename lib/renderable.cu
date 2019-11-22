@@ -21,7 +21,7 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     Interval vs[3];
     vs[0] = 2.0f * (X - 0.5f) * v.scale - v.center[0];
     vs[1] = 2.0f * (Y - 0.5f) * v.scale - v.center[1];
-    vs[2] = 2.0f * (Z - 0.5f);
+    vs[2] = (D == 3) * 2.0f * (Z - 0.5f);
 
     for (unsigned i=0; i < 3; ++i) {
         if (tape.axes.reg[i] != UINT16_MAX) {
@@ -865,7 +865,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         float vs[3];
         vs[0] = 2.0f * (x - 0.5f) * v.scale - v.center[0];
         vs[1] = 2.0f * (y - 0.5f) * v.scale - v.center[1];
-        vs[2] = 2.0f * (z - 0.5f);
+        vs[2] = (DIMENSION == 3) * 2.0f * (z - 0.5f);
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
                 regs[tape.axes.reg[i]][threadIdx.x] = vs[i];

@@ -52,13 +52,6 @@ struct Tiles {
                            (f.z + 1.0f) / per_side);
     }
 
-    __device__ float3 tileToCenterPos(uint32_t t) const {
-        const auto f = unpackFloat(t);
-        return make_float3((f.x + 0.5f) / per_side,
-                           (f.y + 0.5f) / per_side,
-                           (f.z + 0.5f) / per_side);
-    }
-
     __host__ __device__ uint32_t filled(uint32_t i) const
         { return data[total - i - 1]; }
     __host__ __device__ uint32_t active(uint32_t i) const
