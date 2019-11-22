@@ -733,16 +733,15 @@ void SubtileRenderer_check(
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 __device__ void
 SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::drawFilled(
-        const uint32_t tile)
+        const uint32_t subtile)
 {
     static_assert(SUBTILE_SIZE_PX >= 8, "Tiles are too small");
     static_assert(SUBTILE_SIZE_PX % 8 == 0, "Invalid tile size");
 
     // Convert from tile position to pixels
-    const uint32_t px = (tile % subtiles.per_side) * SUBTILE_SIZE_PX;
-    const uint32_t py = (tile / subtiles.per_side) * SUBTILE_SIZE_PX;
+    const uint3 p = subtiles.lowerCornerVoxel(subtile);
 
-    uint2* pix = reinterpret_cast<uint2*>(&image[px + py * image.size_px]);
+    uint2* pix = reinterpret_cast<uint2*>(&image[p.x + p.y * image.size_px]);
     const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
     for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
         for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 8) {
@@ -796,23 +795,25 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         const uint32_t subtile, const View& v)
 {
     const uint32_t pixel = threadIdx.x % pixelsPerSubtile();
-    const uint32_t dx = pixel % SUBTILE_SIZE_PX;
-    const uint32_t dy = pixel / SUBTILE_SIZE_PX;
+    const uint3 d = make_uint3(
+            pixel % SUBTILE_SIZE_PX,
+            (pixel / SUBTILE_SIZE_PX) % SUBTILE_SIZE_PX,
+            (pixel / SUBTILE_SIZE_PX) / SUBTILE_SIZE_PX);
 
     // Pick an index into the register array
     auto regs = this->regs + tape.num_regs * blockIdx.x;
 
     // Convert from tile position to pixels
-    uint32_t px = (subtile % subtiles.per_side) * SUBTILE_SIZE_PX + dx;
-    uint32_t py = (subtile / subtiles.per_side) * SUBTILE_SIZE_PX + dy;
+    const uint3 p = subtiles.lowerCornerVoxel(subtile);
 
     {   // Prepopulate axis values
-        const float x = px / (image.size_px - 1.0f);
-        const float y = py / (image.size_px - 1.0f);
+        const float x = (p.x + d.x) / (image.size_px - 1.0f);
+        const float y = (p.y + d.y) / (image.size_px - 1.0f);
+        const float z = (p.z + d.z) / (image.size_px - 1.0f);
         float vs[3];
         vs[0] = 2.0f * (x - 0.5f) * v.scale - v.center[0];
         vs[1] = 2.0f * (y - 0.5f) * v.scale - v.center[1];
-        vs[2] = 0.0f;
+        vs[2] = 0.0f * z;
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
                 regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
@@ -837,7 +838,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
                 tape = subtiles.subtapes.data[subtape_index];
             } else {
                 if (regs[tape[s - 1].out][threadIdx.x] < 0.0f) {
-                    image(px, py) = 255;
+                    image(p.x + d.x, p.y + d.y) = 255;
                 }
                 return;
             }
