@@ -21,7 +21,7 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     Interval vs[3];
     vs[0] = 2.0f * (X - 0.5f) * v.scale - v.center[0];
     vs[1] = 2.0f * (Y - 0.5f) * v.scale - v.center[1];
-    vs[2] = Z;
+    vs[2] = 2.0f * (Z - 0.5f);
 
     for (unsigned i=0; i < 3; ++i) {
         if (tape.axes.reg[i] != UINT16_MAX) {
@@ -859,13 +859,13 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     const uint3 p = subtiles.lowerCornerVoxel(subtile);
 
     {   // Prepopulate axis values
-        const float x = (p.x + d.x) / (image.size_px - 1.0f);
-        const float y = (p.y + d.y) / (image.size_px - 1.0f);
-        const float z = (p.z + d.z) / (image.size_px - 1.0f);
+        const float x = (p.x + d.x + 0.5f) / image.size_px;
+        const float y = (p.y + d.y + 0.5f) / image.size_px;
+        const float z = (p.z + d.z + 0.5f) / image.size_px;
         float vs[3];
         vs[0] = 2.0f * (x - 0.5f) * v.scale - v.center[0];
         vs[1] = 2.0f * (y - 0.5f) * v.scale - v.center[1];
-        vs[2] = z;
+        vs[2] = 2.0f * (z - 0.5f);
         for (unsigned i=0; i < 3; ++i) {
             if (tape.axes.reg[i] != UINT16_MAX) {
                 regs[tape.axes.reg[i]][threadIdx.x] = vs[i];
