@@ -19,6 +19,46 @@ struct Tiles {
         CHECK(cudaFree(data));
     }
 
+    __device__ uint3 lowerCornerVoxel(uint32_t t) const {
+        const auto i = unpack(t);
+        return make_uint3(i.x * TILE_SIZE_PX,
+                          i.y * TILE_SIZE_PX,
+                          i.z * TILE_SIZE_PX);
+    }
+
+    __device__ uint3 unpack(uint32_t t) const {
+        return make_uint3(
+            t % per_side,
+            (t / per_side) % per_side,
+            (t / per_side) / per_side);
+    }
+
+    __device__ float3 unpackFloat(uint32_t t) const {
+        const auto i = unpack(t);
+        return make_float3(i.x, i.y, i.z);
+    }
+
+    __device__ float3 tileToLowerPos(uint32_t t) const {
+        const auto f = unpackFloat(t);
+        return make_float3(f.x / per_side,
+                           f.y / per_side,
+                           f.z / per_side);
+    }
+
+    __device__ float3 tileToUpperPos(uint32_t t) const {
+        const auto f = unpackFloat(t);
+        return make_float3((f.x + 1.0f) / per_side,
+                           (f.y + 1.0f) / per_side,
+                           (f.z + 1.0f) / per_side);
+    }
+
+    __device__ float3 tileToCenterPos(uint32_t t) const {
+        const auto f = unpackFloat(t);
+        return make_float3((f.x + 0.5f) / per_side,
+                           (f.y + 0.5f) / per_side,
+                           (f.z + 0.5f) / per_side);
+    }
+
     __host__ __device__ uint32_t filled(uint32_t i) const
         { return data[total - i - 1]; }
     __host__ __device__ uint32_t active(uint32_t i) const

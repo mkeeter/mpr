@@ -9,18 +9,16 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
                           R* const __restrict__ regs)
 {
    // Prepopulate axis values
-    const float x = tile % tiles.per_side;
-    const float y = tile / tiles.per_side;
+    const float3 lower = tiles.tileToLowerPos(tile);
+    const float3 upper = tiles.tileToUpperPos(tile);
+
+    Interval X(lower.x, upper.x);
+    Interval Y(lower.y, upper.y);
+    Interval Z(lower.z, upper.z);
 
     Interval vs[3];
-    const Interval X = {x / tiles.per_side, (x + 1) / tiles.per_side};
-    vs[0] = {2.0f * (X.lower() - 0.5f) * v.scale - v.center[0],
-             2.0f * (X.upper() - 0.5f) * v.scale - v.center[0]};
-
-    const Interval Y = {y / tiles.per_side, (y + 1) / tiles.per_side};
-    vs[1] = {2.0f * (Y.lower() - 0.5f) * v.scale - v.center[1],
-             2.0f * (Y.upper() - 0.5f) * v.scale - v.center[1]};
-
+    vs[0] = 2.0f * (X - 0.5f) * v.scale - v.center[0];
+    vs[1] = 2.0f * (Y - 0.5f) * v.scale - v.center[1];
     vs[2] = {0.0f, 0.0f};
 
     for (unsigned i=0; i < 3; ++i) {
@@ -354,10 +352,9 @@ TileRenderer<TILE_SIZE_PX, DIMENSION>::drawFilled(const uint32_t tile)
     static_assert(TILE_SIZE_PX % 16 == 0, "Invalid tile size");
 
     // Convert from tile position to pixels
-    const uint32_t px = (tile % tiles.per_side) * TILE_SIZE_PX;
-    const uint32_t py = (tile / tiles.per_side) * TILE_SIZE_PX;
+    const uint3 p = tiles.lowerCornerVoxel(tile);
 
-    uint4* pix = reinterpret_cast<uint4*>(&image[px + py * image.size_px]);
+    uint4* pix = reinterpret_cast<uint4*>(&image[p.x + p.y * image.size_px]);
     const uint4 fill = make_uint4(0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0);
     for (unsigned y=0; y < TILE_SIZE_PX; y++) {
         for (unsigned x=0; x < TILE_SIZE_PX; x += 16) {
@@ -711,19 +708,23 @@ void SubtileRenderer_check(
         const uint32_t tile = r->tiles.active(i);
 
         // Convert from tile position to pixels
-        const uint32_t px = (tile % r->tiles.per_side) * TILE_SIZE_PX;
-        const uint32_t py = (tile / r->tiles.per_side) * TILE_SIZE_PX;
+        const uint3 p = r->tiles.lowerCornerVoxel(tile);
 
-        // Then convert from pixels into subtiles
-        const uint32_t p = threadIdx.x % r->subtilesPerTile();
-        const uint32_t dx = p % r->subtilesPerTileSide();
-        const uint32_t dy = p / r->subtilesPerTileSide();
+        // Calculate the subtile's offset within the tile
+        const uint32_t q = threadIdx.x % r->subtilesPerTile();
+        const uint3 d = make_uint3(
+             q % r->subtilesPerTileSide(),
+             (q / r->subtilesPerTileSide()) % r->subtilesPerTileSide(),
+             (q / r->subtilesPerTileSide()) / r->subtilesPerTileSide());
 
-        const uint32_t tx = px / SUBTILE_SIZE_PX + dx;
-        const uint32_t ty = py / SUBTILE_SIZE_PX + dy;
+        const uint32_t tx = p.x / SUBTILE_SIZE_PX + d.x;
+        const uint32_t ty = p.y / SUBTILE_SIZE_PX + d.y;
+        const uint32_t tz = p.z / SUBTILE_SIZE_PX + d.z;
+        assert(tz == 0);
 
         // Finally, unconvert back into a single index
-        const uint32_t subtile = ty * r->subtiles.per_side + tx;
+        const uint32_t subtile = tx + ty * r->subtiles.per_side
+             + tz * r->subtiles.per_side * r->subtiles.per_side;
 
         r->check(subtile, tile, v);
     }
