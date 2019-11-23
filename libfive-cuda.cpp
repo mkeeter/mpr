@@ -50,19 +50,6 @@ int main(int argc, char **argv)
     }
     out.savePNG("out_gpu.png");
 
-    if (r->image.size_px == 256) {
-        for (unsigned i=0; i < r->image.size_px; ++i) {
-            for (unsigned j=0; j < r->image.size_px; ++j) {
-                switch (r->image[i * r->image.size_px + j]) {
-                    case 0:     printf(" "); break;
-                    case 0xF0:  printf("."); break;
-                    default:    printf("X"); break;
-                }
-            }
-            printf("\n");
-        }
-    }
-
     std::atomic_bool abort(false);
     libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->image.size_px / 2);
     auto start_cpu = std::chrono::steady_clock::now();
