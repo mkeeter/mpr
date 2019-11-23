@@ -162,9 +162,16 @@ public:
 protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
 
+#if LIBFIVE_CUDA_3D
+    TileRenderer<64, 3> tile_renderer;
+    SubtileRenderer<64, 16, 3> subtile_renderer;
+    SubtileRenderer<16, 4, 3> microtile_renderer;
+    PixelRenderer<4, 3> pixel_renderer;
+#else
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;
     PixelRenderer<8, 2> pixel_renderer;
+#endif
 
     Subtapes subtapes;
 

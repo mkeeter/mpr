@@ -24,3 +24,6 @@
 
 /*  This is the length of each subtape chunk */
 #define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 256
+
+/*  Rendering in 2D vs 3D */
+#define LIBFIVE_CUDA_3D 0
