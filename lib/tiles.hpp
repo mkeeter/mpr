@@ -30,9 +30,9 @@ struct Tiles {
 
     __device__ float3 voxelPos(uint3 v) const {
         return make_float3(
-        2.0f * ((v.x + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f),
-        2.0f * ((v.y + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f),
-        2.0f * ((v.z + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f));
+            2.0f * ((v.x + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f),
+            2.0f * ((v.y + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f),
+            2.0f * ((v.z + 0.5f) / (per_side * TILE_SIZE_PX) - 0.5f));
     }
 
     __device__ uint3 unpack(uint32_t t) const {
@@ -61,17 +61,21 @@ struct Tiles {
                            2.0f * ((f.z + 1.0f) / per_side - 0.5f));
     }
 
+    // Returns the tile index of the i'th filled tile
     __host__ __device__ uint32_t filled(uint32_t i) const
         { return data[total - i - 1]; }
-    __host__ __device__ uint32_t active(uint32_t i) const
-        { return data[i]; }
-    __host__ __device__ uint32_t head(uint32_t t) const
-        { return data[total + t]; }
-
     __host__ __device__ uint32_t& filled(uint32_t i)
         { return data[total - i - 1]; }
+
+    // Returns the tile index of the i'th active tile
+    __host__ __device__ uint32_t active(uint32_t i) const
+        { return data[i]; }
     __host__ __device__ uint32_t& active(uint32_t i)
         { return data[i]; }
+
+    // Returns the subtape head of the i'th active tile
+    __host__ __device__ uint32_t head(uint32_t t) const
+        { return data[total + t]; }
     __host__ __device__ uint32_t& head(uint32_t t)
         { return data[total + t]; }
 
