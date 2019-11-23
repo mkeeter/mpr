@@ -1,8 +1,6 @@
 #include <cassert>
 #include "renderable.hpp"
 
-#define USE_SHARED_MEMORY 0
-
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename R, unsigned T, unsigned D>
@@ -118,68 +116,9 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     const auto num_clauses = tape.num_clauses;
 
     // We copy a chunk of the tape from constant to shared memory
-#if USE_SHARED_MEMORY
-    constexpr unsigned SHARED_CLAUSE_SIZE = LIBFIVE_CUDA_TILE_THREADS;
-    __shared__ Clause clauses[SHARED_CLAUSE_SIZE];
-    __shared__ float constant_lhs[SHARED_CLAUSE_SIZE];
-    __shared__ float constant_rhs[SHARED_CLAUSE_SIZE];
-#endif
-
     for (uint32_t i=0; i < num_clauses; ++i) {
         using namespace libfive::Opcode;
 
-#if USE_SHARED_MEMORY
-        if ((i % SHARED_CLAUSE_SIZE) == 0) {
-            __syncthreads();
-            if (i + threadIdx.x < num_clauses) {
-                const Clause c = clause_ptr[i + threadIdx.x];
-                if (c.banks & 1) {
-                    constant_lhs[threadIdx.x] = constant_ptr[c.lhs];
-                }
-                if (c.banks & 2) {
-                    constant_rhs[threadIdx.x] = constant_ptr[c.rhs];
-                }
-                clauses[threadIdx.x] = c;
-            }
-            __syncthreads();
-        }
-#endif
-
-        // Skip unused tiles
-        if (tile == UINT32_MAX) {
-            continue;
-        }
-
-#if USE_SHARED_MEMORY
-        const Clause c = clauses[i % SHARED_CLAUSE_SIZE];
-        Interval out;
-        switch (c.banks) {
-            case 0: // Interval op Interval
-                out = intervalOp<Interval, Interval>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
-                        regs[c.rhs][threadIdx.x],
-                        choice, choice_index);
-                break;
-            case 1: // Constant op Interval
-                out = intervalOp<float, Interval>(c.opcode,
-                        constant_lhs[i % SHARED_CLAUSE_SIZE],
-                        regs[c.rhs][threadIdx.x],
-                        choice, choice_index);
-                break;
-            case 2: // Interval op Constant
-                out = intervalOp<Interval, float>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
-                        constant_rhs[i % SHARED_CLAUSE_SIZE],
-                        choice, choice_index);
-                break;
-            case 3: // Constant op Constant
-                out = intervalOp<float, float>(c.opcode,
-                        constant_lhs[i % SHARED_CLAUSE_SIZE],
-                        constant_rhs[i % SHARED_CLAUSE_SIZE],
-                        choice, choice_index);
-                break;
-        }
-#else
         const Clause c = clause_ptr[i];
         Interval out;
         switch (c.banks) {
@@ -208,7 +147,6 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                         choice, choice_index);
                 break;
         }
-#endif
 
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             choice_index += 2;
@@ -222,26 +160,25 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         regs[c.out][threadIdx.x] = out;
     }
 
-    uint32_t build_tape_tile = UINT32_MAX;
-    if (tile != UINT32_MAX) {
-        // Copy output to standard register before exiting
-        const Clause c = clause_ptr[num_clauses - 1];
-        const Interval result = regs[c.out][threadIdx.x];
+    const Clause c = clause_ptr[num_clauses - 1];
+    const Interval result = regs[c.out][threadIdx.x];
 
-        // If this tile is unambiguously filled, then mark it at the end
-        // of the tiles list
-        if (result.upper() < 0.0f) {
-            tiles.insert_filled(tile);
-        }
+    // If this tile is unambiguously filled, then mark it at the end
+    // of the tiles list
+    if (result.upper() < 0.0f) {
+        tiles.insert_filled(tile);
+        return;
+    }
 
-        // If the tile is ambiguous, then record it as needing further refinement
-        else if ((result.lower() <= 0.0f && result.upper() >= 0.0f)
-                || isnan(result.lower())
-                || isnan(result.upper()))
-        {
-            tiles.insert_active(tile);
-            build_tape_tile = tile;
-        }
+    // If the tile is ambiguous, then record it as needing further refinement
+    else if ((result.lower() <= 0.0f && result.upper() >= 0.0f)
+            || isnan(result.lower())
+            || isnan(result.upper()))
+    {
+        tiles.insert_active(tile);
+    }
+    else {
+        return;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -263,13 +200,11 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
 
     // Claim a subtape to populate
-    if (build_tape_tile != UINT32_MAX) {
-        subtape_index = subtapes.claim();
+    subtape_index = subtapes.claim();
 
-        // Since we're reversing the tape, this is going to be the
-        // end of the linked list (i.e. next = 0)
-        subtapes.next[subtape_index] = 0;
-    }
+    // Since we're reversing the tape, this is going to be the
+    // end of the linked list (i.e. next = 0)
+    subtapes.next[subtape_index] = 0;
 
     // Walk from the root of the tape downwards
     Clause* __restrict__ out = subtapes.data[subtape_index];
@@ -277,28 +212,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     bool terminal = true;
     for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
-
-#if USE_SHARED_MEMORY
-        if ((i % SHARED_CLAUSE_SIZE) == 0) {
-            __syncthreads();
-            const uint32_t j = num_clauses - i - 1 - threadIdx.x;
-            if (j < num_clauses) {
-                clauses[SHARED_CLAUSE_SIZE - threadIdx.x - 1] = clause_ptr[j];
-            }
-            __syncthreads();
-        }
-#endif
-
-        // Skip dummy tiles which don't actually do things
-        if (build_tape_tile == UINT32_MAX) {
-            continue;
-        }
-
-#if USE_SHARED_MEMORY
-        Clause c = clauses[SHARED_CLAUSE_SIZE - (i % SHARED_CLAUSE_SIZE) - 1];
-#else
         Clause c = clause_ptr[num_clauses - i - 1];
-#endif
 
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             if (choice_index == 0) {
@@ -370,12 +284,10 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         }
     }
 
-    if (build_tape_tile != UINT32_MAX) {
-        // The last subtape may not be completely filled
-        subtapes.start[subtape_index] = s;
-        tiles.head(build_tape_tile) = subtape_index;
-        tiles.terminal[build_tape_tile] = terminal;
-    }
+    // The last subtape may not be completely filled
+    subtapes.start[subtape_index] = s;
+    tiles.head(tile) = subtape_index;
+    tiles.terminal[tile] = terminal;
 }
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
@@ -389,7 +301,9 @@ __global__ void TileRenderer_check(TileRenderer<TILE_SIZE_PX, DIMENSION>* r,
     assert(gridDim.z == 1);
 
     const uint32_t tile = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
+    if (tile < r->tiles.total) {
+        r->check(tile, v);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -448,42 +362,6 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // We copy LIBFIVE_CUDA_SUBTILES_PER_TILE clauses from each active tape
     // into shared memory, to speed up the first pass a little bit.  Beyond
     // that point, tapes diverge in size, so we can't realiably sync threads.
-#if USE_SHARED_MEMORY
-    // We can't use a constexpr function in the array size, so we manually
-    // unroll the pow function here
-    __shared__ Clause local[LIBFIVE_CUDA_REFINE_TILES]
-                           [(TILE_SIZE_PX / SUBTILE_SIZE_PX) *
-                            (TILE_SIZE_PX / SUBTILE_SIZE_PX) *
-                            ((DIMENSION == 3)
-                               ? (TILE_SIZE_PX / SUBTILE_SIZE_PX)
-                               : 1)
-                           ];
-    const auto u = threadIdx.x / subtilesPerTile();
-    const uint32_t q = threadIdx.x % subtilesPerTile();
-    if (s + q < LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
-        local[u][q] = tape[s + q];
-    }
-
-    {   // If this chunk is larger than the short cached tape, then
-        // we'll set the next chunk to re-enter this chunk at a
-        // later point to finish it up.
-        const auto chunk_length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE - s;
-        if (chunk_length > subtilesPerTile()) {
-            length = subtilesPerTile();
-            next = subtape_index;
-            next_start = s + length;
-        } else {
-            // Otherwise, we'll finish the entire cached subtape
-            length = chunk_length;
-        }
-    }
-
-    // Reassign the first tape to our chunk of shared memory
-    tape = local[u];
-    s = 0;
-    __syncthreads();
-#endif
-
     Interval result;
     while (true) {
         using namespace libfive::Opcode;
