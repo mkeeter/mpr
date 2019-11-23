@@ -1076,8 +1076,7 @@ void Renderable::run(const View& view)
                     subtile_renderer, i, view);
         CUDA_CHECK(cudaGetLastError());
     }
-
-    cudaDeviceSynchronize();
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
     const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
