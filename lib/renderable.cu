@@ -779,7 +779,9 @@ __global__ void PixelRenderer_draw(
 
     if (i < r->subtiles.num_active) {
         const uint32_t subtile = r->subtiles.active(i);
-        r->draw(subtile, v);
+        if (!r->subtiles.isMasked(subtile)) {
+            r->draw(subtile, v);
+        }
     }
 }
 
