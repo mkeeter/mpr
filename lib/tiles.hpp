@@ -16,7 +16,7 @@ struct Tiles {
     }
 
     ~Tiles() {
-        CHECK(cudaFree(data));
+        CUDA_CHECK(cudaFree(data));
     }
 
     __device__ uint3 lowerCornerVoxel(uint32_t t) const {

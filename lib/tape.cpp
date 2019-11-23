@@ -121,14 +121,15 @@ Tape Tape::build(libfive::Tree tree) {
 
     auto data = CUDA_MALLOC(char, sizeof(Clause) * flat.size() +
                                   sizeof(float) * constant_data.size());
-    CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     // Copy everything onto the GPU
-    CHECK(cudaMemcpy(data, flat.data(), sizeof(Clause) * flat.size(),
-                     cudaMemcpyHostToDevice));
-    CHECK(cudaMemcpy(data + sizeof(Clause) * flat.size(), constant_data.data(),
-                     sizeof(float) * constant_data.size(),
-                     cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(data, flat.data(), sizeof(Clause) * flat.size(),
+                          cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(data + sizeof(Clause) * flat.size(),
+                          constant_data.data(),
+                          sizeof(float) * constant_data.size(),
+                          cudaMemcpyHostToDevice));
 
     return Tape(data,
                 static_cast<uint16_t>(flat.size()),
@@ -163,7 +164,7 @@ Tape::Tape(Tape&& other)
 
 Tape::~Tape()
 {
-    CHECK(cudaFree((void*)data));
+    CUDA_CHECK(cudaFree((void*)data));
 }
 
 void Tape::print(std::ostream& o)

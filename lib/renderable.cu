@@ -6,7 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename R, unsigned T, unsigned D>
-__device__ void storeAxes(const uint32_t index, const uint32_t tile,
+__device__ void storeAxes(const uint32_t tile,
                           const View& v, const Tiles<T, D>& tiles, const Tape& tape,
                           R* const __restrict__ regs)
 {
@@ -19,13 +19,13 @@ __device__ void storeAxes(const uint32_t index, const uint32_t tile,
     Interval Z(lower.z, upper.z);
 
     if (tape.axes.reg[0] != UINT16_MAX) {
-        regs[tape.axes.reg[0]][index] = X * v.scale - v.center[0];
+        regs[tape.axes.reg[0]][threadIdx.x] = X * v.scale - v.center[0];
     }
     if (tape.axes.reg[1] != UINT16_MAX) {
-        regs[tape.axes.reg[1]][index] = Y * v.scale - v.center[1];
+        regs[tape.axes.reg[1]][threadIdx.x] = Y * v.scale - v.center[1];
     }
     if (tape.axes.reg[2] != UINT16_MAX) {
-        regs[tape.axes.reg[2]][index] = (D == 3)
+        regs[tape.axes.reg[2]][threadIdx.x] = (D == 3)
             ? (Z * v.scale - v.center[2])
             : Interval{v.center[2], v.center[2]};
     }
@@ -95,9 +95,9 @@ TileRenderer<TILE_SIZE_PX, DIMENSION>::TileRenderer(
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 TileRenderer<TILE_SIZE_PX, DIMENSION>::~TileRenderer()
 {
-    CHECK(cudaFree(regs));
-    CHECK(cudaFree(active));
-    CHECK(cudaFree(choices));
+    CUDA_CHECK(cudaFree(regs));
+    CUDA_CHECK(cudaFree(active));
+    CUDA_CHECK(cudaFree(choices));
 }
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
@@ -106,7 +106,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         const uint32_t tile, const View& v)
 {
     auto regs = this->regs + tape.num_regs * blockIdx.x;
-    storeAxes(threadIdx.x, tile, v, tiles, tape, regs);
+    storeAxes(tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
     auto choices = this->choices + ((tape.num_csg_choices + 31) / 32) * blockIdx.x;
@@ -454,9 +454,9 @@ SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::SubtileRenderer(
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::~SubtileRenderer()
 {
-    CHECK(cudaFree(regs));
-    CHECK(cudaFree(active));
-    CHECK(cudaFree(choices));
+    CUDA_CHECK(cudaFree(regs));
+    CUDA_CHECK(cudaFree(active));
+    CUDA_CHECK(cudaFree(choices));
 }
 
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -465,7 +465,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const uint32_t subtile, const uint32_t tile, const View& v)
 {
     auto regs = this->regs + tape.num_regs * blockIdx.x;
-    storeAxes(threadIdx.x, subtile, v, subtiles, tape, regs);
+    storeAxes(subtile, v, subtiles, tape, regs);
 
     auto choices = this->choices + ((tape.num_csg_choices + 31) / 32) * blockIdx.x;
     uint64_t choice = 0;
@@ -773,7 +773,9 @@ void SubtileRenderer_check(
         const uint32_t tx = p.x / SUBTILE_SIZE_PX + d.x;
         const uint32_t ty = p.y / SUBTILE_SIZE_PX + d.y;
         const uint32_t tz = p.z / SUBTILE_SIZE_PX + d.z;
-        assert(tz == 0);
+        if (DIMENSION == 2) {
+            assert(tz == 0);
+        }
 
         // Finally, unconvert back into a single index
         const uint32_t subtile = tx + ty * r->subtiles.per_side
@@ -840,7 +842,7 @@ PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::PixelRenderer(
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::~PixelRenderer()
 {
-    CHECK(cudaFree(regs));
+    CUDA_CHECK(cudaFree(regs));
 }
 
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -982,13 +984,13 @@ void Renderable_copyToTexture(Renderable* r, bool append, cudaSurfaceObject_t su
 void Renderable::Deleter::operator()(Renderable* r)
 {
     r->~Renderable();
-    CHECK(cudaFree(r));
+    CUDA_CHECK(cudaFree(r));
 }
 
 Renderable::~Renderable()
 {
     for (auto& s : streams) {
-        CHECK(cudaStreamDestroy(s));
+        CUDA_CHECK(cudaStreamDestroy(s));
     }
 }
 
@@ -1008,8 +1010,8 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       subtile_renderer(tape, image, tile_renderer.tiles),
       pixel_renderer(tape, image, subtile_renderer.subtiles)
 {
-    CHECK(cudaStreamCreate(&streams[0]));
-    CHECK(cudaStreamCreate(&streams[1]));
+    CUDA_CHECK(cudaStreamCreate(&streams[0]));
+    CUDA_CHECK(cudaStreamCreate(&streams[1]));
 }
 
 void Renderable::run(const View& view)
@@ -1061,6 +1063,7 @@ void Renderable::run(const View& view)
             LIBFIVE_CUDA_REFINE_TILES,
             0, streams[0]>>>(
                     subtile_renderer, i, view);
+        CUDA_CHECK(cudaGetLastError());
     }
 
     cudaDeviceSynchronize();
@@ -1074,6 +1077,7 @@ void Renderable::run(const View& view)
                                      LIBFIVE_CUDA_SUBTILE_THREADS,
                                      0, streams[1]>>>(
             subtile_renderer, i);
+        CUDA_CHECK(cudaGetLastError());
     }
 
     // Do pixel-by-pixel rendering for active subtiles
@@ -1084,14 +1088,15 @@ void Renderable::run(const View& view)
                              pixel_renderer->pixelsPerSubtile() *
                              LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
             pixel_renderer, i, view);
+        CUDA_CHECK(cudaGetLastError());
     }
-    cudaDeviceSynchronize();
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 cudaGraphicsResource* Renderable::registerTexture(GLuint t)
 {
     cudaGraphicsResource* gl_tex;
-    CHECK(cudaGraphicsGLRegisterImage(&gl_tex, t, GL_TEXTURE_2D,
+    CUDA_CHECK(cudaGraphicsGLRegisterImage(&gl_tex, t, GL_TEXTURE_2D,
                                       cudaGraphicsMapFlagsWriteDiscard));
     return gl_tex;
 }
@@ -1099,8 +1104,8 @@ cudaGraphicsResource* Renderable::registerTexture(GLuint t)
 void Renderable::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
 {
     cudaArray* array;
-    CHECK(cudaGraphicsMapResources(1, &gl_tex));
-    CHECK(cudaGraphicsSubResourceGetMappedArray(&array, gl_tex, 0, 0));
+    CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
+    CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(&array, gl_tex, 0, 0));
 
     // Specify texture
     struct cudaResourceDesc res_desc;
@@ -1110,14 +1115,14 @@ void Renderable::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
 
     // Surface object??!
     cudaSurfaceObject_t surf = 0;
-    CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
+    CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
-    CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaDeviceSynchronize());
     Renderable_copyToTexture<<<dim3(256, 256), dim3(16, 16)>>>(
             this, append, surf);
-    CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaGetLastError());
 
-    CHECK(cudaDeviceSynchronize());
-    CHECK(cudaDestroySurfaceObject(surf));
-    CHECK(cudaGraphicsUnmapResources(1, &gl_tex));
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaDestroySurfaceObject(surf));
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &gl_tex));
 }

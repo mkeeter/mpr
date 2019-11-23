@@ -10,7 +10,7 @@ struct Image {
 
     ~Image()
     {
-        CHECK(cudaFree(data));
+        CUDA_CHECK(cudaFree(data));
     }
 
     void reset() {
