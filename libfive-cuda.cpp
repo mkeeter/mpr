@@ -26,8 +26,9 @@ int main(int argc, char **argv)
     } else {
         auto X = libfive::Tree::X();
         auto Y = libfive::Tree::Y();
-        t = min(sqrt((X + 0.5)*(X + 0.5)+ Y*Y) - 0.25,
-                sqrt((X - 0.5)*(X - 0.5) + Y*Y) - 0.25);
+        auto Z = libfive::Tree::Z();
+        t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
+                sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
     auto r = Renderable::build(t, 2048);
     r->tape.print();
