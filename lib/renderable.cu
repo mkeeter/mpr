@@ -790,20 +790,33 @@ __device__ void
 SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::drawFilled(
         const uint32_t subtile)
 {
-    static_assert(SUBTILE_SIZE_PX >= 8, "Tiles are too small");
-    static_assert(SUBTILE_SIZE_PX % 8 == 0, "Invalid tile size");
-
     // Convert from tile position to pixels
     const uint3 p = subtiles.lowerCornerVoxel(subtile);
+    uint8_t* ptr = &image[p.x + p.y * image.size_px];
 
-    uint2* pix = reinterpret_cast<uint2*>(&image[p.x + p.y * image.size_px]);
-    const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
-    for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
-        for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 8) {
-            *pix = fill;
-            pix++;
+    // Can we do 8-byte writes?
+    if (SUBTILE_SIZE_PX >= 8 && (SUBTILE_SIZE_PX % 8) == 0) {
+        uint2* pix = reinterpret_cast<uint2*>(ptr);
+        const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
+        for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
+            for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 8) {
+                *pix = fill;
+                pix++;
+            }
+            pix += (image.size_px - SUBTILE_SIZE_PX) / 8;
         }
-        pix += (image.size_px - SUBTILE_SIZE_PX) / 8;
+    } else if (SUBTILE_SIZE_PX == 4 && (SUBTILE_SIZE_PX % 4) == 0) {
+        uint32_t* pix = reinterpret_cast<uint32_t*>(ptr);
+        const uint32_t fill = 0xD0D0D0D0;
+        for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
+            for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 4) {
+                *pix = fill;
+                pix++;
+            }
+            pix += (image.size_px - SUBTILE_SIZE_PX) / 4;
+        }
+    } else {
+        assert(false);
     }
 }
 
