@@ -85,7 +85,6 @@ struct Tiles {
     void reset() {
         num_active = 0;
         num_filled = 0;
-        num_subtapes = 1;
     }
 
     const uint32_t per_side;
@@ -93,9 +92,6 @@ struct Tiles {
 
     uint32_t num_active;
     uint32_t num_filled;
-
-    Subtapes subtapes;
-    uint32_t num_subtapes;
 protected:
     uint32_t* __restrict__ const data;
 };

@@ -11,4 +11,19 @@ struct Subtapes {
     uint32_t next[LIBFIVE_CUDA_NUM_SUBTAPES];
     Clause   data[LIBFIVE_CUDA_NUM_SUBTAPES]
                  [LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE];
+
+    /* The index of the next available subtape chunk */
+    uint32_t num_subtapes;
+
+    void reset() {
+        num_subtapes = 1;
+    }
+
+#ifdef __CUDACC__
+    inline __device__ uint32_t claim() {
+        const auto out = atomicAdd(&num_subtapes, 1);
+        assert(out < LIBFIVE_CUDA_NUM_SUBTAPES);
+        return out;
+    }
+#endif
 };

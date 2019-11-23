@@ -16,7 +16,7 @@
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 class TileRenderer {
 public:
-    TileRenderer(const Tape& tape, Image& image);
+    TileRenderer(const Tape& tape, Subtapes& subtapes, Image& image);
     ~TileRenderer();
 
     // These are blocks of data which should be indexed as i[threadIdx.x]
@@ -40,6 +40,8 @@ public:
     Tiles<TILE_SIZE_PX, DIMENSION> tiles;
 
 protected:
+    Subtapes& subtapes;
+
     Registers* __restrict__ const regs;
     ActiveArray* __restrict__ const active;
     ChoiceArray* __restrict__ const choices;
@@ -53,7 +55,7 @@ protected:
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 class SubtileRenderer {
 public:
-    SubtileRenderer(const Tape& tape, Image& image,
+    SubtileRenderer(const Tape& tape, Subtapes& subtapes, Image& image,
                     Tiles<TILE_SIZE_PX, DIMENSION>& prev);
     ~SubtileRenderer();
 
@@ -94,6 +96,8 @@ public:
     Tiles<SUBTILE_SIZE_PX, DIMENSION> subtiles;
 
 protected:
+    Subtapes& subtapes;
+
     Registers* __restrict__ const regs;
     ActiveArray* __restrict__ const active;
     ChoiceArray* __restrict__ const choices;
@@ -107,7 +111,7 @@ protected:
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 class PixelRenderer {
 public:
-    PixelRenderer(const Tape& tape, Image& image,
+    PixelRenderer(const Tape& tape, const Subtapes& subtapes, Image& image,
                   const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
     ~PixelRenderer();
 
@@ -128,6 +132,7 @@ public:
     const Tiles<SUBTILE_SIZE_PX, DIMENSION>& subtiles;
 
 protected:
+    const Subtapes& subtapes;
     FloatRegisters* __restrict__ const regs;
 
     PixelRenderer(const PixelRenderer& other)=delete;
@@ -164,6 +169,8 @@ protected:
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;
     PixelRenderer<8, 2> pixel_renderer;
+
+    Subtapes subtapes;
 
     Renderable(const Renderable& other)=delete;
     Renderable& operator=(const Renderable& other)=delete;
