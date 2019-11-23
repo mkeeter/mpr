@@ -65,7 +65,7 @@ struct Tiles {
     //
     // This ignores Z coordinates, because filled tiles occlude
     // anything behind them, so only the highest Z value matters.
-    __host__ __device__ uint32_t& filled(uint32_t t) {
+    __device__ uint32_t& filled(uint32_t t) {
         uint3 i = unpack(t);
         return data[total*2 + i.x + i.y * per_side];
     }
@@ -88,14 +88,6 @@ struct Tiles {
     __host__ __device__ uint32_t& head(uint32_t t)
         { return data[total + t]; }
 
-    // Returns the Z level of the pixel at px, py
-    __host__ __device__ uint32_t z(uint32_t px, uint32_t py) const {
-        return data[total * 2 + px + py * per_side];
-    }
-    __host__ __device__ uint32_t& z(uint32_t px, uint32_t py) {
-        return data[total * 2 + px + py * per_side];
-    }
-
 #ifdef __CUDACC__
     // Marks that the tile at t is filled.  Filled tiles occlude
     // everything behind them, so this is an atomicMax operation.
@@ -111,7 +103,7 @@ struct Tiles {
     void reset() {
         num_active = 0;
         num_filled = 0;
-        cudaMemset(&z(0, 0), 0, sizeof(uint32_t) * pow(per_side, 2));
+        cudaMemset(&data[total * 2], 0, sizeof(uint32_t) * pow(per_side, 2));
     }
 
     const uint32_t per_side;
