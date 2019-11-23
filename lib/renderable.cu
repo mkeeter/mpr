@@ -357,27 +357,16 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     const Clause* __restrict__ tape = subtapes.data[subtape_index];
     const float* __restrict__ constant_ptr = &this->tape.constant(0);
 
-    uint32_t next = subtapes.next[subtape_index];
-    uint32_t next_start = subtapes.start[next];
-    uint32_t length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
-
-    // We copy LIBFIVE_CUDA_SUBTILES_PER_TILE clauses from each active tape
-    // into shared memory, to speed up the first pass a little bit.  Beyond
-    // that point, tapes diverge in size, so we can't realiably sync threads.
     Interval result;
     while (true) {
         using namespace libfive::Opcode;
 
-        if (s == length) {
+        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+            uint32_t next = subtapes.next[subtape_index];
             if (next) {
                 subtape_index = next;
-                s = next_start;
+                s = subtapes.start[subtape_index];
                 tape = subtapes.data[subtape_index];
-
-                // Preload these values
-                next = subtapes.next[subtape_index];
-                next_start = subtapes.start[next];
-                length = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
             } else {
                 result = regs[tape[s - 1].out][threadIdx.x];
                 break;
