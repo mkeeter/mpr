@@ -274,6 +274,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     // Walk from the root of the tape downwards
     Clause* __restrict__ out = subtapes.data[subtape_index];
 
+    bool terminal = true;
     for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
 
@@ -336,6 +337,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                         c.banks = 3;
                     }
                 } else if (choice_ == 0) {
+                    terminal = false;
                     if (!(c.banks & 1)) {
                         active[c.lhs][threadIdx.x] = true;
                     }
@@ -372,6 +374,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         // The last subtape may not be completely filled
         subtapes.start[subtape_index] = s;
         tiles.head(build_tape_tile) = subtape_index;
+        tiles.terminal[build_tape_tile] = terminal;
     }
 }
 
@@ -578,8 +581,10 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
 
     ////////////////////////////////////////////////////////////////////////////
 
-    // Reverse the tape
-    if ((threadIdx.x % subtilesPerTile()) == 0) {
+    // Reverse the tape if it isn't terminal
+    bool terminal = tiles.terminal[tile];
+    __syncthreads();
+    if ((threadIdx.x % subtilesPerTile()) == 0 && !terminal) {
         uint32_t subtape_index = tiles.head(tile);
         uint32_t prev = 0;
 
@@ -618,6 +623,14 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
 
     ////////////////////////////////////////////////////////////////////////////
 
+    // Re-use the previous tape and return immediately if the previous
+    // tape was terminal (i.e. having no min/max clauses to specialize)
+    if (terminal) {
+        subtiles.head(subtile) = tiles.head(tile);
+        subtiles.terminal[subtile] = true;
+        return;
+    }
+
     // Pick a subset of the active array to use for this block
     auto active = this->active + blockIdx.x * this->tape.num_regs;
 
@@ -644,6 +657,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // end of the linked list (i.e. next = 0)
     subtapes.next[out_subtape_index] = 0;
 
+    terminal = true;
     while (true) {
         using namespace libfive::Opcode;
 
@@ -709,6 +723,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                     assert(false);
                 }
             } else {
+                terminal = false;
                 if (!(c.banks & 1)) {
                     active[c.lhs][threadIdx.x] = true;
                 }
@@ -736,6 +751,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // The last subtape may not be completely filled, so write its size here
     subtapes.start[out_subtape_index] = out_s;
     subtiles.head(subtile) = out_subtape_index;
+    subtiles.terminal[subtile] = terminal;
 }
 
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>

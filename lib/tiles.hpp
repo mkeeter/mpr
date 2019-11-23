@@ -10,13 +10,15 @@ struct Tiles {
     Tiles(const uint32_t image_size_px)
         : per_side(image_size_px / TILE_SIZE_PX),
           total(pow(per_side, DIMENSION)),
-          data(CUDA_MALLOC(uint32_t, 2 * total))
+          data(CUDA_MALLOC(uint32_t, 2 * total)),
+          terminal(CUDA_MALLOC(uint8_t, total))
     {
         reset();
     }
 
     ~Tiles() {
         CUDA_CHECK(cudaFree(data));
+        CUDA_CHECK(cudaFree(terminal));
     }
 
     __device__ uint3 lowerCornerVoxel(uint32_t t) const {
@@ -92,6 +94,8 @@ struct Tiles {
 
     uint32_t num_active;
     uint32_t num_filled;
+
+    uint8_t* __restrict__ const terminal;
 protected:
     uint32_t* __restrict__ const data;
 };
