@@ -302,7 +302,9 @@ __global__ void TileRenderer_check(TileRenderer<TILE_SIZE_PX, DIMENSION>* r,
 
     const uint32_t tile = threadIdx.x + blockIdx.x * blockDim.x + offset;
     if (tile < r->tiles.total) {
-        r->check(tile, v);
+        if (!r->tiles.isMasked(tile)) {
+            r->check(tile, v);
+        }
     }
 }
 
@@ -636,7 +638,9 @@ void SubtileRenderer_check(
         const uint32_t subtile = tx + ty * r->subtiles.per_side
              + tz * r->subtiles.per_side * r->subtiles.per_side;
 
-        r->check(subtile, tile, v);
+        if (!r->tiles.isMasked(tile) && !r->subtiles.isMasked(subtile)) {
+            r->check(subtile, tile, v);
+        }
     }
 }
 

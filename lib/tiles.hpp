@@ -69,6 +69,11 @@ struct Tiles {
         uint3 i = unpack(t);
         return data[total*2 + i.x + i.y * per_side];
     }
+    __device__ uint32_t filled(uint32_t t) const {
+        uint3 i = unpack(t);
+        return data[total*2 + i.x + i.y * per_side];
+    }
+
     // Returns the Z height of the given pixels
     __host__ __device__ uint32_t filledAt(uint32_t px, uint32_t py) const {
         const auto tx = px / TILE_SIZE_PX;
@@ -101,6 +106,12 @@ struct Tiles {
     }
     __device__ void insertActive(uint32_t t) {
         active(atomicAdd(&num_active, 1)) = t;
+    }
+
+    // Checks whether the given tile is masked by a filled tile in front of it
+    __device__ bool isMasked(uint32_t t) const {
+        uint3 i = unpack(t);
+        return filled(t) >= (i.z * TILE_SIZE_PX + TILE_SIZE_PX - 1);
     }
 #endif
 
