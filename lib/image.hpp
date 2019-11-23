@@ -26,6 +26,10 @@ struct Image {
     uint16_t& operator()(uint32_t x, uint32_t y) {
         return data[x + y * size_px];
     }
+    __host__ __device__
+    uint16_t operator()(uint32_t x, uint32_t y) const {
+        return data[x + y * size_px];
+    }
 
     const uint32_t size_px;
     uint16_t* const __restrict__ data;

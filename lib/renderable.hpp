@@ -111,6 +111,10 @@ public:
                   const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
     ~PixelRenderer();
 
+    constexpr static bool __host__ __device__ is3D() {
+        return DIMENSION == 3;
+    }
+
     constexpr static unsigned __host__ __device__ pixelsPerSubtile() {
         return pow(SUBTILE_SIZE_PX, DIMENSION);
     }
@@ -155,6 +159,9 @@ public:
 
     __device__
     void copyToSurface(bool append, cudaSurfaceObject_t surf);
+
+    __host__ __device__
+    uint16_t heightAt(const uint32_t x, const uint32_t y) const;
 
     Image image;
     Tape tape;

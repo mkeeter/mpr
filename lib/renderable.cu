@@ -898,6 +898,20 @@ __global__ void PixelRenderer_draw(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+__host__ __device__
+uint16_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
+{
+    const uint8_t c = image(px, py);
+    const uint8_t t = tile_renderer.tiles.filledAt(px, py);
+    const uint8_t s = subtile_renderer.subtiles.filledAt(px, py);
+
+    if (pixel_renderer.is3D()) {
+        return max(max(c, t), s);
+    } else {
+        return (c || t || s) ? 65535 : 0;
+    }
+}
+
 __device__
 void Renderable::copyToSurface(bool append, cudaSurfaceObject_t surf)
 {
@@ -906,15 +920,9 @@ void Renderable::copyToSurface(bool append, cudaSurfaceObject_t surf)
 
     const unsigned size = image.size_px;
     if (x < size && y < size) {
-        const uint8_t c = image(x, size - y - 1);
-        const uint8_t t = tile_renderer.tiles.filledAt(x, size - y - 1);
-        const uint8_t s = subtile_renderer.subtiles.filledAt(x, size - y - 1);
-        if (c) {
-            surf2Dwrite(0xFFFFFFFF, surf, x*4, y);
-        } else if (t) {
-            surf2Dwrite(0xAFFFFFFF, surf, x*4, y);
-        } else if (s) {
-            surf2Dwrite(0xCFFFFFFF, surf, x*4, y);
+        const auto h = heightAt(x, size - y - 1);
+        if (h) {
+            surf2Dwrite(0x00FFFFFF | (h << 24), surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
