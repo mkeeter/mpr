@@ -967,16 +967,17 @@ void Renderable::run(const View& view)
     // that has been loaned to the GPU and not synchronized.
     auto tile_renderer = &this->tile_renderer;
     const uint32_t total_tiles = tile_renderer->tiles.total;
-    const uint32_t tile_stride = LIBFIVE_CUDA_TILE_THREADS *
-                                 LIBFIVE_CUDA_TILE_BLOCKS;
     auto subtile_renderer = &this->subtile_renderer;
     auto pixel_renderer = &this->pixel_renderer;
 
-    // Do per-tile evaluation to get filled / ambiguous tiles
-    for (unsigned i=0; i < total_tiles; i += tile_stride) {
-        TileRenderer_check<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                             LIBFIVE_CUDA_TILE_THREADS>>>(
-                                     tile_renderer, i, view);
+    {   // Do per-tile evaluation to get filled / ambiguous tiles
+        const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
+                                LIBFIVE_CUDA_TILE_BLOCKS;
+        for (unsigned i=0; i < total_tiles; i += stride) {
+            TileRenderer_check<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                                 LIBFIVE_CUDA_TILE_THREADS>>>(
+                                         tile_renderer, i, view);
+        }
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -984,23 +985,24 @@ void Renderable::run(const View& view)
     const uint32_t active_tiles = tile_renderer->tiles.num_active;
 
     // Refine ambiguous tiles from their subtapes
-    const uint32_t subtile_check_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                          LIBFIVE_CUDA_REFINE_TILES;
-    for (unsigned i=0; i < active_tiles; i += subtile_check_stride) {
-        SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-            subtile_renderer->subtilesPerTile() *
-            LIBFIVE_CUDA_REFINE_TILES>>>(
-                    subtile_renderer, i, view);
-        CUDA_CHECK(cudaGetLastError());
+    {
+        const uint32_t per_block = 256 / subtile_renderer->subtilesPerTile();
+        const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS * per_block;
+        for (unsigned i=0; i < active_tiles; i += stride) {
+            SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                subtile_renderer->subtilesPerTile() * per_block>>>(
+                        subtile_renderer, i, view);
+            CUDA_CHECK(cudaGetLastError());
+        }
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
 
-    const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
+    const uint32_t active_pixel_tiles = pixel_renderer->subtiles.num_active;
 
     // Do pixel-by-pixel rendering for active subtiles
     const uint32_t subtile_render_stride = LIBFIVE_CUDA_RENDER_BLOCKS *
                                            LIBFIVE_CUDA_RENDER_SUBTILES;
-    for (unsigned i=0; i < active_subtiles; i += subtile_render_stride) {
+    for (unsigned i=0; i < active_pixel_tiles; i += subtile_render_stride) {
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
                              pixel_renderer->pixelsPerSubtile() *
                              LIBFIVE_CUDA_RENDER_SUBTILES>>>(
