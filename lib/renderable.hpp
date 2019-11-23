@@ -31,9 +31,6 @@ public:
     //  Reverses the tapes
     __device__ void check(const uint32_t tile, const View& v);
 
-    // Fills in the given (filled) tile in the image
-    __device__ void drawFilled(const uint32_t tile);
-
     const Tape& tape;
     Image& image;
 
@@ -81,7 +78,6 @@ public:
             const uint32_t subtile,
             const uint32_t tile,
             const View& v);
-    __device__ void drawFilled(const uint32_t tile);
 
     // Refines a tile tape into a subtile tape based on choices
     __device__ void buildTape(const uint32_t subtile,
@@ -152,19 +148,19 @@ public:
 
     // Returns a GPU-allocated Renderable struct
     static Handle build(libfive::Tree tree, uint32_t image_size_px);
-    ~Renderable();
     void run(const View& v);
 
     static cudaGraphicsResource* registerTexture(GLuint t);
     void copyToTexture(cudaGraphicsResource* gl_tex, bool append);
+
+    __device__
+    void copyToSurface(bool append, cudaSurfaceObject_t surf);
 
     Image image;
     Tape tape;
 
 protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
-
-    cudaStream_t streams[2];
 
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;

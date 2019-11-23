@@ -392,45 +392,6 @@ __global__ void TileRenderer_check(TileRenderer<TILE_SIZE_PX, DIMENSION>* r,
     r->check(tile < r->tiles.total ? tile : UINT32_MAX, v);
 }
 
-template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
-__device__ void
-TileRenderer<TILE_SIZE_PX, DIMENSION>::drawFilled(const uint32_t tile)
-{
-    static_assert(TILE_SIZE_PX >= 16, "Tiles are too small");
-    static_assert(TILE_SIZE_PX % 16 == 0, "Invalid tile size");
-
-    // Convert from tile position to pixels
-    const uint3 p = tiles.lowerCornerVoxel(tile);
-
-    uint4* pix = reinterpret_cast<uint4*>(&image[p.x + p.y * image.size_px]);
-    const uint4 fill = make_uint4(0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0, 0xB0B0B0B0);
-    for (unsigned y=0; y < TILE_SIZE_PX; y++) {
-        for (unsigned x=0; x < TILE_SIZE_PX; x += 16) {
-            *pix = fill;
-            pix++;
-        }
-        pix += (image.size_px - TILE_SIZE_PX) / 16;
-    }
-}
-
-template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
-__global__ void TileRenderer_drawFilled(
-        TileRenderer<TILE_SIZE_PX, DIMENSION>* r, const uint32_t offset)
-{
-    // Each thread picks a block and fills in the whole thing
-    assert(blockDim.y == 1);
-    assert(blockDim.z == 1);
-    assert(gridDim.y == 1);
-    assert(gridDim.z == 1);
-
-    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t i = start + offset;
-    if (i < r->tiles.num_filled) {
-        const uint32_t tile = r->tiles.filled(i);
-        r->drawFilled(tile);
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -801,60 +762,6 @@ void SubtileRenderer_check(
     }
 }
 
-template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
-__device__ void
-SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::drawFilled(
-        const uint32_t subtile)
-{
-    // Convert from tile position to pixels
-    const uint3 p = subtiles.lowerCornerVoxel(subtile);
-    uint8_t* ptr = &image[p.x + p.y * image.size_px];
-
-    // Can we do 8-byte writes?
-    if (SUBTILE_SIZE_PX >= 8 && (SUBTILE_SIZE_PX % 8) == 0) {
-        uint2* pix = reinterpret_cast<uint2*>(ptr);
-        const uint2 fill = make_uint2(0xD0D0D0D0, 0xD0D0D0D0);
-        for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
-            for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 8) {
-                *pix = fill;
-                pix++;
-            }
-            pix += (image.size_px - SUBTILE_SIZE_PX) / 8;
-        }
-    } else if (SUBTILE_SIZE_PX == 4 && (SUBTILE_SIZE_PX % 4) == 0) {
-        uint32_t* pix = reinterpret_cast<uint32_t*>(ptr);
-        const uint32_t fill = 0xD0D0D0D0;
-        for (unsigned y=0; y < SUBTILE_SIZE_PX; y++) {
-            for (unsigned x=0; x < SUBTILE_SIZE_PX; x += 4) {
-                *pix = fill;
-                pix++;
-            }
-            pix += (image.size_px - SUBTILE_SIZE_PX) / 4;
-        }
-    } else {
-        assert(false);
-    }
-}
-
-template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
-__global__ void SubtileRenderer_drawFilled(
-        SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>* r,
-        const uint32_t offset)
-{
-    // Each thread picks a block and fills in the whole thing
-    assert(blockDim.y == 1);
-    assert(blockDim.z == 1);
-    assert(gridDim.y == 1);
-    assert(gridDim.z == 1);
-
-    const uint32_t start = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t i = start + offset;
-    if (i < r->subtiles.num_filled) {
-        const uint32_t tile = r->subtiles.filled(i);
-        r->drawFilled(tile);
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -991,21 +898,34 @@ __global__ void PixelRenderer_draw(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-__global__
-void Renderable_copyToTexture(Renderable* r, bool append, cudaSurfaceObject_t surf)
+__device__
+void Renderable::copyToSurface(bool append, cudaSurfaceObject_t surf)
 {
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
 
-    const unsigned size = r->image.size_px;
+    const unsigned size = image.size_px;
     if (x < size && y < size) {
-        const uint8_t c = r->image(x, size - y - 1);
+        const uint8_t c = image(x, size - y - 1);
+        const uint8_t t = tile_renderer.tiles.filledAt(x, size - y - 1);
+        const uint8_t s = subtile_renderer.subtiles.filledAt(x, size - y - 1);
         if (c) {
-            surf2Dwrite(0x00FFFFFF | (c << 24), surf, x*4, y);
+            surf2Dwrite(0xFFFFFFFF, surf, x*4, y);
+        } else if (t) {
+            surf2Dwrite(0xAFFFFFFF, surf, x*4, y);
+        } else if (s) {
+            surf2Dwrite(0xCFFFFFFF, surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
     }
+}
+
+__global__
+void Renderable_copyToSurface(Renderable* r, bool append,
+                              cudaSurfaceObject_t surf)
+{
+    r->copyToSurface(append, surf);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1014,13 +934,6 @@ void Renderable::Deleter::operator()(Renderable* r)
 {
     r->~Renderable();
     CUDA_CHECK(cudaFree(r));
-}
-
-Renderable::~Renderable()
-{
-    for (auto& s : streams) {
-        CUDA_CHECK(cudaStreamDestroy(s));
-    }
 }
 
 Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px)
@@ -1039,21 +952,16 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
       subtile_renderer(tape, subtapes, image, tile_renderer.tiles),
       pixel_renderer(tape, subtapes, image, subtile_renderer.subtiles)
 {
-    CUDA_CHECK(cudaStreamCreate(&streams[0]));
-    CUDA_CHECK(cudaStreamCreate(&streams[1]));
+    // Nothing to do here
 }
 
 void Renderable::run(const View& view)
 {
-    cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
-
     // Reset everything in preparation for a render
-    {
-        tile_renderer.tiles.reset();
-        subtile_renderer.subtiles.reset();
-        subtapes.reset();
-    }
-    cudaMemset(image.data, 0, image.size_px * image.size_px);
+    tile_renderer.tiles.reset();
+    subtile_renderer.subtiles.reset();
+    subtapes.reset();
+    image.reset();
 
     // Record this local variable because otherwise it looks up memory
     // that has been loaned to the GPU and not synchronized.
@@ -1067,22 +975,13 @@ void Renderable::run(const View& view)
     // Do per-tile evaluation to get filled / ambiguous tiles
     for (unsigned i=0; i < total_tiles; i += tile_stride) {
         TileRenderer_check<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                             LIBFIVE_CUDA_TILE_THREADS,
-                             0, streams[0]>>>(tile_renderer, i, view);
+                             LIBFIVE_CUDA_TILE_THREADS>>>(
+                                     tile_renderer, i, view);
     }
-    cudaDeviceSynchronize();
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     // Pull a few variables back from the GPU
-    const uint32_t filled_tiles = tile_renderer->tiles.num_filled;
     const uint32_t active_tiles = tile_renderer->tiles.num_active;
-
-    for (unsigned i=0; i < filled_tiles; i += tile_stride) {
-        // Drawing filled and ambiguous tiles can happen simultaneously,
-        // so we assign each one to a separate stream.
-        TileRenderer_drawFilled<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                                  LIBFIVE_CUDA_TILE_THREADS,
-                                  0, streams[1]>>>(tile_renderer, i);
-    }
 
     // Refine ambiguous tiles from their subtapes
     const uint32_t subtile_check_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
@@ -1090,24 +989,13 @@ void Renderable::run(const View& view)
     for (unsigned i=0; i < active_tiles; i += subtile_check_stride) {
         SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
             subtile_renderer->subtilesPerTile() *
-            LIBFIVE_CUDA_REFINE_TILES,
-            0, streams[0]>>>(
+            LIBFIVE_CUDA_REFINE_TILES>>>(
                     subtile_renderer, i, view);
         CUDA_CHECK(cudaGetLastError());
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    const uint32_t filled_subtiles = subtile_renderer->subtiles.num_filled;
     const uint32_t active_subtiles = subtile_renderer->subtiles.num_active;
-    const uint32_t subtile_stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                    LIBFIVE_CUDA_SUBTILE_THREADS;
-    for (unsigned i=0; i < filled_subtiles; i += subtile_stride) {
-        SubtileRenderer_drawFilled<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-                                     LIBFIVE_CUDA_SUBTILE_THREADS,
-                                     0, streams[1]>>>(
-            subtile_renderer, i);
-        CUDA_CHECK(cudaGetLastError());
-    }
 
     // Do pixel-by-pixel rendering for active subtiles
     const uint32_t subtile_render_stride = LIBFIVE_CUDA_RENDER_BLOCKS *
@@ -1115,7 +1003,7 @@ void Renderable::run(const View& view)
     for (unsigned i=0; i < active_subtiles; i += subtile_render_stride) {
         PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
                              pixel_renderer->pixelsPerSubtile() *
-                             LIBFIVE_CUDA_RENDER_SUBTILES, 0, streams[0]>>>(
+                             LIBFIVE_CUDA_RENDER_SUBTILES>>>(
             pixel_renderer, i, view);
         CUDA_CHECK(cudaGetLastError());
     }
@@ -1147,7 +1035,7 @@ void Renderable::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
     CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    Renderable_copyToTexture<<<dim3(256, 256), dim3(16, 16)>>>(
+    Renderable_copyToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
             this, append, surf);
     CUDA_CHECK(cudaGetLastError());
 

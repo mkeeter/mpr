@@ -10,7 +10,7 @@ struct Tiles {
     Tiles(const uint32_t image_size_px)
         : per_side(image_size_px / TILE_SIZE_PX),
           total(pow(per_side, DIMENSION)),
-          data(CUDA_MALLOC(uint32_t, 2 * total)),
+          data(CUDA_MALLOC(uint32_t, 2 * total + pow(per_side, 2))),
           terminal(CUDA_MALLOC(uint8_t, total))
     {
         reset();
@@ -61,11 +61,20 @@ struct Tiles {
                            2.0f * ((f.z + 1.0f) / per_side - 0.5f));
     }
 
-    // Returns the tile index of the i'th filled tile
-    __host__ __device__ uint32_t filled(uint32_t i) const
-        { return data[total - i - 1]; }
-    __host__ __device__ uint32_t& filled(uint32_t i)
-        { return data[total - i - 1]; }
+    // Returns the z index of the filled tile at t, if present
+    //
+    // This ignores Z coordinates, because filled tiles occlude
+    // anything behind them, so only the highest Z value matters.
+    __host__ __device__ uint32_t& filled(uint32_t t) {
+        uint3 i = unpack(t);
+        return data[total*2 + i.x + i.y * per_side];
+    }
+    // Returns the Z height of the given pixels
+    __host__ __device__ uint32_t filledAt(uint32_t px, uint32_t py) const {
+        const auto tx = px / TILE_SIZE_PX;
+        const auto ty = py / TILE_SIZE_PX;
+        return data[total*2 + tx + ty * per_side];
+    }
 
     // Returns the tile index of the i'th active tile
     __host__ __device__ uint32_t active(uint32_t i) const
@@ -79,9 +88,20 @@ struct Tiles {
     __host__ __device__ uint32_t& head(uint32_t t)
         { return data[total + t]; }
 
+    // Returns the Z level of the pixel at px, py
+    __host__ __device__ uint32_t z(uint32_t px, uint32_t py) const {
+        return data[total * 2 + px + py * per_side];
+    }
+    __host__ __device__ uint32_t& z(uint32_t px, uint32_t py) {
+        return data[total * 2 + px + py * per_side];
+    }
+
 #ifdef __CUDACC__
+    // Marks that the tile at t is filled.  Filled tiles occlude
+    // everything behind them, so this is an atomicMax operation.
     __device__ void insert_filled(uint32_t t) {
-        filled(atomicAdd(&num_filled, 1)) = t;
+        uint3 i = unpack(t);
+        atomicMax(&filled(t), i.z + 1);
     }
     __device__ void insert_active(uint32_t t) {
         active(atomicAdd(&num_active, 1)) = t;
@@ -91,6 +111,7 @@ struct Tiles {
     void reset() {
         num_active = 0;
         num_filled = 0;
+        cudaMemset(&z(0, 0), 0, sizeof(uint32_t) * pow(per_side, 2));
     }
 
     const uint32_t per_side;
