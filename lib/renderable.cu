@@ -679,6 +679,11 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     // Convert from tile position to pixels
     const uint3 p = subtiles.lowerCornerVoxel(subtile);
 
+    // Skip this pixel if it's already below the image
+    if (DIMENSION == 3 && image(p.x + d.x, p.y + d.y) >= p.z + d.z) {
+        return;
+    }
+
     {   // Prepopulate axis values
         float3 f = subtiles.voxelPos(make_uint3(
                     p.x + d.x, p.y + d.y, p.z + d.z));
