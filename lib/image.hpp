@@ -3,7 +3,7 @@
 struct Image {
     Image(const uint32_t size_px)
         : size_px(size_px),
-          data(CUDA_MALLOC(uint16_t, size_px * size_px))
+          data(CUDA_MALLOC(uint32_t, size_px * size_px))
     {
         // Nothing to do here
     }
@@ -18,19 +18,19 @@ struct Image {
     }
 
     __host__ __device__
-    uint16_t& operator[](size_t i) { return data[i]; }
+    uint32_t& operator[](size_t i) { return data[i]; }
     __host__ __device__
-    uint16_t operator[](size_t i) const { return data[i]; }
+    uint32_t operator[](size_t i) const { return data[i]; }
 
     __host__ __device__
-    uint16_t& operator()(uint32_t x, uint32_t y) {
+    uint32_t& operator()(uint32_t x, uint32_t y) {
         return data[x + y * size_px];
     }
     __host__ __device__
-    uint16_t operator()(uint32_t x, uint32_t y) const {
+    uint32_t operator()(uint32_t x, uint32_t y) const {
         return data[x + y * size_px];
     }
 
     const uint32_t size_px;
-    uint16_t* const __restrict__ data;
+    uint32_t* const __restrict__ data;
 };

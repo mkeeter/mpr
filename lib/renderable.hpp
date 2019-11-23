@@ -161,7 +161,7 @@ public:
     void copyToSurface(bool append, cudaSurfaceObject_t surf);
 
     __host__ __device__
-    uint16_t heightAt(const uint32_t x, const uint32_t y) const;
+    uint32_t heightAt(const uint32_t x, const uint32_t y) const;
 
     Image image;
     Tape tape;

@@ -830,7 +830,11 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
                 tape = subtapes.data[subtape_index];
             } else {
                 if (regs[tape[s - 1].out][threadIdx.x] < 0.0f) {
-                    image(p.x + d.x, p.y + d.y) = 255;
+                    if (DIMENSION == 2) {
+                        image(p.x + d.x, p.y + d.y) = 255;
+                    } else {
+                        atomicMax(&image(p.x + d.x, p.y + d.y), p.z + d.z);
+                    }
                 }
                 return;
             }
@@ -899,11 +903,11 @@ __global__ void PixelRenderer_draw(
 
 ////////////////////////////////////////////////////////////////////////////////
 __host__ __device__
-uint16_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
+uint32_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
 {
-    const uint8_t c = image(px, py);
-    const uint8_t t = tile_renderer.tiles.filledAt(px, py);
-    const uint8_t s = subtile_renderer.subtiles.filledAt(px, py);
+    const uint32_t c = image(px, py);
+    const uint32_t t = tile_renderer.tiles.filledAt(px, py);
+    const uint32_t s = subtile_renderer.subtiles.filledAt(px, py);
 
     if (pixel_renderer.is3D()) {
         return max(max(c, t), s);
