@@ -91,7 +91,7 @@ struct Tiles {
 #ifdef __CUDACC__
     // Marks that the tile at t is filled.  Filled tiles occlude
     // everything behind them, so this is an atomicMax operation.
-    __device__ void insert_filled(uint32_t t) {
+    __device__ void insertFilled(uint32_t t) {
         uint3 i = unpack(t);
         if (DIMENSION == 2) {
             atomicMax(&filled(t), i.z + 1);
@@ -99,7 +99,7 @@ struct Tiles {
             atomicMax(&filled(t), i.z * TILE_SIZE_PX + TILE_SIZE_PX - 1);
         }
     }
-    __device__ void insert_active(uint32_t t) {
+    __device__ void insertActive(uint32_t t) {
         active(atomicAdd(&num_active, 1)) = t;
     }
 #endif

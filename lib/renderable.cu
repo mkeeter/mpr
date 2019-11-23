@@ -166,7 +166,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper() < 0.0f) {
-        tiles.insert_filled(tile);
+        tiles.insertFilled(tile);
         return;
     }
 
@@ -175,7 +175,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
             || isnan(result.lower())
             || isnan(result.upper()))
     {
-        tiles.insert_active(tile);
+        tiles.insertActive(tile);
     }
     else {
         return;
@@ -444,7 +444,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper() < 0.0f) {
-        subtiles.insert_filled(subtile);
+        subtiles.insertFilled(subtile);
         return;
     }
 
@@ -453,7 +453,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
             || isnan(result.lower())
             || isnan(result.upper()))
     {
-        subtiles.insert_active(subtile);
+        subtiles.insertActive(subtile);
     }
 
     else {
