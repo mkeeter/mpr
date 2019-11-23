@@ -96,7 +96,7 @@ struct Tiles {
         if (DIMENSION == 2) {
             atomicMax(&filled(t), i.z + 1);
         } else {
-            atomicMax(&filled(t), i.z + TILE_SIZE_PX - 1);
+            atomicMax(&filled(t), i.z * TILE_SIZE_PX + TILE_SIZE_PX - 1);
         }
     }
     __device__ void insert_active(uint32_t t) {

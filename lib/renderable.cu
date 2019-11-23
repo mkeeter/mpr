@@ -909,8 +909,11 @@ uint32_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
     const uint32_t t = tile_renderer.tiles.filledAt(px, py);
     const uint32_t s = subtile_renderer.subtiles.filledAt(px, py);
 
+    // This is the same as the subtile renderer in 2D, but that's okay
+    const uint32_t u = pixel_renderer.subtiles.filledAt(px, py);
+
     if (pixel_renderer.is3D()) {
-        return max(max(c, t), s);
+        return max(max(c, t), max(s, u));
     } else {
         return (c || t || s) ? 65535 : 0;
     }
