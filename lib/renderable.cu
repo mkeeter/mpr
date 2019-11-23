@@ -1031,6 +1031,11 @@ void Renderable::run(const View& view)
 {
     cudaStream_t streams[2] = {this->streams[0], this->streams[1]};
 
+    // Reset everything in preparation for a render
+    this->tile_renderer.tiles.reset();
+    this->subtile_renderer.subtiles.reset();
+    cudaMemset(image.data, 0, image.size_px * image.size_px);
+
     // Record this local variable because otherwise it looks up memory
     // that has been loaned to the GPU and not synchronized.
     auto tile_renderer = &this->tile_renderer;
@@ -1039,13 +1044,6 @@ void Renderable::run(const View& view)
                                  LIBFIVE_CUDA_TILE_BLOCKS;
     auto subtile_renderer = &this->subtile_renderer;
     auto pixel_renderer = &this->pixel_renderer;
-    auto tiles = &tile_renderer->tiles;
-    auto subtiles = &subtile_renderer->subtiles;
-
-    // Reset everything in preparation for a render
-    tiles->reset();
-    subtiles->reset();
-    cudaMemset(image.data, 0, image.size_px * image.size_px);
 
     // Do per-tile evaluation to get filled / ambiguous tiles
     for (unsigned i=0; i < total_tiles; i += tile_stride) {
@@ -1056,8 +1054,8 @@ void Renderable::run(const View& view)
     cudaDeviceSynchronize();
 
     // Pull a few variables back from the GPU
-    const uint32_t filled_tiles = tiles->num_filled;
-    const uint32_t active_tiles = tiles->num_active;
+    const uint32_t filled_tiles = tile_renderer->tiles.num_filled;
+    const uint32_t active_tiles = tile_renderer->tiles.num_active;
 
     for (unsigned i=0; i < filled_tiles; i += tile_stride) {
         // Drawing filled and ambiguous tiles can happen simultaneously,
