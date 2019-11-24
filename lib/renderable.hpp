@@ -169,6 +169,8 @@ public:
 protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
 
+    cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
+
 #if LIBFIVE_CUDA_3D
     TileRenderer<128, 3> tile_renderer;
     SubtileRenderer<128, 32, 3> subtile_renderer;

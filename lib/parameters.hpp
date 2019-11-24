@@ -23,7 +23,7 @@
 #define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 256
 
 /*  Rendering in 2D vs 3D */
-#define LIBFIVE_CUDA_3D 0
+#define LIBFIVE_CUDA_3D 1
 
 /*  Number of subtiles per thread block */
 #if LIBFIVE_CUDA_3D
@@ -31,3 +31,5 @@
 #else
 #define LIBFIVE_CUDA_RENDER_SUBTILES 8
 #endif
+
+#define LIBFIVE_CUDA_NUM_STREAMS 4

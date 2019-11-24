@@ -38,7 +38,7 @@ int main(int argc, char **argv)
     r->tape.print();
 
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 100; ++i) {
+    for (unsigned i=0; i < 1; ++i) {
         r->run({{0, 0, 0}, 1});
     }
     auto end_gpu = std::chrono::steady_clock::now();
