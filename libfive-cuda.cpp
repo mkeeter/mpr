@@ -30,7 +30,11 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
+#if LIBFIVE_CUDA_3D
+    auto r = Renderable::build(t, 1024);
+#else
     auto r = Renderable::build(t, 2048);
+#endif
     r->tape.print();
 
     auto start_gpu = std::chrono::steady_clock::now();
