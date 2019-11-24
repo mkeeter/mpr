@@ -172,10 +172,10 @@ protected:
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
 
 #if LIBFIVE_CUDA_3D
-    TileRenderer<128, 3> tile_renderer;
-    SubtileRenderer<128, 32, 3> subtile_renderer;
-    SubtileRenderer<32, 8, 3> microtile_renderer;
-    PixelRenderer<8, 3> pixel_renderer;
+    TileRenderer<64, 3> tile_renderer;
+    SubtileRenderer<64, 16, 3> subtile_renderer;
+    SubtileRenderer<16, 4, 3> microtile_renderer;
+    PixelRenderer<4, 3> pixel_renderer;
 #else
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;

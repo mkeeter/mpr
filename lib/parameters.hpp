@@ -26,10 +26,7 @@
 #define LIBFIVE_CUDA_3D 1
 
 /*  Number of subtiles per thread block */
-#if LIBFIVE_CUDA_3D
-#define LIBFIVE_CUDA_RENDER_SUBTILES 2
-#else
-#define LIBFIVE_CUDA_RENDER_SUBTILES 8
-#endif
+#define LIBFIVE_CUDA_RENDER_SUBTILES 16
 
+/*  Split the work among a bunch of streams to maximize utilization */
 #define LIBFIVE_CUDA_NUM_STREAMS 4
