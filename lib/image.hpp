@@ -31,6 +31,13 @@ struct Image {
         return data[x + y * size_px];
     }
 
+    __device__ float3 voxelPos(uint3 v) const {
+        return make_float3(
+            2.0f * ((v.x + 0.5f) / size_px - 0.5f),
+            2.0f * ((v.y + 0.5f) / size_px - 0.5f),
+            2.0f * ((v.z + 0.5f) / size_px - 0.5f));
+    }
+
     const uint32_t size_px;
     uint32_t* const __restrict__ data;
 };

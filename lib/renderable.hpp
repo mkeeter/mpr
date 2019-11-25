@@ -142,6 +142,31 @@ protected:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+#if LIBFIVE_CUDA_3D
+class Renderable; // forward declaration
+class NormalRenderer {
+public:
+    NormalRenderer(const Tape& tape, const Renderable& parent, Image& norm);
+    ~NormalRenderer();
+
+    using DerivRegisters = Deriv[LIBFIVE_CUDA_NORMAL_THREADS];
+
+    // Draws the given tile, starting from the given subtape
+    __device__ void draw(const uint2 p, const float3 f, const View& v);
+
+    const Tape& tape;
+    const Renderable& parent;
+    Image& norm;
+protected:
+    DerivRegisters* __restrict__ const regs;
+
+    NormalRenderer(const NormalRenderer& other)=delete;
+    NormalRenderer& operator=(const NormalRenderer& other)=delete;
+};
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+
 class Renderable {
 public:
     class Deleter {
@@ -165,6 +190,7 @@ public:
     uint32_t heightAt(const uint32_t x, const uint32_t y) const;
 
     Image image;
+    Image norm;
     Tape tape;
 
 protected:
@@ -177,6 +203,7 @@ protected:
     SubtileRenderer<64, 16, 3> subtile_renderer;
     SubtileRenderer<16, 4, 3> microtile_renderer;
     PixelRenderer<4, 3> pixel_renderer;
+    NormalRenderer normal_renderer;
 #else
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;

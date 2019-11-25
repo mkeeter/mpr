@@ -69,6 +69,29 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs,
     return {0.0f, 0.0f};
 }
 
+template <typename A, typename B>
+__device__ inline Deriv derivOp(uint8_t op, A lhs, B rhs)
+{
+    using namespace libfive::Opcode;
+    switch (op) {
+        case OP_SQUARE: return lhs * lhs;
+        case OP_SQRT: return sqrt(lhs);
+        case OP_NEG: return -lhs;
+        // Skipping transcendental functions for now
+
+        case OP_ADD: return lhs + rhs;
+        case OP_MUL: return lhs * rhs;
+        case OP_DIV: return lhs / rhs;
+        case OP_MIN: return min(lhs, rhs);
+        case OP_MAX: return min(lhs, rhs);
+        case OP_SUB: return lhs - rhs;
+
+        // Skipping various hard functions here
+        default: break;
+    }
+    return {0.0f, 0.0f, 0.0f, 0.0f};
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
@@ -115,7 +138,6 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     const float* __restrict__ constant_ptr = &tape.constant(0);
     const auto num_clauses = tape.num_clauses;
 
-    // We copy a chunk of the tape from constant to shared memory
     for (uint32_t i=0; i < num_clauses; ++i) {
         using namespace libfive::Opcode;
 
@@ -674,7 +696,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     }
 
     {   // Prepopulate axis values
-        float3 f = subtiles.voxelPos(make_uint3(
+        float3 f = image.voxelPos(make_uint3(
                     p.x + d.x, p.y + d.y, p.z + d.z));
         if (tape.axes.reg[0] != UINT16_MAX) {
             regs[tape.axes.reg[0]][threadIdx.x] = f.x * v.scale - v.center[0];
@@ -780,6 +802,107 @@ __global__ void PixelRenderer_draw(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+#if LIBFIVE_CUDA_3D
+NormalRenderer::NormalRenderer(const Tape& tape, const Renderable& parent,
+                               Image& norm)
+    : tape(tape), parent(parent), norm(norm),
+      regs(CUDA_MALLOC(DerivRegisters,
+                       tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS))
+{
+    // Nothing to do here
+}
+
+NormalRenderer::~NormalRenderer()
+{
+    CUDA_CHECK(cudaFree(regs));
+}
+
+__device__ void NormalRenderer::draw(const uint2 p, const float3 f,
+                                     const View& v)
+{
+    {   // Prepopulate axis values
+        if (tape.axes.reg[0] != UINT16_MAX) {
+            const float x = f.x * v.scale - v.center[0];
+            regs[tape.axes.reg[0]][threadIdx.x] = Deriv(x, 1.0f, 0.0f, 0.0f);
+        }
+        if (tape.axes.reg[1] != UINT16_MAX) {
+            const float y = f.y * v.scale - v.center[1];
+            regs[tape.axes.reg[1]][threadIdx.x] = Deriv(y, 0.0f, 1.0f, 0.0f);
+        }
+        if (tape.axes.reg[2] != UINT16_MAX) {
+            const float z = (f.z * v.scale);
+            regs[tape.axes.reg[2]][threadIdx.x] = Deriv(z, 0.0f, 0.0f, 1.0f);
+        }
+    }
+
+    const Clause* __restrict__ clause_ptr = &tape[0];
+    const float* __restrict__ constant_ptr = &tape.constant(0);
+    const auto num_clauses = tape.num_clauses;
+
+    for (uint32_t i=0; i < num_clauses; ++i) {
+        using namespace libfive::Opcode;
+        const Clause c = clause_ptr[i];
+        Deriv out;
+        switch (c.banks) {
+            case 0: // Deriv op Deriv
+                out = derivOp<Deriv, Deriv>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        regs[c.rhs][threadIdx.x]);
+                break;
+            case 1: // Constant op Deriv
+                out = derivOp<float, Deriv>(c.opcode,
+                        constant_ptr[c.lhs],
+                        regs[c.rhs][threadIdx.x]);
+                break;
+            case 2: // Deriv op Constant
+                out = derivOp<Deriv, float>(c.opcode,
+                        regs[c.lhs][threadIdx.x],
+                        constant_ptr[c.rhs]);
+                break;
+            case 3: // Constant op Constant
+                out = derivOp<float, float>(c.opcode,
+                        constant_ptr[c.lhs],
+                        constant_ptr[c.rhs]);
+                break;
+        }
+        regs[c.out][threadIdx.x] = out;
+    }
+
+    const Clause c = clause_ptr[num_clauses - 1];
+    const Deriv result = regs[c.out][threadIdx.x];
+    float norm = sqrtf(powf(result.dx(), 2) +
+                       powf(result.dy(), 2) +
+                       powf(result.dz(), 2));
+    int8_t dx = (result.dx() / norm) * 128 + 127;
+    int8_t dy = (result.dy() / norm) * 128 + 127;
+    int8_t dz = (result.dz() / norm) * 128 + 127;
+    this->norm(p.x, p.y) = (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
+}
+
+__global__ void NormalRenderer_draw(
+        NormalRenderer* r, const uint32_t offset, View v)
+{
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+
+    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x + offset;
+    if (i < r->norm.size_px * r->norm.size_px) {
+        const uint32_t px = i % r->norm.size_px;
+        const uint32_t py = i / r->norm.size_px;
+        const uint32_t pz = r->parent.heightAt(px, py);
+
+        if (pz) {
+            const float3 f = r->norm.voxelPos(make_uint3(px, py, pz));
+            r->draw(make_uint2(px, py), f, v);
+        }
+    }
+}
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
 __host__ __device__
 uint32_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
 {
@@ -841,14 +964,15 @@ Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px)
 }
 
 Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
-    : image(image_size_px),
+    : image(image_size_px), norm(image_size_px),
       tape(std::move(Tape::build(tree))),
 
       tile_renderer(tape, subtapes, image),
       subtile_renderer(tape, subtapes, image, tile_renderer.tiles),
 #if LIBFIVE_CUDA_3D
       microtile_renderer(tape, subtapes, image, subtile_renderer.subtiles),
-      pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles)
+      pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles),
+      normal_renderer(tape, *this, norm)
 #else
       pixel_renderer(tape, subtapes, image, subtile_renderer.subtiles)
 #endif
@@ -865,6 +989,7 @@ void Renderable::run(const View& view)
     subtile_renderer.subtiles.reset();
     subtapes.reset();
     image.reset();
+    norm.reset();
 #if LIBFIVE_CUDA_3D
     microtile_renderer.subtiles.reset();
 #endif
@@ -876,6 +1001,7 @@ void Renderable::run(const View& view)
     auto pixel_renderer = &this->pixel_renderer;
 #if LIBFIVE_CUDA_3D
     auto microtile_renderer = &this->microtile_renderer;
+    auto normal_renderer = &this->normal_renderer;
 #endif
 
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
@@ -942,6 +1068,23 @@ void Renderable::run(const View& view)
         }
     }
     CUDA_CHECK(cudaDeviceSynchronize());
+
+#if LIBFIVE_CUDA_3D && 0
+    {   // Do pixel-by-pixel rendering for normals
+        const uint32_t active = pow(image.size_px, 2);
+        const uint32_t stride = LIBFIVE_CUDA_NORMAL_BLOCKS *
+                                LIBFIVE_CUDA_NORMAL_THREADS;
+        for (unsigned i=0; i < active; i += stride) {
+            NormalRenderer_draw<<<LIBFIVE_CUDA_NORMAL_BLOCKS,
+                                  LIBFIVE_CUDA_NORMAL_THREADS, 0,
+                                  streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                normal_renderer, i, view);
+            CUDA_CHECK(cudaGetLastError());
+        }
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+#endif
 }
 
 cudaGraphicsResource* Renderable::registerTexture(GLuint t)

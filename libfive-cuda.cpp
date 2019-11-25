@@ -51,9 +51,11 @@ int main(int argc, char **argv)
     for (unsigned x=0; x < r->image.size_px; ++x) {
         for (unsigned y=0; y < r->image.size_px; ++y) {
             out.depth(y, x) = r->heightAt(x, y);
+            out.norm(y, x) = r->norm(x, y);
         }
     }
-    out.savePNG("out_gpu.png");
+    out.savePNG("out_gpu_depth.png");
+    out.saveNormalPNG("out_gpu_norm.png");
 
     std::atomic_bool abort(false);
     const float z = LIBFIVE_CUDA_3D ? 1.0f : 0.0f;

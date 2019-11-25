@@ -3,128 +3,147 @@
 #include <math_constants.h>
 
 struct Deriv {
-    __device__ inline Deriv() : v(make_float2(0.0f, 0.0f)) {}
-    __device__ inline Deriv(float f) : v(make_float2(f, 0.0f)) {}
-    __device__ inline Deriv(float v, float d) : v(make_float2(v, d)) {}
-    __device__ inline float value() const { return v.x; }
-    __device__ inline float deriv() const { return v.y; }
-    float2 v;
+    __device__ inline Deriv() : v(make_float4(0.0f, 0.0f, 0.0f, 0.0f)) {}
+    __device__ inline Deriv(float f) : v(make_float4(0.0f, 0.0f, 0.0f, f)) {}
+    __device__ inline Deriv(float v, float dx, float dy, float dz)
+        : v(make_float4(dx, dy, dz, v)) {}
+    __device__ inline float value() const { return v.w; }
+    __device__ inline float dx() const { return v.x; }
+    __device__ inline float dy() const { return v.y; }
+    __device__ inline float dz() const { return v.z; }
+    float4 v;
 };
 
 #ifdef __CUDACC__
-__device__ inline float value(const Deriv& x) {
-    return x.value();
+__device__ inline float value(const Deriv& a) {
+    return a.value();
 }
 
-__device__ inline float value(const float& x) {
-    return x;
+__device__ inline float value(const float& a) {
+    return a;
 }
 
-__device__ inline float deriv(const Deriv& x) {
-    return x.deriv();
-}
+__device__ inline float dx(const Deriv& a) { return a.dx(); }
+__device__ inline float dx(const float& a) { return 0.0f; }
+__device__ inline float dy(const Deriv& a) { return a.dy(); }
+__device__ inline float dy(const float& a) { return 0.0f; }
+__device__ inline float dz(const Deriv& a) { return a.dz(); }
+__device__ inline float dz(const float& a) { return 0.0f; }
 
-__device__ inline float deriv(const float& x) {
-    return 0.0f;
+////////////////////////////////////////////////////////////////////////////////
+
+__device__ inline Deriv operator-(const Deriv& a) {
+    return {-a.value(), -a.dx(), -a.dy(), -a.dz()};
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Deriv operator-(const Deriv& x) {
-    return {-x.value(), -x.deriv()};
+__device__ inline Deriv operator+(const Deriv& a, const Deriv& b) {
+    return {a.value() + b.value(),
+            a.dx() + b.dx(),
+            a.dy() + b.dy(),
+            a.dz() + b.dz()};
+}
+
+__device__ inline Deriv operator+(const Deriv& a, const float& b) {
+    return {a.value() + b, a.dx(), a.dy(), a.dz()};
+}
+
+__device__ inline Deriv operator+(const float& b, const Deriv& a) {
+    return a + b;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Deriv operator+(const Deriv& x, const Deriv& y) {
-    return {x.value() + y.value(), x.deriv() + y.deriv()};
+__device__ inline Deriv operator*(const Deriv& a, const Deriv& b) {
+    return {a.value() * b.value(),
+            a.dx() * b.value() + b.dx() * a.value(),
+            a.dy() * b.value() + b.dy() * a.value(),
+            a.dz() * b.value() + b.dz() * a.value()};
 }
 
-__device__ inline Deriv operator+(const Deriv& x, const float& y) {
-    return {x.value() + y, x.deriv()};
+__device__ inline Deriv operator*(const Deriv& a, const float& b) {
+    return {a.value() * b,
+            a.dx() * b,
+            a.dy() * b,
+            a.dz() * b};
 }
 
-__device__ inline Deriv operator+(const float& y, const Deriv& x) {
-    return x + y;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-__device__ inline Deriv operator*(const Deriv& x, const Deriv& y) {
-    return {x.value() * y.value(),
-            x.deriv() * y.value() + y.deriv() * x.value()}; // produce rule
-}
-
-__device__ inline Deriv operator*(const Deriv& x, const float& y) {
-    return {x.value() * y, x.deriv() * y};
-}
-
-__device__ inline Deriv operator*(const float& x, const Deriv& y) {
-    return y * x;
+__device__ inline Deriv operator*(const float& a, const Deriv& b) {
+    return b * a;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Deriv operator/(const Deriv& x, const Deriv& y) {
-    return {x.value() / y.value(),
-            (y.value() * x.deriv() - x.value() * y.deriv()) /
-                powf(y.value(), 2)};
+__device__ inline Deriv operator/(const Deriv& a, const Deriv& b) {
+    const float d = powf(b.value(), 2);
+    return {a.value() / b.value(),
+            (b.value() * a.dx() - a.value() * b.dx()) / d,
+            (b.value() * a.dy() - a.value() * b.dy()) / d,
+            (b.value() * a.dz() - a.value() * b.dz()) / d};
 }
 
-__device__ inline Deriv operator/(const Deriv& x, const float& y) {
-    return {x.value() / y, x.deriv() / y};
+__device__ inline Deriv operator/(const Deriv& a, const float& b) {
+    return {a.value() / b, a.dx() / b, a.dy() / b, a.dz() / b};
 }
 
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Deriv min(const Deriv& x, const Deriv& y) {
-    return (x.value() < y.value()) ? x : y;
+__device__ inline Deriv min(const Deriv& a, const Deriv& b) {
+    return (a.value() < b.value()) ? a : b;
 }
 
-__device__ inline Deriv min(const Deriv& x, const float& y) {
-    return (x.value() < y) ? x : Deriv(y);
+__device__ inline Deriv min(const Deriv& a, const float& b) {
+    return (a.value() < b) ? a : Deriv(b);
 }
 
-__device__ inline Deriv min(const float& x, const Deriv& y) {
-    return min(y, x);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-__device__ inline Deriv max(const Deriv& x, const Deriv& y) {
-    return (x.value() >= y.value()) ? x : y;
-}
-
-__device__ inline Deriv max(const Deriv& x, const float& y) {
-    return (x.value() >= y) ? x : Deriv(y);
-}
-
-__device__ inline Deriv max(const float& x, const Deriv& y) {
-    return max(y, x);
+__device__ inline Deriv min(const float& a, const Deriv& b) {
+    return min(b, a);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Deriv square(const Deriv& x) {
-    return {x.value() * x.value(), x.deriv() * x.value() * 2};
+__device__ inline Deriv max(const Deriv& a, const Deriv& b) {
+    return (a.value() >= b.value()) ? a : b;
+}
+
+__device__ inline Deriv max(const Deriv& a, const float& b) {
+    return (a.value() >= b) ? a : Deriv(b);
+}
+
+__device__ inline Deriv max(const float& a, const Deriv& b) {
+    return max(b, a);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Deriv operator-(const Deriv& x, const Deriv& y) {
-    return {x.value() - y.value(), x.deriv() - y.deriv()};
+__device__ inline Deriv square(const Deriv& a) {
+    return {a.value() * a.value(),
+            a.dx() * a.value() * 2,
+            a.dy() * a.value() * 2,
+            a.dz() * a.value() * 2};
 }
 
-__device__ inline Deriv operator-(const Deriv& x, const float& y) {
-    return {x.value() - y, x.deriv()};
+////////////////////////////////////////////////////////////////////////////////
+
+__device__ inline Deriv operator-(const Deriv& a, const Deriv& b) {
+    return {a.value() - b.value(),
+            a.dx() - b.dx(),
+            a.dy() - b.dy(),
+            a.dz() - b.dz()};
 }
 
-__device__ inline Deriv operator-(const float& x, const Deriv& y) {
-    return {x - y.value(), -y.deriv()};
+__device__ inline Deriv operator-(const Deriv& a, const float& b) {
+    return {a.value() - b, a.dx(), a.dy(), a.dz()};
 }
 
-__device__ inline Deriv sqrt(const Deriv& x) {
-    return {sqrt(x.value()), x.deriv() / (2 * sqrt(x.value()))};
+__device__ inline Deriv operator-(const float& a, const Deriv& b) {
+    return {a - b.value(), -b.dx(), -b.dy(), -b.dz()};
+}
+
+__device__ inline Deriv sqrt(const Deriv& a) {
+    const float d = (2 * sqrt(a.value()));
+    return {sqrt(a.value()), a.dx() / d, a.dy() / 2, a.dz() / 2};
 }
 #endif
