@@ -897,7 +897,7 @@ __global__ void NormalRenderer_draw(
         const uint32_t pz = r->parent.heightAt(px, py);
 
         if (pz) {
-            const float3 f = r->norm.voxelPos(make_uint3(px, py, pz));
+            const float3 f = r->norm.voxelPos(make_uint3(px, py, pz + 1));
             r->draw(make_uint2(px, py), f, v);
         }
     }

@@ -23,13 +23,6 @@ __device__ inline float value(const float& a) {
     return a;
 }
 
-__device__ inline float dx(const Deriv& a) { return a.dx(); }
-__device__ inline float dx(const float& a) { return 0.0f; }
-__device__ inline float dy(const Deriv& a) { return a.dy(); }
-__device__ inline float dy(const float& a) { return 0.0f; }
-__device__ inline float dz(const Deriv& a) { return a.dz(); }
-__device__ inline float dz(const float& a) { return 0.0f; }
-
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ inline Deriv operator-(const Deriv& a) {
@@ -144,6 +137,6 @@ __device__ inline Deriv operator-(const float& a, const Deriv& b) {
 
 __device__ inline Deriv sqrt(const Deriv& a) {
     const float d = (2 * sqrt(a.value()));
-    return {sqrt(a.value()), a.dx() / d, a.dy() / 2, a.dz() / 2};
+    return {sqrt(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
 }
 #endif
