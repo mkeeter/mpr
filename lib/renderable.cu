@@ -83,7 +83,7 @@ __device__ inline Deriv derivOp(uint8_t op, A lhs, B rhs)
         case OP_MUL: return lhs * rhs;
         case OP_DIV: return lhs / rhs;
         case OP_MIN: return min(lhs, rhs);
-        case OP_MAX: return min(lhs, rhs);
+        case OP_MAX: return max(lhs, rhs);
         case OP_SUB: return lhs - rhs;
 
         // Skipping various hard functions here
