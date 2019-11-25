@@ -821,6 +821,8 @@ NormalRenderer::~NormalRenderer()
 __device__ void NormalRenderer::draw(const uint2 p, const float3 f,
                                      const View& v)
 {
+    auto regs = this->regs + tape.num_regs * blockIdx.x;
+
     {   // Prepopulate axis values
         if (tape.axes.reg[0] != UINT16_MAX) {
             const float x = f.x * v.scale - v.center[0];
@@ -874,9 +876,9 @@ __device__ void NormalRenderer::draw(const uint2 p, const float3 f,
     float norm = sqrtf(powf(result.dx(), 2) +
                        powf(result.dy(), 2) +
                        powf(result.dz(), 2));
-    int8_t dx = (result.dx() / norm) * 128 + 127;
-    int8_t dy = (result.dy() / norm) * 128 + 127;
-    int8_t dz = (result.dz() / norm) * 128 + 127;
+    uint8_t dx = (result.dx() / norm) * 127 + 128;
+    uint8_t dy = (result.dy() / norm) * 127 + 128;
+    uint8_t dz = (result.dz() / norm) * 127 + 128;
     this->norm(p.x, p.y) = (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
 }
 
