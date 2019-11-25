@@ -164,7 +164,8 @@ eval-sandboxed
                 for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r)) {
                     if (scm_is_shape(scm_car(r))) {
                         auto t = *scm_get_tree(scm_car(r));
-                        shapes.insert({t.id(), Renderable::build(t, 2048)});
+                        shapes.insert({t.id(), Renderable::build(
+                                    t, LIBFIVE_CUDA_IMAGE_SIZE_PX)});
                     }
                 }
                 result = scm_cdr(result);
@@ -283,7 +284,9 @@ int main(int argc, char** argv)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2048, 2048, 0,
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                 LIBFIVE_CUDA_IMAGE_SIZE_PX,
+                 LIBFIVE_CUDA_IMAGE_SIZE_PX, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
     auto cuda_tex = Renderable::registerTexture(gl_tex);
