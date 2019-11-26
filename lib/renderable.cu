@@ -932,7 +932,14 @@ void Renderable::copyToSurface(bool append, cudaSurfaceObject_t surf)
     if (x < size && y < size) {
         const auto h = heightAt(x, size - y - 1);
         if (h) {
-            surf2Dwrite(0x00FFFFFF | (h << 24), surf, x*4, y);
+#if LIBFIVE_CUDA_3D
+            if (has_normals) {
+                surf2Dwrite(norm(x, size - y - 1), surf, x*4, y);
+            } else
+#endif
+            {
+                surf2Dwrite(0x00FFFFFF | (h << 24), surf, x*4, y);
+            }
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
@@ -994,6 +1001,7 @@ void Renderable::run(const View& view)
     norm.reset();
 #if LIBFIVE_CUDA_3D
     microtile_renderer.subtiles.reset();
+    has_normals = false;
 #endif
 
     // Record this local variable because otherwise it looks up memory
@@ -1085,7 +1093,7 @@ void Renderable::run(const View& view)
         }
     }
     CUDA_CHECK(cudaDeviceSynchronize());
-
+    has_normals = true;
 #endif
 }
 

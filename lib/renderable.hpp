@@ -204,6 +204,8 @@ protected:
     SubtileRenderer<16, 4, 3> microtile_renderer;
     PixelRenderer<4, 3> pixel_renderer;
     NormalRenderer normal_renderer;
+
+    bool has_normals;
 #else
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;
