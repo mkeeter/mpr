@@ -28,7 +28,7 @@ struct Tiles {
                           i.z * TILE_SIZE_PX);
     }
 
-    __device__ uint32_t headAtPixel(uint3 p) const {
+    __device__ uint32_t headAtVoxel(uint3 p) const {
         const uint32_t t =
             (p.x / TILE_SIZE_PX) +
             (p.y / TILE_SIZE_PX) * per_side +
