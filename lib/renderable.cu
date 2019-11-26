@@ -818,9 +818,16 @@ NormalRenderer::~NormalRenderer()
     CUDA_CHECK(cudaFree(regs));
 }
 
-__device__ void NormalRenderer::draw(const uint2 p, const float3 f,
-                                     const View& v)
+__device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
 {
+    const uint32_t pz = parent.heightAt(pixel.x, pixel.y);
+    if (!pz) {
+        return;
+    }
+
+    const uint3 p = make_uint3(pixel.x, pixel.y, pz + 1);
+    const float3 f = norm.voxelPos(p);
+
     auto regs = this->regs + tape.num_regs * blockIdx.x;
 
     {   // Prepopulate axis values
@@ -899,12 +906,7 @@ __global__ void NormalRenderer_draw(
     const uint32_t py = (i / (r->norm.size_px / 16)) * 16 +
                         (pixel / 16);
     if (px < r->norm.size_px && py < r->norm.size_px) {
-        const uint32_t pz = r->parent.heightAt(px, py);
-
-        if (pz) {
-            const float3 f = r->norm.voxelPos(make_uint3(px, py, pz + 1));
-            r->draw(make_uint2(px, py), f, v);
-        }
+        r->draw(make_uint2(px, py), v);
     }
 }
 #endif
