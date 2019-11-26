@@ -29,7 +29,7 @@
 #define LIBFIVE_CUDA_RENDER_SUBTILES 16
 
 /*  Split the work among a bunch of streams to maximize utilization */
-#define LIBFIVE_CUDA_NUM_STREAMS 4
+#define LIBFIVE_CUDA_NUM_STREAMS 1
 
 /*  Generating normals is done with this many threads + blocks */
 #define LIBFIVE_CUDA_NORMAL_THREADS 256
