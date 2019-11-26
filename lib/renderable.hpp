@@ -149,7 +149,7 @@ public:
     NormalRenderer(const Tape& tape, const Renderable& parent, Image& norm);
     ~NormalRenderer();
 
-    using DerivRegisters = Deriv[LIBFIVE_CUDA_NORMAL_THREADS];
+    using DerivRegisters = Deriv[LIBFIVE_CUDA_NORMAL_TILES * 16 * 16];
 
     // Draws the given tile, starting from the given subtape
     __device__ void draw(const uint2 p, const float3 f, const View& v);

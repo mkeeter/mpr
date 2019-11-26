@@ -32,7 +32,7 @@
 #define LIBFIVE_CUDA_NUM_STREAMS 1
 
 /*  Generating normals is done with this many threads + blocks */
-#define LIBFIVE_CUDA_NORMAL_THREADS 256
+#define LIBFIVE_CUDA_NORMAL_TILES 4
 #define LIBFIVE_CUDA_NORMAL_BLOCKS 32
 
 /*  Default image size for easy benchmarking */

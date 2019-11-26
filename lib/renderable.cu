@@ -890,10 +890,15 @@ __global__ void NormalRenderer_draw(
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t i = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    if (i < r->norm.size_px * r->norm.size_px) {
-        const uint32_t px = i % r->norm.size_px;
-        const uint32_t py = i / r->norm.size_px;
+    const uint32_t pixel = threadIdx.x % (16 * 16);
+
+    const uint32_t i = offset + (threadIdx.x + blockIdx.x * blockDim.x) /
+                                (16 * 16);
+    const uint32_t px = (i % (r->norm.size_px / 16)) * 16 +
+                        (pixel % 16);
+    const uint32_t py = (i / (r->norm.size_px / 16)) * 16 +
+                        (pixel / 16);
+    if (px < r->norm.size_px && py < r->norm.size_px) {
         const uint32_t pz = r->parent.heightAt(px, py);
 
         if (pz) {
@@ -1081,14 +1086,15 @@ void Renderable::run(const View& view)
 
 #if LIBFIVE_CUDA_3D && 0
     {   // Do pixel-by-pixel rendering for normals
-        const uint32_t active = pow(image.size_px, 2);
+        const uint32_t active = pow(image.size_px / 16, 2);
         const uint32_t stride = LIBFIVE_CUDA_NORMAL_BLOCKS *
-                                LIBFIVE_CUDA_NORMAL_THREADS;
+                                LIBFIVE_CUDA_NORMAL_TILES;
         for (unsigned i=0; i < active; i += stride) {
-            NormalRenderer_draw<<<LIBFIVE_CUDA_NORMAL_BLOCKS,
-                                  LIBFIVE_CUDA_NORMAL_THREADS, 0,
-                                  streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
-                normal_renderer, i, view);
+            NormalRenderer_draw<<<
+                LIBFIVE_CUDA_NORMAL_BLOCKS,
+                pow(16, 2) * LIBFIVE_CUDA_NORMAL_TILES,
+                0, streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    normal_renderer, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
     }
