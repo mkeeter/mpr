@@ -87,7 +87,7 @@ struct Tiles {
     __host__ __device__ uint32_t& active(uint32_t i)
         { return data[i]; }
 
-    // Returns the subtape head of the i'th active tile
+    // Returns the subtape head of the tile t
     __host__ __device__ uint32_t head(uint32_t t) const
         { return data[total + t]; }
     __host__ __device__ uint32_t& head(uint32_t t)
@@ -118,7 +118,8 @@ struct Tiles {
     void reset() {
         num_active = 0;
         num_filled = 0;
-        cudaMemset(&data[total * 2], 0, sizeof(uint32_t) * pow(per_side, 2));
+        cudaMemset(&data[total], 0,
+                   sizeof(uint32_t) * (total + pow(per_side, 2)));
     }
 
     const uint32_t per_side;
