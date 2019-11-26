@@ -18,7 +18,6 @@ template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 class TileRenderer {
 public:
     TileRenderer(const Tape& tape, Subtapes& subtapes, Image& image);
-    ~TileRenderer();
 
     // These are blocks of data which should be indexed as i[threadIdx.x]
     using Registers = Interval[LIBFIVE_CUDA_TILE_THREADS];
@@ -40,10 +39,6 @@ public:
 protected:
     Subtapes& subtapes;
 
-    Registers* __restrict__ const regs;
-    ActiveArray* __restrict__ const active;
-    ChoiceArray* __restrict__ const choices;
-
     TileRenderer(const TileRenderer& other)=delete;
     TileRenderer& operator=(const TileRenderer& other)=delete;
 };
@@ -55,7 +50,6 @@ class SubtileRenderer {
 public:
     SubtileRenderer(const Tape& tape, Subtapes& subtapes, Image& image,
                     Tiles<TILE_SIZE_PX, DIMENSION>& prev);
-    ~SubtileRenderer();
 
     constexpr static unsigned __host__ __device__ subtilesPerTileSide() {
         static_assert(TILE_SIZE_PX % SUBTILE_SIZE_PX == 0,
@@ -95,10 +89,6 @@ public:
 protected:
     Subtapes& subtapes;
 
-    Registers* __restrict__ const regs;
-    ActiveArray* __restrict__ const active;
-    ChoiceArray* __restrict__ const choices;
-
     SubtileRenderer(const SubtileRenderer& other)=delete;
     SubtileRenderer& operator=(const SubtileRenderer& other)=delete;
 };
@@ -110,7 +100,6 @@ class PixelRenderer {
 public:
     PixelRenderer(const Tape& tape, const Subtapes& subtapes, Image& image,
                   const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
-    ~PixelRenderer();
 
     constexpr static bool __host__ __device__ is3D() {
         return DIMENSION == 3;
@@ -134,7 +123,6 @@ public:
 
 protected:
     const Subtapes& subtapes;
-    FloatRegisters* __restrict__ const regs;
 
     PixelRenderer(const PixelRenderer& other)=delete;
     PixelRenderer& operator=(const PixelRenderer& other)=delete;
@@ -147,7 +135,6 @@ class Renderable; // forward declaration
 class NormalRenderer {
 public:
     NormalRenderer(const Tape& tape, const Renderable& parent, Image& norm);
-    ~NormalRenderer();
 
     using DerivRegisters = Deriv[LIBFIVE_CUDA_NORMAL_TILES * 16 * 16];
 
@@ -158,8 +145,6 @@ public:
     const Renderable& parent;
     Image& norm;
 protected:
-    DerivRegisters* __restrict__ const regs;
-
     NormalRenderer(const NormalRenderer& other)=delete;
     NormalRenderer& operator=(const NormalRenderer& other)=delete;
 };
@@ -195,6 +180,7 @@ public:
 
 protected:
     Renderable(libfive::Tree tree, uint32_t image_size_px);
+    ~Renderable();
 
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
 

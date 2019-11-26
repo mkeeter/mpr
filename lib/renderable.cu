@@ -17,13 +17,13 @@ __device__ void storeAxes(const uint32_t tile,
     Interval Z(lower.z, upper.z);
 
     if (tape.axes.reg[0] != UINT16_MAX) {
-        regs[tape.axes.reg[0]][threadIdx.x] = X * v.scale - v.center[0];
+        regs[tape.axes.reg[0]] = X * v.scale - v.center[0];
     }
     if (tape.axes.reg[1] != UINT16_MAX) {
-        regs[tape.axes.reg[1]][threadIdx.x] = Y * v.scale - v.center[1];
+        regs[tape.axes.reg[1]] = Y * v.scale - v.center[1];
     }
     if (tape.axes.reg[2] != UINT16_MAX) {
-        regs[tape.axes.reg[2]][threadIdx.x] = (D == 3)
+        regs[tape.axes.reg[2]] = (D == 3)
             ? (Z * v.scale - v.center[2])
             : Interval{v.center[2], v.center[2]};
     }
@@ -98,27 +98,9 @@ template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 TileRenderer<TILE_SIZE_PX, DIMENSION>::TileRenderer(
         const Tape& tape, Subtapes& subtapes, Image& image)
     : tape(tape), subtapes(subtapes), image(image),
-      tiles(image.size_px),
-
-      regs(CUDA_MALLOC(Registers, LIBFIVE_CUDA_TILE_BLOCKS *
-                                      tape.num_regs)),
-      active(CUDA_MALLOC(ActiveArray, LIBFIVE_CUDA_TILE_BLOCKS *
-                                      tape.num_regs)),
-      choices(tape.num_csg_choices ?
-              CUDA_MALLOC(ChoiceArray,
-                    LIBFIVE_CUDA_TILE_BLOCKS *
-                    ((tape.num_csg_choices + 31) / 32))
-              : nullptr)
+      tiles(image.size_px)
 {
     // Nothing to do here
-}
-
-template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
-TileRenderer<TILE_SIZE_PX, DIMENSION>::~TileRenderer()
-{
-    CUDA_CHECK(cudaFree(regs));
-    CUDA_CHECK(cudaFree(active));
-    CUDA_CHECK(cudaFree(choices));
 }
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
@@ -126,11 +108,12 @@ __device__
 void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         const uint32_t tile, const View& v)
 {
-    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    Interval regs[128];
     storeAxes(tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
-    auto choices = this->choices + ((tape.num_csg_choices + 31) / 32) * blockIdx.x;
+    uint64_t choices_[128];
+    uint64_t* __restrict__ choices = choices_;
     uint64_t choice = 0;
     uint8_t choice_index = 0;
 
@@ -146,19 +129,19 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<Interval, Interval>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
-                        regs[c.rhs][threadIdx.x],
+                        regs[c.lhs],
+                        regs[c.rhs],
                         choice, choice_index);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, Interval>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs][threadIdx.x],
+                        regs[c.rhs],
                         choice, choice_index);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<Interval, float>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
+                        regs[c.lhs],
                         constant_ptr[c.rhs],
                         choice, choice_index);
                 break;
@@ -173,17 +156,17 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             choice_index += 2;
             if (choice_index == sizeof(choice) * 8) {
-                (*(choices++))[threadIdx.x] = choice;
+                (*(choices++)) = choice;
                 choice = 0;
                 choice_index = 0;
             }
         }
 
-        regs[c.out][threadIdx.x] = out;
+        regs[c.out] = out;
     }
 
     const Clause c = clause_ptr[num_clauses - 1];
-    const Interval result = regs[c.out][threadIdx.x];
+    const Interval result = regs[c.out];
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
@@ -209,14 +192,14 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     // write any tape data out.
 
     // Pick a subset of the active array to use for this block
-    auto active = this->active + blockIdx.x * tape.num_regs;
+    uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(regs);
 
     for (uint32_t r=0; r < tape.num_regs; ++r) {
-        active[r][threadIdx.x] = false;
+        active[r] = false;
     }
 
     // Mark the root of the tree as true
-    active[tape[num_clauses - 1].out][threadIdx.x] = true;
+    active[tape[num_clauses - 1].out] = true;
 
     uint32_t subtape_index = 0;
     uint32_t s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
@@ -239,18 +222,18 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             if (choice_index == 0) {
                 choice_index = sizeof(choice) * 8;
-                choice = (*(--choices))[threadIdx.x];
+                choice = (*(--choices));
             }
             choice_index -= 2;
         }
 
-        if (active[c.out][threadIdx.x]) {
-            active[c.out][threadIdx.x] = false;
+        if (active[c.out]) {
+            active[c.out] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
                 const uint8_t choice_ = (choice >> choice_index) & 3;
                 if (choice_ == 1) {
                     if (!(c.banks & 1)) {
-                        active[c.lhs][threadIdx.x] = true;
+                        active[c.lhs] = true;
                         if (c.lhs == c.out) {
                             continue;
                         }
@@ -262,7 +245,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                     }
                 } else if (choice_ == 2) {
                     if (!(c.banks & 2)) {
-                        active[c.rhs][threadIdx.x] = true;
+                        active[c.rhs] = true;
                         if (c.rhs == c.out) {
                             continue;
                         }
@@ -275,20 +258,20 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                 } else if (choice_ == 0) {
                     terminal = false;
                     if (!(c.banks & 1)) {
-                        active[c.lhs][threadIdx.x] = true;
+                        active[c.lhs] = true;
                     }
                     if (!(c.banks & 2)) {
-                        active[c.rhs][threadIdx.x] = true;
+                        active[c.rhs] = true;
                     }
                 } else {
                     assert(false);
                 }
             } else {
                 if (!(c.banks & 1)) {
-                    active[c.lhs][threadIdx.x] = true;
+                    active[c.lhs] = true;
                 }
                 if (c.opcode >= OP_ADD && !(c.banks & 2)) {
-                    active[c.rhs][threadIdx.x] = true;
+                    active[c.rhs] = true;
                 }
             }
 
@@ -337,28 +320,9 @@ SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::SubtileRenderer(
         const Tape& tape, Subtapes& subtapes, Image& image,
         Tiles<TILE_SIZE_PX, DIMENSION>& prev)
     : tape(tape), subtapes(subtapes), image(image), tiles(prev),
-      subtiles(image.size_px),
-
-      regs(CUDA_MALLOC(Registers,
-        LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
-
-      active(CUDA_MALLOC(ActiveArray,
-                  LIBFIVE_CUDA_SUBTILE_BLOCKS * tape.num_regs)),
-      choices(tape.num_csg_choices ?
-              CUDA_MALLOC(ChoiceArray,
-                  LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                  ((tape.num_csg_choices + 31) / 32))
-              : nullptr)
+      subtiles(image.size_px)
 {
     // Nothing to do here
-}
-
-template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
-SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::~SubtileRenderer()
-{
-    CUDA_CHECK(cudaFree(regs));
-    CUDA_CHECK(cudaFree(active));
-    CUDA_CHECK(cudaFree(choices));
 }
 
 template <unsigned TILE_SIZE_PX, unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -366,10 +330,11 @@ __device__
 void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const uint32_t subtile, const uint32_t tile, const View& v)
 {
-    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    Interval regs[128];
     storeAxes(subtile, v, subtiles, tape, regs);
 
-    auto choices = this->choices + ((tape.num_csg_choices + 31) / 32) * blockIdx.x;
+    uint64_t choices_[128];
+    uint64_t* __restrict__ choices = choices_;
     uint64_t choice = 0;
     uint32_t choice_index = 0;
 
@@ -390,7 +355,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                 s = subtapes.start[subtape_index];
                 tape = subtapes.data[subtape_index];
             } else {
-                result = regs[tape[s - 1].out][threadIdx.x];
+                result = regs[tape[s - 1].out];
                 break;
             }
         }
@@ -400,17 +365,17 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<Interval, Interval>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
-                        regs[c.rhs][threadIdx.x], choice, choice_index);
+                        regs[c.lhs],
+                        regs[c.rhs], choice, choice_index);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, Interval>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs][threadIdx.x], choice, choice_index);
+                        regs[c.rhs], choice, choice_index);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<Interval, float>(c.opcode,
-                         regs[c.lhs][threadIdx.x],
+                         regs[c.lhs],
                          constant_ptr[c.rhs], choice, choice_index);
                 break;
             case 3: // Constant op Constant
@@ -422,13 +387,13 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             choice_index += 2;
             if (choice_index == sizeof(choice) * 8) {
-                (*(choices++))[threadIdx.x] = choice;
+                (*(choices++)) = choice;
                 choice = 0;
                 choice_index = 0;
             }
         }
 
-        regs[c.out][threadIdx.x] = out;
+        regs[c.out] = out;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -484,10 +449,10 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     }
 
     // Pick a subset of the active array to use for this block
-    auto active = this->active + blockIdx.x * this->tape.num_regs;
+    uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(regs);
 
     for (uint32_t r=0; r < this->tape.num_regs; ++r) {
-        active[r][threadIdx.x] = false;
+        active[r] = false;
     }
 
     // The tape chunks must be reversed by this point!
@@ -497,7 +462,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     const Clause* __restrict__ in_tape = subtapes.data[in_subtape_index];
 
     // Mark the head of the tape as active
-    active[in_tape[in_s - 1].out][threadIdx.x] = true;
+    active[in_tape[in_s - 1].out] = true;
 
     // Claim a subtape to populate
     uint32_t out_subtape_index = subtapes.claim();
@@ -531,18 +496,18 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             if (choice_index == 0) {
                 choice_index = sizeof(choice) * 8;
-                choice = (*(--choices))[threadIdx.x];
+                choice = (*(--choices));
             }
             choice_index -= 2;
         }
 
-        if (active[c.out][threadIdx.x]) {
-            active[c.out][threadIdx.x] = false;
+        if (active[c.out]) {
+            active[c.out] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
                 const uint8_t choice_ = (choice >> choice_index) & 3;
                 if (choice_ == 1) {
                     if (!(c.banks & 1)) {
-                        active[c.lhs][threadIdx.x] = true;
+                        active[c.lhs] = true;
                         if (c.lhs == c.out) {
                             continue;
                         }
@@ -554,7 +519,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                     }
                 } else if (choice_ == 2) {
                     if (!(c.banks & 2)) {
-                        active[c.rhs][threadIdx.x] = true;
+                        active[c.rhs] = true;
                         if (c.rhs == c.out) {
                             continue;
                         }
@@ -566,10 +531,10 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                     }
                 } else if (choice_ == 0) {
                     if (!(c.banks & 1)) {
-                        active[c.lhs][threadIdx.x] = true;
+                        active[c.lhs] = true;
                     }
                     if (!(c.banks & 2)) {
-                        active[c.rhs][threadIdx.x] = true;
+                        active[c.rhs] = true;
                     }
                 } else {
                     assert(false);
@@ -577,10 +542,10 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
             } else {
                 terminal = false;
                 if (!(c.banks & 1)) {
-                    active[c.lhs][threadIdx.x] = true;
+                    active[c.lhs] = true;
                 }
                 if (c.opcode >= OP_ADD && !(c.banks & 2)) {
-                    active[c.rhs][threadIdx.x] = true;
+                    active[c.rhs] = true;
                 }
             }
 
@@ -661,17 +626,9 @@ template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
 PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::PixelRenderer(
         const Tape& tape, const Subtapes& subtapes, Image& image,
         const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev)
-    : tape(tape), subtapes(subtapes), image(image), subtiles(prev),
-      regs(CUDA_MALLOC(FloatRegisters,
-                       tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS))
+    : tape(tape), subtapes(subtapes), image(image), subtiles(prev)
 {
     // Nothing to do here
-}
-
-template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
-PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::~PixelRenderer()
-{
-    CUDA_CHECK(cudaFree(regs));
 }
 
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -684,8 +641,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             (pixel / SUBTILE_SIZE_PX) % SUBTILE_SIZE_PX,
             (pixel / SUBTILE_SIZE_PX) / SUBTILE_SIZE_PX);
 
-    // Pick an index into the register array
-    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    float regs[128];
 
     // Convert from tile position to pixels
     const uint3 p = subtiles.lowerCornerVoxel(subtile);
@@ -699,13 +655,13 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         float3 f = image.voxelPos(make_uint3(
                     p.x + d.x, p.y + d.y, p.z + d.z));
         if (tape.axes.reg[0] != UINT16_MAX) {
-            regs[tape.axes.reg[0]][threadIdx.x] = f.x * v.scale - v.center[0];
+            regs[tape.axes.reg[0]] = f.x * v.scale - v.center[0];
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
-            regs[tape.axes.reg[1]][threadIdx.x] = f.y * v.scale - v.center[1];
+            regs[tape.axes.reg[1]] = f.y * v.scale - v.center[1];
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
-            regs[tape.axes.reg[2]][threadIdx.x] = (DIMENSION == 3)
+            regs[tape.axes.reg[2]] = (DIMENSION == 3)
                 ? (f.z * v.scale)
                 : v.center[2];
         }
@@ -727,7 +683,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
                 s = subtapes.start[subtape_index];
                 tape = subtapes.data[subtape_index];
             } else {
-                if (regs[tape[s - 1].out][threadIdx.x] < 0.0f) {
+                if (regs[tape[s - 1].out] < 0.0f) {
                     if (DIMENSION == 2) {
                         image(p.x + d.x, p.y + d.y) = 255;
                     } else {
@@ -745,14 +701,14 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         if (c.banks & 1) {
             lhs = constant_ptr[c.lhs];
         } else {
-            lhs = regs[c.lhs][threadIdx.x];
+            lhs = regs[c.lhs];
         }
 
         float rhs;
         if (c.banks & 2) {
             rhs = constant_ptr[c.rhs];
         } else if (c.opcode >= OP_ADD) {
-            rhs = regs[c.rhs][threadIdx.x];
+            rhs = regs[c.rhs];
         }
 
         float out;
@@ -772,7 +728,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             // Skipping various hard functions here
             default: break;
         }
-        regs[c.out][threadIdx.x] = out;
+        regs[c.out] = out;
     }
 }
 
@@ -806,16 +762,9 @@ __global__ void PixelRenderer_draw(
 #if LIBFIVE_CUDA_3D
 NormalRenderer::NormalRenderer(const Tape& tape, const Renderable& parent,
                                Image& norm)
-    : tape(tape), parent(parent), norm(norm),
-      regs(CUDA_MALLOC(DerivRegisters,
-                       tape.num_regs * LIBFIVE_CUDA_RENDER_BLOCKS))
+    : tape(tape), parent(parent), norm(norm)
 {
     // Nothing to do here
-}
-
-NormalRenderer::~NormalRenderer()
-{
-    CUDA_CHECK(cudaFree(regs));
 }
 
 __device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
@@ -828,20 +777,20 @@ __device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
     const uint3 p = make_uint3(pixel.x, pixel.y, pz + 1);
     const float3 f = norm.voxelPos(p);
 
-    auto regs = this->regs + tape.num_regs * blockIdx.x;
+    Deriv regs[128];
 
     {   // Prepopulate axis values
         if (tape.axes.reg[0] != UINT16_MAX) {
             const float x = f.x * v.scale - v.center[0];
-            regs[tape.axes.reg[0]][threadIdx.x] = Deriv(x, 1.0f, 0.0f, 0.0f);
+            regs[tape.axes.reg[0]] = Deriv(x, 1.0f, 0.0f, 0.0f);
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
             const float y = f.y * v.scale - v.center[1];
-            regs[tape.axes.reg[1]][threadIdx.x] = Deriv(y, 0.0f, 1.0f, 0.0f);
+            regs[tape.axes.reg[1]] = Deriv(y, 0.0f, 1.0f, 0.0f);
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
             const float z = (f.z * v.scale);
-            regs[tape.axes.reg[2]][threadIdx.x] = Deriv(z, 0.0f, 0.0f, 1.0f);
+            regs[tape.axes.reg[2]] = Deriv(z, 0.0f, 0.0f, 1.0f);
         }
     }
 
@@ -856,17 +805,17 @@ __device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
         switch (c.banks) {
             case 0: // Deriv op Deriv
                 out = derivOp<Deriv, Deriv>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
-                        regs[c.rhs][threadIdx.x]);
+                        regs[c.lhs],
+                        regs[c.rhs]);
                 break;
             case 1: // Constant op Deriv
                 out = derivOp<float, Deriv>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs][threadIdx.x]);
+                        regs[c.rhs]);
                 break;
             case 2: // Deriv op Constant
                 out = derivOp<Deriv, float>(c.opcode,
-                        regs[c.lhs][threadIdx.x],
+                        regs[c.lhs],
                         constant_ptr[c.rhs]);
                 break;
             case 3: // Constant op Constant
@@ -875,11 +824,11 @@ __device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
                         constant_ptr[c.rhs]);
                 break;
         }
-        regs[c.out][threadIdx.x] = out;
+        regs[c.out] = out;
     }
 
     const Clause c = clause_ptr[num_clauses - 1];
-    const Deriv result = regs[c.out][threadIdx.x];
+    const Deriv result = regs[c.out];
     float norm = sqrtf(powf(result.dx(), 2) +
                        powf(result.dy(), 2) +
                        powf(result.dz(), 2));
@@ -964,11 +913,15 @@ void Renderable_copyToSurface(Renderable* r, bool append,
 
 void Renderable::Deleter::operator()(Renderable* r)
 {
-    for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
-        CUDA_CHECK(cudaStreamDestroy(r->streams[i]));
-    }
     r->~Renderable();
     CUDA_CHECK(cudaFree(r));
+}
+
+Renderable::~Renderable()
+{
+    for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
+        CUDA_CHECK(cudaStreamDestroy(streams[i]));
+    }
 }
 
 Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px)
