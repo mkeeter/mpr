@@ -19,11 +19,6 @@ class TileRenderer {
 public:
     TileRenderer(const Tape& tape, Subtapes& subtapes, Image& image);
 
-    // These are blocks of data which should be indexed as i[threadIdx.x]
-    using Registers = Interval[LIBFIVE_CUDA_TILE_THREADS];
-    using ChoiceArray = uint64_t[LIBFIVE_CUDA_TILE_THREADS];
-    using ActiveArray = uint8_t[LIBFIVE_CUDA_TILE_THREADS];
-
     // Evaluates the given tile.
     //      Filled -> Pushes it to the list of filed tiles
     //      Ambiguous -> Pushes it to the list of active tiles and builds tape
@@ -59,13 +54,6 @@ public:
     constexpr static unsigned __host__ __device__ subtilesPerTile() {
         return pow(subtilesPerTileSide(), DIMENSION);
     }
-
-    using Registers = Interval[subtilesPerTile() *
-                               LIBFIVE_CUDA_REFINE_TILES];
-    using ActiveArray = uint8_t[subtilesPerTile() *
-                                LIBFIVE_CUDA_REFINE_TILES];
-    using ChoiceArray = uint64_t[subtilesPerTile() *
-                                 LIBFIVE_CUDA_REFINE_TILES];
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
@@ -109,9 +97,6 @@ public:
         return pow(SUBTILE_SIZE_PX, DIMENSION);
     }
 
-    using FloatRegisters = float[pixelsPerSubtile() *
-                                 LIBFIVE_CUDA_RENDER_SUBTILES];
-
     // Draws the given tile, starting from the given subtape
     __device__ void draw(const uint32_t subtile, const View& v);
 
@@ -135,8 +120,6 @@ class Renderable; // forward declaration
 class NormalRenderer {
 public:
     NormalRenderer(const Tape& tape, const Renderable& parent, Image& norm);
-
-    using DerivRegisters = Deriv[LIBFIVE_CUDA_NORMAL_TILES * 16 * 16];
 
     // Draws the given pixel, pulling height from the image
     __device__ void draw(const uint2 p, const View& v);
