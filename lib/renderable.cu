@@ -188,10 +188,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
 
     // Pick a subset of the active array to use for this block
     uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(regs);
-
-    for (uint32_t r=0; r < tape.num_regs; ++r) {
-        active[r] = false;
-    }
+    memset(active, 0, tape.num_regs);
 
     // Mark the root of the tree as true
     active[tape[num_clauses - 1].out] = true;
@@ -249,22 +246,14 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                     }
                 } else if (choice == 0) {
                     terminal = false;
-                    if (!(c.banks & 1)) {
-                        active[c.lhs] = true;
-                    }
-                    if (!(c.banks & 2)) {
-                        active[c.rhs] = true;
-                    }
+                    active[c.lhs] |= !(c.banks & 1);
+                    active[c.rhs] |= !(c.banks & 2);
                 } else {
                     assert(false);
                 }
             } else {
-                if (!(c.banks & 1)) {
-                    active[c.lhs] = true;
-                }
-                if (c.opcode >= OP_ADD && !(c.banks & 2)) {
-                    active[c.rhs] = true;
-                }
+                active[c.lhs] |= !(c.banks & 1);
+                active[c.rhs] |= (c.opcode >= OP_ADD && !(c.banks & 2));
             }
 
             // Allocate a new subtape and begin writing to it
@@ -438,10 +427,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
 
     // Pick a subset of the active array to use for this block
     uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(regs);
-
-    for (uint32_t r=0; r < this->tape.num_regs; ++r) {
-        active[r] = false;
-    }
+    memset(active, 0, this->tape.num_regs);
 
     // The tape chunks must be reversed by this point!
     uint32_t in_subtape_index = tiles.head(tile);
@@ -515,23 +501,15 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                         c.banks = 3;
                     }
                 } else if (choice == 0) {
-                    if (!(c.banks & 1)) {
-                        active[c.lhs] = true;
-                    }
-                    if (!(c.banks & 2)) {
-                        active[c.rhs] = true;
-                    }
+                    active[c.lhs] |= (!(c.banks & 1));
+                    active[c.rhs] |= (!(c.banks & 2));
                 } else {
                     assert(false);
                 }
             } else {
                 terminal = false;
-                if (!(c.banks & 1)) {
-                    active[c.lhs] = true;
-                }
-                if (c.opcode >= OP_ADD && !(c.banks & 2)) {
-                    active[c.rhs] = true;
-                }
+                active[c.lhs] |= (!(c.banks & 1));
+                active[c.rhs] |= (c.opcode >= OP_ADD && !(c.banks & 2));
             }
 
             // If we've reached the end of the output tape, then
