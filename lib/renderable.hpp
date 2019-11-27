@@ -118,12 +118,13 @@ protected:
 class Renderable; // forward declaration
 class NormalRenderer {
 public:
-    NormalRenderer(const Tape& tape, Image& norm);
+    NormalRenderer(const Tape& tape, const Subtapes& subtapes, Image& norm);
 
     // Draws the given pixel, pulling height from the image
     __device__ uint32_t draw(const float3 f, const View& v);
 
     const Tape& tape;
+    const Subtapes& subtapes;
     Image& norm;
 protected:
     NormalRenderer(const NormalRenderer& other)=delete;

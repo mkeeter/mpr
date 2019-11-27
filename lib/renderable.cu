@@ -759,8 +759,10 @@ __global__ void PixelRenderer_draw(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-NormalRenderer::NormalRenderer(const Tape& tape, Image& norm)
-    : tape(tape), norm(norm)
+NormalRenderer::NormalRenderer(const Tape& tape,
+                               const Subtapes& subtapes,
+                               Image& norm)
+    : tape(tape), subtapes(subtapes), norm(norm)
 {
     // Nothing to do here
 }
@@ -940,7 +942,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 #if LIBFIVE_CUDA_3D
       microtile_renderer(tape, subtapes, image, subtile_renderer.subtiles),
       pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles),
-      normal_renderer(tape, norm)
+      normal_renderer(tape, subtapes, norm)
 #else
       pixel_renderer(tape, subtapes, image, subtile_renderer.subtiles)
 #endif
