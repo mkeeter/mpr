@@ -759,23 +759,14 @@ __global__ void PixelRenderer_draw(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-NormalRenderer::NormalRenderer(const Tape& tape, const Renderable& parent,
-                               Image& norm)
-    : tape(tape), parent(parent), norm(norm)
+NormalRenderer::NormalRenderer(const Tape& tape, Image& norm)
+    : tape(tape), norm(norm)
 {
     // Nothing to do here
 }
 
-__device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
+__device__ uint32_t NormalRenderer::draw(const float3 f, const View& v)
 {
-    const uint32_t pz = parent.heightAt(pixel.x, pixel.y);
-    if (!pz) {
-        return;
-    }
-
-    const uint3 p = make_uint3(pixel.x, pixel.y, pz + 1);
-    const float3 f = norm.voxelPos(p);
-
     Deriv regs[128];
 
     {   // Prepopulate axis values
@@ -834,11 +825,12 @@ __device__ void NormalRenderer::draw(const uint2 pixel, const View& v)
     uint8_t dx = (result.dx() / norm) * 127 + 128;
     uint8_t dy = (result.dy() / norm) * 127 + 128;
     uint8_t dz = (result.dz() / norm) * 127 + 128;
-    this->norm(p.x, p.y) = (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
+    return (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
 }
 
-__global__ void NormalRenderer_draw(
-        NormalRenderer* r, const uint32_t offset, View v)
+#if LIBFIVE_CUDA_3D
+__global__ void Renderable_drawNormals(
+        Renderable* r, const uint32_t offset, View v)
 {
     assert(blockDim.y == 1);
     assert(blockDim.z == 1);
@@ -854,9 +846,21 @@ __global__ void NormalRenderer_draw(
     const uint32_t py = (i / (r->norm.size_px / 16)) * 16 +
                         (pixel / 16);
     if (px < r->norm.size_px && py < r->norm.size_px) {
-        r->draw(make_uint2(px, py), v);
+        const uint32_t pz = r->heightAt(px, py);
+        if (pz) {
+            const uint3 p = make_uint3(px, py, pz + 1);
+            const float3 f = r->norm.voxelPos(p);
+            const uint32_t n = r->drawNormals(f, v);
+            r->norm(p.x, p.y) = n;
+        }
     }
 }
+
+__device__
+uint32_t Renderable::drawNormals(const float3 f, const View& v) {
+    return normal_renderer.draw(f, v);
+}
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 __host__ __device__
@@ -886,14 +890,11 @@ void Renderable::copyToSurface(bool append, cudaSurfaceObject_t surf)
     if (x < size && y < size) {
         const auto h = heightAt(x, size - y - 1);
         if (h) {
-#if LIBFIVE_CUDA_3D
-            if (has_normals) {
-                surf2Dwrite(norm(x, size - y - 1), surf, x*4, y);
-            } else
+#if LIBFIVE_CUDA_3D_NORMALS
+            surf2Dwrite(norm(x, size - y - 1), surf, x*4, y);
+#else
+            surf2Dwrite(0x00FFFFFF | (h << 24), surf, x*4, y);
 #endif
-            {
-                surf2Dwrite(0x00FFFFFF | (h << 24), surf, x*4, y);
-            }
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
@@ -939,7 +940,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 #if LIBFIVE_CUDA_3D
       microtile_renderer(tape, subtapes, image, subtile_renderer.subtiles),
       pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles),
-      normal_renderer(tape, *this, norm)
+      normal_renderer(tape, norm)
 #else
       pixel_renderer(tape, subtapes, image, subtile_renderer.subtiles)
 #endif
@@ -952,24 +953,20 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 void Renderable::run(const View& view)
 {
     // Reset everything in preparation for a render
-    tile_renderer.tiles.reset();
-    subtile_renderer.subtiles.reset();
     subtapes.reset();
     image.reset();
     norm.reset();
-#if LIBFIVE_CUDA_3D
-    microtile_renderer.subtiles.reset();
-    has_normals = false;
-#endif
 
     // Record this local variable because otherwise it looks up memory
     // that has been loaned to the GPU and not synchronized.
     auto tile_renderer = &this->tile_renderer;
+    tile_renderer->tiles.reset();
     auto subtile_renderer = &this->subtile_renderer;
+    subtile_renderer->subtiles.reset();
     auto pixel_renderer = &this->pixel_renderer;
 #if LIBFIVE_CUDA_3D
     auto microtile_renderer = &this->microtile_renderer;
-    auto normal_renderer = &this->normal_renderer;
+    microtile_renderer->subtiles.reset();
 #endif
 
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
@@ -1045,22 +1042,21 @@ void Renderable::run(const View& view)
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-#if LIBFIVE_CUDA_3D && 0
+#if LIBFIVE_CUDA_3D && LIBFIVE_CUDA_3D_NORMALS
     {   // Do pixel-by-pixel rendering for normals
         const uint32_t active = pow(image.size_px / 16, 2);
         const uint32_t stride = LIBFIVE_CUDA_NORMAL_BLOCKS *
                                 LIBFIVE_CUDA_NORMAL_TILES;
         for (unsigned i=0; i < active; i += stride) {
-            NormalRenderer_draw<<<
+            Renderable_drawNormals<<<
                 LIBFIVE_CUDA_NORMAL_BLOCKS,
                 pow(16, 2) * LIBFIVE_CUDA_NORMAL_TILES,
                 0, streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
-                    normal_renderer, i, view);
+                    this, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
     }
     CUDA_CHECK(cudaDeviceSynchronize());
-    has_normals = true;
 #endif
 }
 

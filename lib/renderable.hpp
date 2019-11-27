@@ -118,13 +118,12 @@ protected:
 class Renderable; // forward declaration
 class NormalRenderer {
 public:
-    NormalRenderer(const Tape& tape, const Renderable& parent, Image& norm);
+    NormalRenderer(const Tape& tape, Image& norm);
 
     // Draws the given pixel, pulling height from the image
-    __device__ void draw(const uint2 p, const View& v);
+    __device__ uint32_t draw(const float3 f, const View& v);
 
     const Tape& tape;
-    const Renderable& parent;
     Image& norm;
 protected:
     NormalRenderer(const NormalRenderer& other)=delete;
@@ -155,6 +154,9 @@ public:
     __host__ __device__
     uint32_t heightAt(const uint32_t x, const uint32_t y) const;
 
+    __device__
+    uint32_t drawNormals(const float3 f, const View& v);
+
     Image image;
     Image norm;
     Tape tape;
@@ -171,8 +173,6 @@ protected:
     SubtileRenderer<16, 4, 3> microtile_renderer;
     PixelRenderer<4, 3> pixel_renderer;
     NormalRenderer normal_renderer;
-
-    bool has_normals;
 #else
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;

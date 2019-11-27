@@ -24,6 +24,7 @@
 
 /*  Rendering in 2D vs 3D */
 #define LIBFIVE_CUDA_3D 1
+#define LIBFIVE_CUDA_3D_NORMALS 1
 
 /*  Number of subtiles per thread block */
 #define LIBFIVE_CUDA_RENDER_SUBTILES 16
