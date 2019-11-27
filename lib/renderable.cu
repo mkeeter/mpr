@@ -261,6 +261,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                 auto next_subtape_index = subtapes.claim();
                 subtapes.start[subtape_index] = 0;
                 subtapes.next[next_subtape_index] = subtape_index;
+                subtapes.prev[subtape_index] = next_subtape_index;
 
                 subtape_index = next_subtape_index;
                 s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
@@ -272,6 +273,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
 
     // The last subtape may not be completely filled
     subtapes.start[subtape_index] = s;
+    subtapes.prev[subtape_index] = 0;
     tiles.head(tile) = subtape_index;
     tiles.terminal[tile] = terminal;
 }
@@ -374,28 +376,6 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     }
 
     ////////////////////////////////////////////////////////////////////////////
-
-    // Reverse the tape if it isn't terminal
-    bool terminal = tiles.terminal[tile];
-    __syncthreads();
-    if ((threadIdx.x % subtilesPerTile()) == 0 && !terminal) {
-        uint32_t subtape_index = tiles.head(tile);
-        uint32_t prev = 0;
-
-        while (true) {
-            const uint32_t next = subtapes.next[subtape_index];
-            subtapes.next[subtape_index] = prev;
-            if (next == 0) {
-                break;
-            } else {
-                prev = subtape_index;
-                subtape_index = next;
-            }
-        }
-        tiles.head(tile) = subtape_index;
-    }
-    __syncthreads();
-
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
     if (result.upper() < 0.0f) {
@@ -419,6 +399,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
 
     // Re-use the previous tape and return immediately if the previous
     // tape was terminal (i.e. having no min/max clauses to specialize)
+    bool terminal = tiles.terminal[tile];
     if (terminal) {
         subtiles.head(subtile) = tiles.head(tile);
         subtiles.terminal[subtile] = true;
@@ -429,8 +410,10 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(regs);
     memset(active, 0, this->tape.num_regs);
 
-    // The tape chunks must be reversed by this point!
-    uint32_t in_subtape_index = tiles.head(tile);
+    // At this point, subtape_index is pointing to the last chunk, so we'll
+    // use the prev pointers to walk backwards (where "backwards" means
+    // from the root of the tree to its leaves).
+    uint32_t in_subtape_index = subtape_index;
     uint32_t in_s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
     uint32_t in_s_end = subtapes.start[in_subtape_index];
     const Clause* __restrict__ in_tape = subtapes.data[in_subtape_index];
@@ -455,9 +438,9 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         // If we've reached the end of an input tape chunk, then
         // either move on to the next one or escape the loop
         if (in_s == in_s_end) {
-            const uint32_t next = subtapes.next[in_subtape_index];
-            if (next) {
-                in_subtape_index = next;
+            const uint32_t prev = subtapes.prev[in_subtape_index];
+            if (prev) {
+                in_subtape_index = prev;
                 in_s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
                 in_s_end = subtapes.start[in_subtape_index];
                 in_tape = subtapes.data[in_subtape_index];
@@ -518,6 +501,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                 const auto next = subtapes.claim();
                 subtapes.start[out_subtape_index] = 0;
                 subtapes.next[next] = out_subtape_index;
+                subtapes.prev[out_subtape_index] = next;
 
                 out_subtape_index = next;
                 out_s = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
@@ -530,6 +514,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
 
     // The last subtape may not be completely filled, so write its size here
     subtapes.start[out_subtape_index] = out_s;
+    subtapes.prev[out_subtape_index] = 0;
     subtiles.head(subtile) = out_subtape_index;
     subtiles.terminal[subtile] = terminal;
 }
