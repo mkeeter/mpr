@@ -54,8 +54,7 @@ int main(int argc, char **argv)
     out.saveNormalPNG("out_gpu_norm.png");
 
     std::atomic_bool abort(false);
-    const float z = LIBFIVE_CUDA_3D ? 1.0f : 0.0f;
-    libfive::Voxels vox({-1, -1, -z}, {1, 1, z}, r->image.size_px / 2);
+    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->image.size_px / 2);
     auto start_cpu = std::chrono::steady_clock::now();
     for (unsigned i=0; i < 10; ++i) {
         auto h = libfive::Heightmap::render(t, vox, abort);

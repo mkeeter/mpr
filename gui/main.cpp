@@ -286,8 +286,8 @@ int main(int argc, char** argv)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                 LIBFIVE_CUDA_IMAGE_SIZE_PX,
-                 LIBFIVE_CUDA_IMAGE_SIZE_PX, 0,
+                 1024,
+                 1024, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
     auto cuda_tex = Renderable::registerTexture(gl_tex);
