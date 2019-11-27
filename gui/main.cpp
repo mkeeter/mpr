@@ -167,8 +167,7 @@ eval-sandboxed
                 for (auto r = scm_cdar(result); !scm_is_null(r); r = scm_cdr(r)) {
                     if (scm_is_shape(scm_car(r))) {
                         auto t = *scm_get_tree(scm_car(r));
-                        shapes.insert({t.id(), Renderable::build(
-                                    t, 1024, 3)});
+                        shapes.insert({t.id(), t});
                     }
                 }
                 result = scm_cdr(result);
@@ -200,7 +199,14 @@ eval-sandboxed
     std::string result_err_stack;
     Range result_err_range;
 
-    std::map<libfive::Tree::Id, Renderable::Handle> shapes;
+    std::map<libfive::Tree::Id, libfive::Tree> shapes;
+};
+
+struct Shape {
+    Renderable::Handle handle;
+    libfive::Tree tree;
+    int size;
+    int dimension;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -278,6 +284,8 @@ int main(int argc, char** argv)
     // View matrix, as it were
     ImVec2 center = ImVec2(0.0f, 0.0f);
     float scale = 100.0f; // scale = pixels per model units
+
+    std::map<libfive::Tree::Id, Shape> shapes;
 
     // Generate a texture which we'll draw into
     GLuint gl_tex;
@@ -379,6 +387,29 @@ int main(int argc, char** argv)
         ImGui::Begin("Text editor");
             if (needs_eval) {
                 interpreter.eval(editor.GetText());
+
+                // Erase shapes that are no longer in the script
+                auto itr = shapes.begin();
+                while (itr != shapes.end()) {
+                    if (interpreter.shapes.find(itr->first) == interpreter.shapes.end()) {
+                        itr = shapes.erase(itr);
+                    } else {
+                        ++itr;
+                    }
+                }
+                // Create new shapes from the script
+                for (auto& t : interpreter.shapes) {
+                    if (shapes.find(t.first) == shapes.end()) {
+                        const uint32_t default_size = 1024;
+                        const uint32_t default_dim = 2;
+                        Shape s = { Renderable::build(
+                                        t.second, default_size, default_dim),
+                                    t.second,
+                                    default_size,
+                                    default_dim};
+                        shapes.emplace(t.first, std::move(s));
+                    }
+                }
             }
 
             float size = ImGui::GetContentRegionAvail().y;
@@ -409,29 +440,49 @@ int main(int argc, char** argv)
             const float cx = center.x * scale + io.DisplaySize.x / 2.0f;
             const float cy = center.y * scale + io.DisplaySize.y / 2.0f;
             bool append = false;
-            for (const auto& s : interpreter.shapes) {
+            for (auto& s : shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
                 ImGui::Columns(2);
-                ImGui::Text("%u clauses", s.second->tape.num_clauses);
-                ImGui::Text("%u registers", s.second->tape.num_regs);
+                ImGui::Text("%u clauses", s.second.handle->tape.num_clauses);
+                ImGui::Text("%u registers", s.second.handle->tape.num_regs);
                 ImGui::NextColumn();
-                ImGui::Text("%u constants", s.second->tape.num_constants);
-                ImGui::Text("%u CSG nodes", s.second->tape.num_csg_choices);
+                ImGui::Text("%u constants", s.second.handle->tape.num_constants);
+                ImGui::Text("%u CSG nodes", s.second.handle->tape.num_csg_choices);
                 ImGui::Columns(1);
 
                 {   // Timed rendering pass
                     using namespace std::chrono;
                     auto start = high_resolution_clock::now();
-                        s.second->run({{center.x, -center.y}, render_scale});
+                        s.second.handle->run({{center.x, -center.y}, render_scale});
                     auto end = high_resolution_clock::now();
                     auto dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
                     start = high_resolution_clock::now();
-                        s.second->copyToTexture(cuda_tex, TEXTURE_SIZE, append);
+                        s.second.handle->copyToTexture(cuda_tex, TEXTURE_SIZE, append);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Texture load time: %f s", dt.count() / 1e6);
+                }
+
+                ImGui::Text("Render size:");
+                ImGui::RadioButton("512", &s.second.size, 512);
+                ImGui::SameLine();
+                ImGui::RadioButton("1024", &s.second.size, 1024);
+                ImGui::SameLine();
+                ImGui::RadioButton("2048", &s.second.size, 2048);
+
+                ImGui::Text("Dimension:");
+                ImGui::RadioButton("2D", &s.second.dimension, 2);
+                ImGui::SameLine();
+                ImGui::RadioButton("3D", &s.second.dimension, 3);
+
+                if (s.second.size != (int)s.second.handle->image.size_px ||
+                    s.second.dimension != (int)s.second.handle->dimension())
+                {
+                    auto h = Renderable::build(s.second.tree, s.second.size,
+                                               s.second.dimension);
+                    s.second.handle = std::move(h);
                 }
 
                 ImGui::Separator();
