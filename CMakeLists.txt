@@ -12,6 +12,6 @@ add_subdirectory(libfive)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -fPIC -pedantic -Werror=switch -march=native")
 
-add_subdirectory(lib)
+add_subdirectory(src)
 add_subdirectory(gui)
 add_subdirectory(benchmark)

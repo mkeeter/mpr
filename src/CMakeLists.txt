@@ -5,7 +5,7 @@ add_library(five-cuda
     renderable.cu)
 target_include_directories(five-cuda PUBLIC
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
-    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../inc
     libfive/libfive/include
     ${EIGEN_INCLUDE_DIRS})
 target_link_libraries(five-cuda five)
