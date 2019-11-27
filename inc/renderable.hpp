@@ -140,21 +140,56 @@ public:
     public:
         void operator()(Renderable* r);
     };
-
     using Handle = std::unique_ptr<Renderable, Deleter>;
 
+    virtual ~Renderable();
+
     // Returns a GPU-allocated Renderable struct
-    static Handle build(libfive::Tree tree, uint32_t image_size_px);
-    void run(const View& v);
+    static Handle build(libfive::Tree tree, uint32_t image_size_px,
+                        uint8_t dimension);
+    virtual void run(const View& v)=0;
+
+    uint32_t heightAt(const uint32_t x, const uint32_t y) const {
+        return image(x, y);
+    }
+    virtual uint32_t normalAt(const uint32_t, const uint32_t) const {
+        return 0;
+    }
 
     static cudaGraphicsResource* registerTexture(GLuint t);
-    void copyToTexture(cudaGraphicsResource* gl_tex, bool append);
+    virtual void copyToTexture(cudaGraphicsResource* gl_tex, bool append)=0;
+
+    Image image;
+    Tape tape;
+
+protected:
+    cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
+    Subtapes subtapes;
+
+    Renderable(libfive::Tree tree, uint32_t image_size_px);
+    Renderable(const Renderable& other)=delete;
+    Renderable& operator=(const Renderable& other)=delete;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class Renderable3D : public Renderable {
+public:
+    void run(const View& v) override;
+    void copyToTexture(cudaGraphicsResource* gl_tex, bool append) override;
 
     __device__
-    void copyToSurface(bool append, cudaSurfaceObject_t surf);
+    void copyDepthToSurface(bool append, cudaSurfaceObject_t surf);
 
-    __host__ __device__
-    uint32_t heightAt(const uint32_t x, const uint32_t y) const;
+    __device__
+    void copyDepthToImage();
+
+    __device__
+    void copyNormalToSurface(bool append, cudaSurfaceObject_t surf);
+
+    uint32_t normalAt(const uint32_t x, const uint32_t y) const override {
+        return norm(x, y);
+    }
 
     // Returns the subtape head at the given voxel, or 0
     __device__
@@ -163,30 +198,45 @@ public:
     __device__
     uint32_t drawNormals(const float3 f, const uint32_t subtape_index, const View& v);
 
-    Image image;
     Image norm;
-    Tape tape;
 
-protected:
-    Renderable(libfive::Tree tree, uint32_t image_size_px);
-    ~Renderable();
+    Renderable3D(libfive::Tree tree, uint32_t image_size_px);
 
-    cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
-
-#if LIBFIVE_CUDA_3D
     TileRenderer<64, 3> tile_renderer;
     SubtileRenderer<64, 16, 3> subtile_renderer;
     SubtileRenderer<16, 4, 3> microtile_renderer;
     PixelRenderer<4, 3> pixel_renderer;
     NormalRenderer normal_renderer;
-#else
+
+protected:
+    Renderable3D(const Renderable3D& other)=delete;
+    Renderable3D& operator=(const Renderable3D& other)=delete;
+
+    friend class Renderable;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+class Renderable2D : public Renderable {
+public:
+    void run(const View& v) override;
+    void copyToTexture(cudaGraphicsResource* gl_tex, bool append) override;
+
+    __device__
+    void copyToSurface(bool append, cudaSurfaceObject_t surf);
+
+    __device__
+    void copyDepthToImage();
+
+protected:
+    Renderable2D(libfive::Tree tree, uint32_t image_size_px);
+
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;
     PixelRenderer<8, 2> pixel_renderer;
-#endif
 
-    Subtapes subtapes;
+    Renderable2D(const Renderable2D& other)=delete;
+    Renderable2D& operator=(const Renderable2D& other)=delete;
 
-    Renderable(const Renderable& other)=delete;
-    Renderable& operator=(const Renderable& other)=delete;
+    friend class Renderable;
 };

@@ -1,9 +1,14 @@
-add_executable(libfive-cuda-test libfive-cuda.cpp)
-set_target_properties(libfive-cuda-test PROPERTIES CXX_STANDARD 11)
-target_include_directories(libfive-cuda-test PUBLIC ../lib)
-target_link_libraries(libfive-cuda-test five-cuda)
+macro(benchmark)
+    add_executable(${ARGV0} ${ARGV0}.cpp)
+    set_target_properties(${ARGV0} PROPERTIES CXX_STANDARD 11)
+    target_include_directories(${ARGV0} PUBLIC ../lib)
+    target_link_libraries(${ARGV0} five-cuda)
 
-if(APPLE)
-  # Add the rpath to the lib
-  set_property(TARGET libfive-cuda-test PROPERTY BUILD_RPATH ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
-endif()
+    if(APPLE)
+      # Add the rpath to the lib
+      set_property(TARGET ${ARGV0} PROPERTY BUILD_RPATH ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
+    endif()
+endmacro()
+
+benchmark(render_2d)
+benchmark(render_3d)

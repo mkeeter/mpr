@@ -30,7 +30,7 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    auto r = Renderable::build(t, LIBFIVE_CUDA_IMAGE_SIZE_PX);
+    auto r = Renderable::build(t, 1024, 3);
     r->tape.print();
 
     auto start_gpu = std::chrono::steady_clock::now();
@@ -47,7 +47,7 @@ int main(int argc, char **argv)
     for (unsigned x=0; x < r->image.size_px; ++x) {
         for (unsigned y=0; y < r->image.size_px; ++y) {
             out.depth(y, x) = r->heightAt(x, y);
-            out.norm(y, x) = r->norm(x, y);
+            out.norm(y, x) = r->normalAt(x, y);
         }
     }
     out.savePNG("out_gpu_depth.png");
@@ -68,3 +68,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
+

@@ -792,9 +792,8 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
     return (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
 }
 
-#if LIBFIVE_CUDA_3D
-__global__ void Renderable_drawNormals(
-        Renderable* r, const uint32_t offset, View v)
+__global__ void Renderable3D_drawNormals(
+        Renderable3D* r, const uint32_t offset, View v)
 {
     assert(blockDim.y == 1);
     assert(blockDim.z == 1);
@@ -810,9 +809,9 @@ __global__ void Renderable_drawNormals(
     const uint32_t py = (i / (r->norm.size_px / 16)) * 16 +
                         (pixel / 16);
     if (px < r->norm.size_px && py < r->norm.size_px) {
-        const uint32_t pz = r->heightAt(px, py);
+        const uint32_t pz = min(r->image(px, py) + 1, r->image.size_px - 1);
         if (pz) {
-            const uint3 p = make_uint3(px, py, pz + 1);
+            const uint3 p = make_uint3(px, py, pz);
             const float3 f = r->norm.voxelPos(p);
             const uint32_t h = r->subtapeHeadAt(p);
             if (h) {
@@ -824,31 +823,15 @@ __global__ void Renderable_drawNormals(
 }
 
 __device__
-uint32_t Renderable::drawNormals(const float3 f, const uint32_t subtape_index, const View& v) {
-    return normal_renderer.draw(f, subtape_index, v);
-}
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-__host__ __device__
-uint32_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
+uint32_t Renderable3D::drawNormals(const float3 f,
+                                   const uint32_t subtape_index,
+                                   const View& v)
 {
-    const uint32_t c = image(px, py);
-    const uint32_t t = tile_renderer.tiles.filledAt(px, py);
-    const uint32_t s = subtile_renderer.subtiles.filledAt(px, py);
-
-    // This is the same as the subtile renderer in 2D, but that's okay
-    const uint32_t u = pixel_renderer.subtiles.filledAt(px, py);
-
-    if (pixel_renderer.is3D()) {
-        return max(max(c, t), max(s, u));
-    } else {
-        return (c || t || s) ? 65535 : 0;
-    }
+    return normal_renderer.draw(f, subtape_index, v);
 }
 
 __device__
-uint32_t Renderable::subtapeHeadAt(const uint3 v) const
+uint32_t Renderable3D::subtapeHeadAt(const uint3 v) const
 {
     if (auto h = pixel_renderer.subtiles.headAtVoxel(v)) {
         return h;
@@ -862,29 +845,114 @@ uint32_t Renderable::subtapeHeadAt(const uint3 v) const
 }
 
 __device__
-void Renderable::copyToSurface(bool append, cudaSurfaceObject_t surf)
+void Renderable3D::copyDepthToImage()
 {
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
 
     const unsigned size = image.size_px;
     if (x < size && y < size) {
-        const auto h = heightAt(x, size - y - 1);
+        const uint32_t c = image(x, y);
+        const uint32_t t = tile_renderer.tiles.filledAt(x, y);
+        const uint32_t s = subtile_renderer.subtiles.filledAt(x, y);
+        const uint32_t u = pixel_renderer.subtiles.filledAt(x, y);
+
+        image(x, y) = max(max(c, t), max(s, u));
+    }
+}
+
+__device__
+void Renderable2D::copyDepthToImage()
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    const unsigned size = image.size_px;
+    if (x < size && y < size) {
+        const uint32_t c = image(x, y);
+        const uint32_t t = tile_renderer.tiles.filledAt(x, y);
+        const uint32_t s = subtile_renderer.subtiles.filledAt(x, y);
+
+        image(x, y) = (c || t || s) ? (image.size_px - 1) : 0;
+    }
+}
+
+__global__
+void Renderable3D_copyDepthToImage(Renderable3D* r)
+{
+    r->copyDepthToImage();
+}
+
+__global__
+void Renderable2D_copyDepthToImage(Renderable2D* r)
+{
+    r->copyDepthToImage();
+}
+
+__device__
+void Renderable3D::copyDepthToSurface(bool append, cudaSurfaceObject_t surf)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    const unsigned size = image.size_px;
+    if (x < size && y < size) {
+        const auto h = image(x, size - y - 1);
         if (h) {
-#if LIBFIVE_CUDA_3D_NORMALS
-            surf2Dwrite(norm(x, size - y - 1), surf, x*4, y);
-#else
-            surf2Dwrite(0x00FFFFFF | (h << 24), surf, x*4, y);
-#endif
+            surf2Dwrite(0x00FFFFFF | (((h * 255) / size) << 24), surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
     }
 }
 
+__device__
+void Renderable3D::copyNormalToSurface(bool append, cudaSurfaceObject_t surf)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    const unsigned size = image.size_px;
+    if (x < size && y < size) {
+        const auto h = image(x, size - y - 1);
+        if (h) {
+            surf2Dwrite(norm(x, size - y - 1), surf, x*4, y);
+        } else if (!append) {
+            surf2Dwrite(0, surf, x*4, y);
+        }
+    }
+}
+
+__device__
+void Renderable2D::copyToSurface(bool append, cudaSurfaceObject_t surf)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    const unsigned size = image.size_px;
+    if (x < size && y < size) {
+        const auto h = image(x, size - y - 1);
+        surf2Dwrite(0xFFFFFFFF, surf, x*4, y);
+    }
+}
+
 __global__
-void Renderable_copyToSurface(Renderable* r, bool append,
-                              cudaSurfaceObject_t surf)
+void Renderable3D_copyDepthToSurface(Renderable3D* r, bool append,
+                                     cudaSurfaceObject_t surf)
+{
+    r->copyDepthToSurface(append, surf);
+}
+
+__global__
+void Renderable3D_copyNormalToSurface(Renderable3D* r, const bool append,
+                                      cudaSurfaceObject_t surf)
+{
+    r->copyNormalToSurface(append, surf);
+}
+
+__global__
+void Renderable2D_copyToSurface(Renderable2D* r, const bool append,
+                                cudaSurfaceObject_t surf)
 {
     r->copyToSurface(append, surf);
 }
@@ -904,51 +972,67 @@ Renderable::~Renderable()
     }
 }
 
-Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px)
+Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px, uint8_t dimension)
 {
-    auto out = CUDA_MALLOC(Renderable, 1);
-    new (out) Renderable(tree, image_size_px);
+    Renderable* out;
+    if (dimension == 2) {
+        out = CUDA_MALLOC(Renderable2D, 1);
+        new (out) Renderable2D(tree, image_size_px);
+    } else if (dimension == 3) {
+        out = CUDA_MALLOC(Renderable3D, 1);
+        new (out) Renderable3D(tree, image_size_px);
+    }
     cudaDeviceSynchronize();
     return Handle(out);
 }
 
 Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
-    : image(image_size_px), norm(image_size_px),
-      tape(std::move(Tape::build(tree))),
-
-      tile_renderer(tape, subtapes, image),
-      subtile_renderer(tape, subtapes, image, tile_renderer.tiles),
-#if LIBFIVE_CUDA_3D
-      microtile_renderer(tape, subtapes, image, subtile_renderer.subtiles),
-      pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles),
-      normal_renderer(tape, subtapes, norm)
-#else
-      pixel_renderer(tape, subtapes, image, subtile_renderer.subtiles)
-#endif
+    : image(image_size_px),
+      tape(std::move(Tape::build(tree)))
 {
     for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
         CUDA_CHECK(cudaStreamCreate(&streams[i]));
     }
 }
 
-void Renderable::run(const View& view)
+Renderable3D::Renderable3D(libfive::Tree tree, uint32_t image_size_px)
+    : Renderable(tree, image_size_px),
+      norm(image_size_px),
+      tile_renderer(tape, subtapes, image),
+      subtile_renderer(tape, subtapes, image, tile_renderer.tiles),
+      microtile_renderer(tape, subtapes, image, subtile_renderer.subtiles),
+      pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles),
+      normal_renderer(tape, subtapes, norm)
+{
+    // Nothing to do here
+}
+
+Renderable2D::Renderable2D(libfive::Tree tree, uint32_t image_size_px)
+    : Renderable(tree, image_size_px),
+
+      tile_renderer(tape, subtapes, image),
+      subtile_renderer(tape, subtapes, image, tile_renderer.tiles),
+      pixel_renderer(tape, subtapes, image, subtile_renderer.subtiles)
+{
+    // Nothing to do here
+}
+
+void Renderable3D::run(const View& view)
 {
     // Reset everything in preparation for a render
     subtapes.reset();
     image.reset();
     norm.reset();
+    tile_renderer.tiles.reset();
+    subtile_renderer.subtiles.reset();
+    microtile_renderer.subtiles.reset();
 
     // Record this local variable because otherwise it looks up memory
     // that has been loaned to the GPU and not synchronized.
     auto tile_renderer = &this->tile_renderer;
-    tile_renderer->tiles.reset();
     auto subtile_renderer = &this->subtile_renderer;
-    subtile_renderer->subtiles.reset();
-    auto pixel_renderer = &this->pixel_renderer;
-#if LIBFIVE_CUDA_3D
     auto microtile_renderer = &this->microtile_renderer;
-    microtile_renderer->subtiles.reset();
-#endif
+    auto pixel_renderer = &this->pixel_renderer;
 
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
     for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
@@ -987,7 +1071,6 @@ void Renderable::run(const View& view)
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-#if LIBFIVE_CUDA_3D
     {   // Refine ambiguous tiles from their subtapes
         const uint32_t active = subtile_renderer->subtiles.num_active;
         const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
@@ -1004,7 +1087,6 @@ void Renderable::run(const View& view)
         }
         CUDA_CHECK(cudaDeviceSynchronize());
     }
-#endif
 
     {   // Do pixel-by-pixel rendering for active subtiles
         const uint32_t active = pixel_renderer->subtiles.num_active;
@@ -1023,13 +1105,16 @@ void Renderable::run(const View& view)
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-#if LIBFIVE_CUDA_3D && LIBFIVE_CUDA_3D_NORMALS
+    Renderable3D_copyDepthToImage<<<dim3(256, 256), dim3(16, 16)>>>(this);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
     {   // Do pixel-by-pixel rendering for normals
         const uint32_t active = pow(image.size_px / 16, 2);
         const uint32_t stride = LIBFIVE_CUDA_NORMAL_BLOCKS *
                                 LIBFIVE_CUDA_NORMAL_TILES;
         for (unsigned i=0; i < active; i += stride) {
-            Renderable_drawNormals<<<
+            Renderable3D_drawNormals<<<
                 LIBFIVE_CUDA_NORMAL_BLOCKS,
                 pow(16, 2) * LIBFIVE_CUDA_NORMAL_TILES,
                 0, streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
@@ -1038,7 +1123,79 @@ void Renderable::run(const View& view)
         }
     }
     CUDA_CHECK(cudaDeviceSynchronize());
-#endif
+}
+
+void Renderable2D::run(const View& view)
+{
+    // Reset everything in preparation for a render
+    subtapes.reset();
+    image.reset();
+    tile_renderer.tiles.reset();
+    subtile_renderer.subtiles.reset();
+
+    // Record this local variable because otherwise it looks up memory
+    // that has been loaned to the GPU and not synchronized.
+    auto tile_renderer = &this->tile_renderer;
+    auto subtile_renderer = &this->subtile_renderer;
+    auto pixel_renderer = &this->pixel_renderer;
+
+    cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
+    for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
+        streams[i] = this->streams[i];
+    }
+
+    {   // Do per-tile evaluation to get filled / ambiguous tiles
+        const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
+                                LIBFIVE_CUDA_TILE_BLOCKS;
+        const uint32_t total_tiles = tile_renderer->tiles.total;
+        for (unsigned i=0; i < total_tiles; i += stride) {
+            TileRenderer_check<<<
+                LIBFIVE_CUDA_TILE_BLOCKS,
+                LIBFIVE_CUDA_TILE_THREADS,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    tile_renderer, i, view);
+        }
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    {   // Refine ambiguous tiles from their subtapes
+        const uint32_t active = tile_renderer->tiles.num_active;
+        const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
+                                LIBFIVE_CUDA_REFINE_TILES;
+        for (unsigned i=0; i < active; i += stride) {
+            SubtileRenderer_check<<<
+                LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                subtile_renderer->subtilesPerTile() *
+                    LIBFIVE_CUDA_REFINE_TILES,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    subtile_renderer, i, view);
+            CUDA_CHECK(cudaGetLastError());
+        }
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    {   // Do pixel-by-pixel rendering for active subtiles
+        const uint32_t active = pixel_renderer->subtiles.num_active;
+        const uint32_t stride = LIBFIVE_CUDA_RENDER_BLOCKS *
+                                LIBFIVE_CUDA_RENDER_SUBTILES;
+        for (unsigned i=0; i < active; i += stride) {
+            PixelRenderer_draw<<<
+                LIBFIVE_CUDA_RENDER_BLOCKS,
+                pixel_renderer->pixelsPerSubtile() *
+                    LIBFIVE_CUDA_RENDER_SUBTILES,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    pixel_renderer, i, view);
+            CUDA_CHECK(cudaGetLastError());
+        }
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    Renderable2D_copyDepthToImage<<<dim3(256, 256), dim3(16, 16)>>>(this);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 cudaGraphicsResource* Renderable::registerTexture(GLuint t)
@@ -1049,7 +1206,7 @@ cudaGraphicsResource* Renderable::registerTexture(GLuint t)
     return gl_tex;
 }
 
-void Renderable::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
+void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
 {
     cudaArray* array;
     CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
@@ -1066,7 +1223,33 @@ void Renderable::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
     CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    Renderable_copyToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
+    Renderable2D_copyToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
+            this, append, surf);
+    CUDA_CHECK(cudaGetLastError());
+
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaDestroySurfaceObject(surf));
+    CUDA_CHECK(cudaGraphicsUnmapResources(1, &gl_tex));
+}
+
+void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
+{
+    cudaArray* array;
+    CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
+    CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(&array, gl_tex, 0, 0));
+
+    // Specify texture
+    struct cudaResourceDesc res_desc;
+    memset(&res_desc, 0, sizeof(res_desc));
+    res_desc.resType = cudaResourceTypeArray;
+    res_desc.res.array.array = array;
+
+    // Surface object??!
+    cudaSurfaceObject_t surf = 0;
+    CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
+
+    CUDA_CHECK(cudaDeviceSynchronize());
+    Renderable3D_copyDepthToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
             this, append, surf);
     CUDA_CHECK(cudaGetLastError());
 

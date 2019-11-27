@@ -22,10 +22,6 @@
 /*  This is the length of each subtape chunk */
 #define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 256
 
-/*  Rendering in 2D vs 3D */
-#define LIBFIVE_CUDA_3D 1
-#define LIBFIVE_CUDA_3D_NORMALS 1
-
 /*  Number of subtiles per thread block */
 #define LIBFIVE_CUDA_RENDER_SUBTILES 16
 
@@ -35,10 +31,3 @@
 /*  Generating normals is done with this many threads + blocks */
 #define LIBFIVE_CUDA_NORMAL_TILES 4
 #define LIBFIVE_CUDA_NORMAL_BLOCKS 32
-
-/*  Default image size for easy benchmarking */
-#if LIBFIVE_CUDA_3D
-#define LIBFIVE_CUDA_IMAGE_SIZE_PX 1024
-#else
-#define LIBFIVE_CUDA_IMAGE_SIZE_PX 2048
-#endif
