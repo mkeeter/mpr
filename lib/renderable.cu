@@ -984,10 +984,12 @@ void Renderable::run(const View& view)
                                 LIBFIVE_CUDA_TILE_BLOCKS;
         const uint32_t total_tiles = tile_renderer->tiles.total;
         for (unsigned i=0; i < total_tiles; i += stride) {
-            TileRenderer_check<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                                 LIBFIVE_CUDA_TILE_THREADS, 0,
-                                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
-                                         tile_renderer, i, view);
+            TileRenderer_check<<<
+                LIBFIVE_CUDA_TILE_BLOCKS,
+                LIBFIVE_CUDA_TILE_THREADS,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    tile_renderer, i, view);
         }
     }
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -997,11 +999,13 @@ void Renderable::run(const View& view)
         const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                 LIBFIVE_CUDA_REFINE_TILES;
         for (unsigned i=0; i < active; i += stride) {
-            SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-                    subtile_renderer->subtilesPerTile() *
-                    LIBFIVE_CUDA_REFINE_TILES, 0,
-                    streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
-                        subtile_renderer, i, view);
+            SubtileRenderer_check<<<
+                LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                subtile_renderer->subtilesPerTile() *
+                    LIBFIVE_CUDA_REFINE_TILES,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    subtile_renderer, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
     }
@@ -1013,11 +1017,13 @@ void Renderable::run(const View& view)
         const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                 LIBFIVE_CUDA_REFINE_TILES;
         for (unsigned i=0; i < active; i += stride) {
-            SubtileRenderer_check<<<LIBFIVE_CUDA_SUBTILE_BLOCKS,
-                    microtile_renderer->subtilesPerTile() *
-                    LIBFIVE_CUDA_REFINE_TILES, 0,
-                    streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
-                        microtile_renderer, i, view);
+            SubtileRenderer_check<<<
+                LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                microtile_renderer->subtilesPerTile() *
+                    LIBFIVE_CUDA_REFINE_TILES,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    microtile_renderer, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -1029,11 +1035,13 @@ void Renderable::run(const View& view)
         const uint32_t stride = LIBFIVE_CUDA_RENDER_BLOCKS *
                                 LIBFIVE_CUDA_RENDER_SUBTILES;
         for (unsigned i=0; i < active; i += stride) {
-            PixelRenderer_draw<<<LIBFIVE_CUDA_RENDER_BLOCKS,
-                                 pixel_renderer->pixelsPerSubtile() *
-                                 LIBFIVE_CUDA_RENDER_SUBTILES, 0,
-                                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
-                pixel_renderer, i, view);
+            PixelRenderer_draw<<<
+                LIBFIVE_CUDA_RENDER_BLOCKS,
+                pixel_renderer->pixelsPerSubtile() *
+                    LIBFIVE_CUDA_RENDER_SUBTILES,
+                0,
+                streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
+                    pixel_renderer, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
     }
