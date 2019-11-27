@@ -30,8 +30,7 @@ __device__ void storeAxes(const uint32_t tile,
 }
 
 template <typename A, typename B>
-__device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs,
-                                      uint64_t& choice, uint8_t choice_index)
+__device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
 {
     using namespace libfive::Opcode;
     switch (op) {
@@ -44,19 +43,19 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs,
         case OP_MUL: return lhs * rhs;
         case OP_DIV: return lhs / rhs;
         case OP_MIN: if (upper(lhs) < lower(rhs)) {
-                         choice |= (1UL << choice_index);
+                         choice = 1;
                          return lhs;
                      } else if (upper(rhs) < lower(lhs)) {
-                         choice |= (2UL << choice_index);
+                         choice = 2;
                          return rhs;
                      } else {
                          return min(lhs, rhs);
                      }
         case OP_MAX: if (lower(lhs) > upper(rhs)) {
-                         choice |= (1UL << choice_index);
+                         choice = 1;
                          return lhs;
                      } else if (lower(rhs) > upper(lhs)) {
-                         choice |= (2UL << choice_index);
+                         choice = 2;
                          return rhs;
                      } else {
                          return max(lhs, rhs);
@@ -112,10 +111,9 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     storeAxes(tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
-    uint64_t choices_[128];
-    uint64_t* __restrict__ choices = choices_;
-    uint64_t choice = 0;
-    uint8_t choice_index = 0;
+    uint32_t choices[256];
+    memset(choices, 0, sizeof(choices));
+    uint32_t choice_index = 0;
 
     const Clause* __restrict__ clause_ptr = &tape[0];
     const float* __restrict__ constant_ptr = &tape.constant(0);
@@ -126,40 +124,37 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
 
         const Clause c = clause_ptr[i];
         Interval out;
+        uint8_t choice = 0;
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<Interval, Interval>(c.opcode,
                         regs[c.lhs],
                         regs[c.rhs],
-                        choice, choice_index);
+                        choice);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, Interval>(c.opcode,
                         constant_ptr[c.lhs],
                         regs[c.rhs],
-                        choice, choice_index);
+                        choice);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<Interval, float>(c.opcode,
                         regs[c.lhs],
                         constant_ptr[c.rhs],
-                        choice, choice_index);
+                        choice);
                 break;
             case 3: // Constant op Constant
                 out = intervalOp<float, float>(c.opcode,
                         constant_ptr[c.lhs],
                         constant_ptr[c.rhs],
-                        choice, choice_index);
+                        choice);
                 break;
         }
 
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            choice_index += 2;
-            if (choice_index == sizeof(choice) * 8) {
-                (*(choices++)) = choice;
-                choice = 0;
-                choice_index = 0;
-            }
+            choices[choice_index / 16] |= (choice << ((choice_index % 16) * 2));
+            choice_index++;
         }
 
         regs[c.out] = out;
@@ -219,19 +214,16 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         using namespace libfive::Opcode;
         Clause c = clause_ptr[num_clauses - i - 1];
 
+        uint8_t choice = 0;
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            if (choice_index == 0) {
-                choice_index = sizeof(choice) * 8;
-                choice = (*(--choices));
-            }
-            choice_index -= 2;
+            --choice_index;
+            choice = (choices[choice_index / 16] >> ((choice_index % 16) * 2)) & 3;
         }
 
         if (active[c.out]) {
             active[c.out] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice_ = (choice >> choice_index) & 3;
-                if (choice_ == 1) {
+                if (choice == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;
                         if (c.lhs == c.out) {
@@ -243,7 +235,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                         c.rhs = c.lhs;
                         c.banks = 3;
                     }
-                } else if (choice_ == 2) {
+                } else if (choice == 2) {
                     if (!(c.banks & 2)) {
                         active[c.rhs] = true;
                         if (c.rhs == c.out) {
@@ -255,7 +247,7 @@ void TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                         c.lhs = c.rhs;
                         c.banks = 3;
                     }
-                } else if (choice_ == 0) {
+                } else if (choice == 0) {
                     terminal = false;
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;
@@ -333,9 +325,8 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     Interval regs[128];
     storeAxes(subtile, v, subtiles, tape, regs);
 
-    uint64_t choices_[128];
-    uint64_t* __restrict__ choices = choices_;
-    uint64_t choice = 0;
+    uint32_t choices[256];
+    memset(choices, 0, sizeof(choices));
     uint32_t choice_index = 0;
 
     // Run actual evaluation
@@ -362,35 +353,32 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const Clause c = tape[s++];
 
         Interval out;
+        uint8_t choice = 0;
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<Interval, Interval>(c.opcode,
                         regs[c.lhs],
-                        regs[c.rhs], choice, choice_index);
+                        regs[c.rhs], choice);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, Interval>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs], choice, choice_index);
+                        regs[c.rhs], choice);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<Interval, float>(c.opcode,
                          regs[c.lhs],
-                         constant_ptr[c.rhs], choice, choice_index);
+                         constant_ptr[c.rhs], choice);
                 break;
             case 3: // Constant op Constant
                 out = intervalOp<float, float>(c.opcode,
                         constant_ptr[c.lhs],
-                        constant_ptr[c.rhs], choice, choice_index);
+                        constant_ptr[c.rhs], choice);
                 break;
         }
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            choice_index += 2;
-            if (choice_index == sizeof(choice) * 8) {
-                (*(choices++)) = choice;
-                choice = 0;
-                choice_index = 0;
-            }
+            choices[choice_index / 16] |= (choice << ((choice_index % 16) * 2));
+            choice_index++;
         }
 
         regs[c.out] = out;
@@ -493,19 +481,16 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         }
         Clause c = in_tape[--in_s];
 
+        uint8_t choice = 0;
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-            if (choice_index == 0) {
-                choice_index = sizeof(choice) * 8;
-                choice = (*(--choices));
-            }
-            choice_index -= 2;
+            --choice_index;
+            choice = (choices[choice_index / 16] >> ((choice_index % 16) * 2)) & 3;
         }
 
         if (active[c.out]) {
             active[c.out] = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
-                const uint8_t choice_ = (choice >> choice_index) & 3;
-                if (choice_ == 1) {
+                if (choice == 1) {
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;
                         if (c.lhs == c.out) {
@@ -517,7 +502,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                         c.rhs = c.lhs;
                         c.banks = 3;
                     }
-                } else if (choice_ == 2) {
+                } else if (choice == 2) {
                     if (!(c.banks & 2)) {
                         active[c.rhs] = true;
                         if (c.rhs == c.out) {
@@ -529,7 +514,7 @@ void SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                         c.lhs = c.rhs;
                         c.banks = 3;
                     }
-                } else if (choice_ == 0) {
+                } else if (choice == 0) {
                     if (!(c.banks & 1)) {
                         active[c.lhs] = true;
                     }
