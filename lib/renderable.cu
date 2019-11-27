@@ -715,7 +715,9 @@ NormalRenderer::NormalRenderer(const Tape& tape,
     // Nothing to do here
 }
 
-__device__ uint32_t NormalRenderer::draw(const float3 f, const View& v)
+__device__ uint32_t NormalRenderer::draw(const float3 f,
+                                         uint32_t subtape_index,
+                                         const View& v)
 {
     Deriv regs[128];
 
@@ -734,13 +736,26 @@ __device__ uint32_t NormalRenderer::draw(const float3 f, const View& v)
         }
     }
 
-    const Clause* __restrict__ clause_ptr = &tape[0];
+    uint32_t s = subtapes.start[subtape_index];
     const float* __restrict__ constant_ptr = &tape.constant(0);
-    const auto num_clauses = tape.num_clauses;
+    const Clause* __restrict__ tape = subtapes.data[subtape_index];
 
-    for (uint32_t i=0; i < num_clauses; ++i) {
+    while (true) {
         using namespace libfive::Opcode;
-        const Clause c = clause_ptr[i];
+
+        // Move to the next subtape if this one is finished
+        if (s == LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE) {
+            const uint32_t next = subtapes.next[subtape_index];
+            if (next) {
+                subtape_index = next;
+                s = subtapes.start[subtape_index];
+                tape = subtapes.data[subtape_index];
+            } else {
+                break;
+            }
+        }
+        const Clause c = tape[s++];
+
         Deriv out;
         switch (c.banks) {
             case 0: // Deriv op Deriv
@@ -767,8 +782,7 @@ __device__ uint32_t NormalRenderer::draw(const float3 f, const View& v)
         regs[c.out] = out;
     }
 
-    const Clause c = clause_ptr[num_clauses - 1];
-    const Deriv result = regs[c.out];
+    const Deriv result = regs[tape[s - 1].out];
     float norm = sqrtf(powf(result.dx(), 2) +
                        powf(result.dy(), 2) +
                        powf(result.dz(), 2));
@@ -800,15 +814,18 @@ __global__ void Renderable_drawNormals(
         if (pz) {
             const uint3 p = make_uint3(px, py, pz + 1);
             const float3 f = r->norm.voxelPos(p);
-            const uint32_t n = r->drawNormals(f, v);
-            r->norm(p.x, p.y) = n;
+            const uint32_t h = r->subtapeHeadAt(p);
+            if (h) {
+                const uint32_t n = r->drawNormals(f, h, v);
+                r->norm(p.x, p.y) = n;
+            }
         }
     }
 }
 
 __device__
-uint32_t Renderable::drawNormals(const float3 f, const View& v) {
-    return normal_renderer.draw(f, v);
+uint32_t Renderable::drawNormals(const float3 f, const uint32_t subtape_index, const View& v) {
+    return normal_renderer.draw(f, subtape_index, v);
 }
 #endif
 
@@ -827,6 +844,20 @@ uint32_t Renderable::heightAt(const uint32_t px, const uint32_t py) const
         return max(max(c, t), max(s, u));
     } else {
         return (c || t || s) ? 65535 : 0;
+    }
+}
+
+__device__
+uint32_t Renderable::subtapeHeadAt(const uint3 v) const
+{
+    if (auto h = pixel_renderer.subtiles.headAtVoxel(v)) {
+        return h;
+    } else if (auto h = subtile_renderer.subtiles.headAtVoxel(v)) {
+        return h;
+    } else if (auto h = tile_renderer.tiles.headAtVoxel(v)) {
+        return h;
+    } else {
+        return 0;
     }
 }
 

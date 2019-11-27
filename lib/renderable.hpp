@@ -120,8 +120,9 @@ class NormalRenderer {
 public:
     NormalRenderer(const Tape& tape, const Subtapes& subtapes, Image& norm);
 
-    // Draws the given pixel, pulling height from the image
-    __device__ uint32_t draw(const float3 f, const View& v);
+    // Evaluates the given location + subtape + view, returning the
+    // packed normal result
+    __device__ uint32_t draw(const float3 f, uint32_t subtape_index, const View& v);
 
     const Tape& tape;
     const Subtapes& subtapes;
@@ -155,8 +156,12 @@ public:
     __host__ __device__
     uint32_t heightAt(const uint32_t x, const uint32_t y) const;
 
+    // Returns the subtape head at the given voxel, or 0
     __device__
-    uint32_t drawNormals(const float3 f, const View& v);
+    uint32_t subtapeHeadAt(const uint3 v) const;
+
+    __device__
+    uint32_t drawNormals(const float3 f, const uint32_t subtape_index, const View& v);
 
     Image image;
     Image norm;

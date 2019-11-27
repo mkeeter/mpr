@@ -32,7 +32,7 @@ struct Tiles {
         const uint32_t t =
             (p.x / TILE_SIZE_PX) +
             (p.y / TILE_SIZE_PX) * per_side +
-            (p.y / TILE_SIZE_PX) * per_side * per_side;
+            (p.z / TILE_SIZE_PX) * per_side * per_side;
         return head(t);
     }
 
