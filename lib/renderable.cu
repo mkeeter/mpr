@@ -759,7 +759,6 @@ __global__ void PixelRenderer_draw(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#if LIBFIVE_CUDA_3D
 NormalRenderer::NormalRenderer(const Tape& tape, const Renderable& parent,
                                Image& norm)
     : tape(tape), parent(parent), norm(norm)
@@ -858,7 +857,6 @@ __global__ void NormalRenderer_draw(
         r->draw(make_uint2(px, py), v);
     }
 }
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 __host__ __device__

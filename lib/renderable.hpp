@@ -115,7 +115,6 @@ protected:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#if LIBFIVE_CUDA_3D
 class Renderable; // forward declaration
 class NormalRenderer {
 public:
@@ -131,7 +130,6 @@ protected:
     NormalRenderer(const NormalRenderer& other)=delete;
     NormalRenderer& operator=(const NormalRenderer& other)=delete;
 };
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
