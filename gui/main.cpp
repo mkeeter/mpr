@@ -16,6 +16,8 @@
 #include "libfive-guile.h"
 #include "renderable.hpp"
 
+#define TEXTURE_SIZE 2048
+
 static void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "glfw Error %d: %s\n", error, description);
@@ -286,8 +288,8 @@ int main(int argc, char** argv)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
-                 1024,
-                 1024, 0,
+                 TEXTURE_SIZE,
+                 TEXTURE_SIZE, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
     auto cuda_tex = Renderable::registerTexture(gl_tex);
@@ -426,7 +428,7 @@ int main(int argc, char** argv)
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
                     start = high_resolution_clock::now();
-                        s.second->copyToTexture(cuda_tex, append);
+                        s.second->copyToTexture(cuda_tex, TEXTURE_SIZE, append);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Texture load time: %f s", dt.count() / 1e6);

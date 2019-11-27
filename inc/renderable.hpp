@@ -89,10 +89,6 @@ public:
     PixelRenderer(const Tape& tape, const Subtapes& subtapes, Image& image,
                   const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
 
-    constexpr static bool __host__ __device__ is3D() {
-        return DIMENSION == 3;
-    }
-
     constexpr static unsigned __host__ __device__ pixelsPerSubtile() {
         return pow(SUBTILE_SIZE_PX, DIMENSION);
     }
@@ -157,7 +153,10 @@ public:
     }
 
     static cudaGraphicsResource* registerTexture(GLuint t);
-    virtual void copyToTexture(cudaGraphicsResource* gl_tex, bool append)=0;
+    virtual void copyToTexture(cudaGraphicsResource* gl_tex,
+                               uint32_t texture_size,
+                               bool append)=0;
+    virtual uint32_t dimension() const=0;
 
     Image image;
     Tape tape;
@@ -176,20 +175,26 @@ protected:
 class Renderable3D : public Renderable {
 public:
     void run(const View& v) override;
-    void copyToTexture(cudaGraphicsResource* gl_tex, bool append) override;
+    void copyToTexture(cudaGraphicsResource* gl_tex,
+                       uint32_t texture_size,
+                       bool append) override;
 
     __device__
-    void copyDepthToSurface(bool append, cudaSurfaceObject_t surf);
+    void copyDepthToSurface(cudaSurfaceObject_t surf,
+                            uint32_t texture_size, bool append);
 
     __device__
     void copyDepthToImage();
 
     __device__
-    void copyNormalToSurface(bool append, cudaSurfaceObject_t surf);
+    void copyNormalToSurface(cudaSurfaceObject_t surf,
+                             uint32_t texture_size, bool append);
 
     uint32_t normalAt(const uint32_t x, const uint32_t y) const override {
         return norm(x, y);
     }
+
+    uint32_t dimension() const override { return 3; };
 
     // Returns the subtape head at the given voxel, or 0
     __device__
@@ -220,13 +225,18 @@ protected:
 class Renderable2D : public Renderable {
 public:
     void run(const View& v) override;
-    void copyToTexture(cudaGraphicsResource* gl_tex, bool append) override;
+    void copyToTexture(cudaGraphicsResource* gl_tex,
+                       uint32_t texture_size,
+                       bool append) override;
 
     __device__
-    void copyToSurface(bool append, cudaSurfaceObject_t surf);
+    void copyToSurface(cudaSurfaceObject_t surf,
+                       uint32_t texture_size, bool append);
 
     __device__
     void copyDepthToImage();
+
+    uint32_t dimension() const override { return 2; };
 
 protected:
     Renderable2D(libfive::Tree tree, uint32_t image_size_px);

@@ -890,16 +890,19 @@ void Renderable2D_copyDepthToImage(Renderable2D* r)
 }
 
 __device__
-void Renderable3D::copyDepthToSurface(bool append, cudaSurfaceObject_t surf)
+void Renderable3D::copyDepthToSurface(cudaSurfaceObject_t surf,
+                                      uint32_t texture_size,
+                                      bool append)
 {
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
 
-    const unsigned size = image.size_px;
-    if (x < size && y < size) {
-        const auto h = image(x, size - y - 1);
+    if (x < texture_size && y < texture_size) {
+        uint32_t px = x * image.size_px / texture_size;
+        uint32_t py = y * image.size_px / texture_size;
+        const auto h = image(px, image.size_px - py - 1);
         if (h) {
-            surf2Dwrite(0x00FFFFFF | (((h * 255) / size) << 24), surf, x*4, y);
+            surf2Dwrite(0x00FFFFFF | (((h * 255) / image.size_px) << 24), surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
@@ -907,16 +910,19 @@ void Renderable3D::copyDepthToSurface(bool append, cudaSurfaceObject_t surf)
 }
 
 __device__
-void Renderable3D::copyNormalToSurface(bool append, cudaSurfaceObject_t surf)
+void Renderable3D::copyNormalToSurface(cudaSurfaceObject_t surf,
+                                       uint32_t texture_size,
+                                       bool append)
 {
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
 
-    const unsigned size = image.size_px;
-    if (x < size && y < size) {
-        const auto h = image(x, size - y - 1);
+    if (x < texture_size && y < texture_size) {
+        uint32_t px = x * image.size_px / texture_size;
+        uint32_t py = y * image.size_px / texture_size;
+        const auto h = image(px, image.size_px - py - 1);
         if (h) {
-            surf2Dwrite(norm(x, size - y - 1), surf, x*4, y);
+            surf2Dwrite(norm(x, image.size_px - y - 1), surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
@@ -924,37 +930,44 @@ void Renderable3D::copyNormalToSurface(bool append, cudaSurfaceObject_t surf)
 }
 
 __device__
-void Renderable2D::copyToSurface(bool append, cudaSurfaceObject_t surf)
+void Renderable2D::copyToSurface(cudaSurfaceObject_t surf,
+                                 uint32_t texture_size, bool append)
 {
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
 
-    const unsigned size = image.size_px;
-    if (x < size && y < size) {
-        const auto h = image(x, size - y - 1);
-        surf2Dwrite(0xFFFFFFFF, surf, x*4, y);
+    if (x < texture_size && y < texture_size) {
+        const uint32_t px = x * image.size_px / texture_size;
+        const uint32_t py = y * image.size_px / texture_size;
+        const auto h = image(px, image.size_px - py - 1);
+        if (h) {
+            surf2Dwrite(0xFFFFFFFF, surf, x*4, y);
+        } else if (!append) {
+            surf2Dwrite(0, surf, x*4, y);
+        }
     }
 }
 
 __global__
-void Renderable3D_copyDepthToSurface(Renderable3D* r, bool append,
-                                     cudaSurfaceObject_t surf)
+void Renderable3D_copyDepthToSurface(Renderable3D* r, cudaSurfaceObject_t surf,
+                                     uint32_t texture_size, bool append)
 {
-    r->copyDepthToSurface(append, surf);
+    r->copyDepthToSurface(surf, texture_size, append);
 }
 
 __global__
-void Renderable3D_copyNormalToSurface(Renderable3D* r, const bool append,
-                                      cudaSurfaceObject_t surf)
+void Renderable3D_copyNormalToSurface(Renderable3D* r,
+                                      cudaSurfaceObject_t surf,
+                                      uint32_t texture_size, bool append)
 {
-    r->copyNormalToSurface(append, surf);
+    r->copyNormalToSurface(surf, texture_size, append);
 }
 
 __global__
-void Renderable2D_copyToSurface(Renderable2D* r, const bool append,
-                                cudaSurfaceObject_t surf)
+void Renderable2D_copyToSurface(Renderable2D* r, cudaSurfaceObject_t surf,
+                                uint32_t texture_size, bool append)
 {
-    r->copyToSurface(append, surf);
+    r->copyToSurface(surf, texture_size, append);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1206,7 +1219,9 @@ cudaGraphicsResource* Renderable::registerTexture(GLuint t)
     return gl_tex;
 }
 
-void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
+void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
+                                 uint32_t texture_size,
+                                 bool append)
 {
     cudaArray* array;
     CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
@@ -1224,7 +1239,7 @@ void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
 
     CUDA_CHECK(cudaDeviceSynchronize());
     Renderable2D_copyToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
-            this, append, surf);
+            this, surf, texture_size, append);
     CUDA_CHECK(cudaGetLastError());
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -1232,7 +1247,9 @@ void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
     CUDA_CHECK(cudaGraphicsUnmapResources(1, &gl_tex));
 }
 
-void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
+void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
+                                 uint32_t texture_size,
+                                 bool append)
 {
     cudaArray* array;
     CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
@@ -1250,7 +1267,7 @@ void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex, bool append)
 
     CUDA_CHECK(cudaDeviceSynchronize());
     Renderable3D_copyDepthToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
-            this, append, surf);
+            this, surf, texture_size, append);
     CUDA_CHECK(cudaGetLastError());
 
     CUDA_CHECK(cudaDeviceSynchronize());
