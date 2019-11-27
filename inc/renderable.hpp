@@ -155,7 +155,7 @@ public:
     static cudaGraphicsResource* registerTexture(GLuint t);
     virtual void copyToTexture(cudaGraphicsResource* gl_tex,
                                uint32_t texture_size,
-                               bool append)=0;
+                               bool append, bool mode)=0;
     virtual uint32_t dimension() const=0;
 
     Image image;
@@ -177,7 +177,7 @@ public:
     void run(const View& v) override;
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
-                       bool append) override;
+                       bool append, bool mode) override;
 
     __device__
     void copyDepthToSurface(cudaSurfaceObject_t surf,
@@ -227,7 +227,7 @@ public:
     void run(const View& v) override;
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
-                       bool append) override;
+                       bool append, bool mode) override;
 
     __device__
     void copyToSurface(cudaSurfaceObject_t surf,

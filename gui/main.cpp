@@ -207,6 +207,7 @@ struct Shape {
     libfive::Tree tree;
     int size;
     int dimension;
+    int mode;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -402,11 +403,13 @@ int main(int argc, char** argv)
                     if (shapes.find(t.first) == shapes.end()) {
                         const uint32_t default_size = 1024;
                         const uint32_t default_dim = 2;
+                        const uint32_t default_mode = 0;
                         Shape s = { Renderable::build(
                                         t.second, default_size, default_dim),
                                     t.second,
                                     default_size,
-                                    default_dim};
+                                    default_dim,
+                                    default_mode};
                         shapes.emplace(t.first, std::move(s));
                     }
                 }
@@ -459,7 +462,8 @@ int main(int argc, char** argv)
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
                     start = high_resolution_clock::now();
-                        s.second.handle->copyToTexture(cuda_tex, TEXTURE_SIZE, append);
+                        s.second.handle->copyToTexture(cuda_tex, TEXTURE_SIZE,
+                                                       append, s.second.mode);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Texture load time: %f s", dt.count() / 1e6);
@@ -476,6 +480,13 @@ int main(int argc, char** argv)
                 ImGui::RadioButton("2D", &s.second.dimension, 2);
                 ImGui::SameLine();
                 ImGui::RadioButton("3D", &s.second.dimension, 3);
+
+                if (s.second.dimension == 3) {
+                    ImGui::Text("Render mode:");
+                    ImGui::RadioButton("Heightmap", &s.second.mode, 0);
+                    ImGui::SameLine();
+                    ImGui::RadioButton("Normals", &s.second.mode, 1);
+                }
 
                 if (s.second.size != (int)s.second.handle->image.size_px ||
                     s.second.dimension != (int)s.second.handle->dimension())
