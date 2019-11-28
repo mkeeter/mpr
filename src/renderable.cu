@@ -267,8 +267,7 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     // The last subtape may not be completely filled
     subtapes.start[subtape_index] = s;
     subtapes.prev[subtape_index] = 0;
-    tiles.head(tile) = subtape_index;
-    tiles.terminal[tile] = terminal;
+    tiles.setHead(tile, subtape_index, terminal);
 
     return TILE_AMBIGUOUS;
 }
@@ -394,10 +393,9 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
 
     // Re-use the previous tape and return immediately if the previous
     // tape was terminal (i.e. having no min/max clauses to specialize)
-    bool terminal = tiles.terminal[tile];
+    bool terminal = tiles.terminal(tile);
     if (terminal) {
-        subtiles.head(subtile) = tiles.head(tile);
-        subtiles.terminal[subtile] = true;
+        subtiles.setHead(subtile, tiles.head(tile), true);
         return TILE_AMBIGUOUS;
     }
 
@@ -510,8 +508,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // The last subtape may not be completely filled, so write its size here
     subtapes.start[out_subtape_index] = out_s;
     subtapes.prev[out_subtape_index] = 0;
-    subtiles.head(subtile) = out_subtape_index;
-    subtiles.terminal[subtile] = terminal;
+    subtiles.setHead(subtile, out_subtape_index, terminal);
 
     return TILE_AMBIGUOUS;
 }

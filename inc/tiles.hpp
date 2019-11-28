@@ -10,15 +10,13 @@ struct Tiles {
     Tiles(const uint32_t image_size_px)
         : per_side(image_size_px / TILE_SIZE_PX),
           total(pow(per_side, DIMENSION)),
-          data(CUDA_MALLOC(uint32_t, total)),
-          terminal(CUDA_MALLOC(uint8_t, total))
+          data(CUDA_MALLOC(uint32_t, total))
     {
         reset();
     }
 
     ~Tiles() {
         CUDA_CHECK(cudaFree(data));
-        CUDA_CHECK(cudaFree(terminal));
     }
 
     __device__ uint3 lowerCornerVoxel(uint32_t t) const {
@@ -63,10 +61,15 @@ struct Tiles {
     }
 
     // Returns the subtape head of the tile t
-    __host__ __device__ uint32_t head(uint32_t t) const
-        { return data[t]; }
-    __host__ __device__ uint32_t& head(uint32_t t)
-        { return data[t]; }
+    __host__ __device__ uint32_t head(uint32_t t) const {
+        return data[t] & ((1U << 31) - 1);
+    }
+    __host__ __device__ void setHead(uint32_t t, uint32_t head, bool terminal) {
+        data[t] = head | (terminal << 31);
+    }
+    __host__ __device__ bool terminal(uint32_t t) const {
+        return data[t] & (1U << 31);
+    }
 
     void reset() {
         cudaMemset(data, 0, sizeof(uint32_t) * total);
@@ -74,8 +77,6 @@ struct Tiles {
 
     const uint32_t per_side;
     const uint32_t total;
-
-    uint8_t* __restrict__ const terminal;
 protected:
     uint32_t* __restrict__ const data;
 };
