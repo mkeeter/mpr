@@ -10,7 +10,7 @@ struct Tiles {
     Tiles(const uint32_t image_size_px)
         : per_side(image_size_px / TILE_SIZE_PX),
           total(pow(per_side, DIMENSION)),
-          data(CUDA_MALLOC(uint32_t, total + pow(per_side, 2))),
+          data(CUDA_MALLOC(uint32_t, total)),
           terminal(CUDA_MALLOC(uint8_t, total))
     {
         reset();
@@ -62,60 +62,18 @@ struct Tiles {
                            2.0f * ((f.z + 1.0f) / per_side - 0.5f));
     }
 
-    // Returns the z index of the filled tile at t, if present
-    //
-    // This ignores Z coordinates, because filled tiles occlude
-    // anything behind them, so only the highest Z value matters.
-    __device__ uint32_t& filled(uint32_t t) {
-        uint3 i = unpack(t);
-        return data[total + i.x + i.y * per_side];
-    }
-    __device__ uint32_t filled(uint32_t t) const {
-        uint3 i = unpack(t);
-        return data[total + i.x + i.y * per_side];
-    }
-
-    // Returns the Z height of the given pixels
-    __host__ __device__ uint32_t filledAt(uint32_t px, uint32_t py) const {
-        const auto tx = px / TILE_SIZE_PX;
-        const auto ty = py / TILE_SIZE_PX;
-        return data[total + tx + ty * per_side];
-    }
-
     // Returns the subtape head of the tile t
     __host__ __device__ uint32_t head(uint32_t t) const
         { return data[t]; }
     __host__ __device__ uint32_t& head(uint32_t t)
         { return data[t]; }
 
-#ifdef __CUDACC__
-    // Marks that the tile at t is filled.  Filled tiles occlude
-    // everything behind them, so this is an atomicMax operation.
-    __device__ void insertFilled(uint32_t t) {
-        uint3 i = unpack(t);
-        if (DIMENSION == 2) {
-            atomicMax(&filled(t), i.z + 1);
-        } else {
-            atomicMax(&filled(t), i.z * TILE_SIZE_PX + TILE_SIZE_PX - 1);
-        }
-    }
-
-    // Checks whether the given tile is masked by a filled tile in front of it
-    __device__ bool isMasked(uint32_t t) const {
-        uint3 i = unpack(t);
-        return filled(t) >= (i.z * TILE_SIZE_PX + TILE_SIZE_PX - 1);
-    }
-#endif
-
     void reset() {
-        num_filled = 0;
-        cudaMemset(data, 0, sizeof(uint32_t) * (total + pow(per_side, 2)));
+        cudaMemset(data, 0, sizeof(uint32_t) * total);
     }
 
     const uint32_t per_side;
     const uint32_t total;
-
-    uint32_t num_filled;
 
     uint8_t* __restrict__ const terminal;
 protected:

@@ -5,6 +5,7 @@
 
 #include "check.hpp"
 #include "clause.hpp"
+#include "filled.hpp"
 #include "gpu_interval.hpp"
 #include "gpu_deriv.hpp"
 #include "image.hpp"
@@ -14,6 +15,12 @@
 #include "tape.hpp"
 #include "tiles.hpp"
 #include "view.hpp"
+
+enum TileResult {
+    TILE_FILLED,
+    TILE_EMPTY,
+    TILE_AMBIGUOUS,
+};
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
 class TileRenderer {
@@ -25,9 +32,7 @@ public:
     //      Ambiguous -> Pushes it to the list of active tiles and builds tape
     //      Empty -> Does nothing
     //  Reverses the tapes
-    //
-    //  Returns true if the region is ambiguous
-    __device__ bool check(const uint32_t tile, const View& v);
+    __device__ TileResult check(const uint32_t tile, const View& v);
 
     const Tape& tape;
 
@@ -59,7 +64,7 @@ public:
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
-    __device__ bool check(
+    __device__ TileResult check(
             const uint32_t subtile,
             const uint32_t tile,
             const View& v);
@@ -207,6 +212,10 @@ public:
 
     Renderable3D(libfive::Tree tree, uint32_t image_size_px);
 
+    Filled<64> filled_tiles;
+    Filled<16> filled_subtiles;
+    Filled<4>  filled_microtiles;
+
     TileRenderer<64, 3> tile_renderer;
     SubtileRenderer<64, 16, 3> subtile_renderer;
     SubtileRenderer<16, 4, 3> microtile_renderer;
@@ -240,6 +249,9 @@ public:
 
 protected:
     Renderable2D(libfive::Tree tree, uint32_t image_size_px);
+
+    Filled<64> filled_tiles;
+    Filled<8>  filled_subtiles;
 
     TileRenderer<64, 2> tile_renderer;
     SubtileRenderer<64, 8, 2> subtile_renderer;
