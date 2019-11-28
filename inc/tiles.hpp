@@ -82,12 +82,6 @@ struct Tiles {
         return data[total*2 + tx + ty * per_side];
     }
 
-    // Returns the tile index of the i'th active tile
-    __host__ __device__ uint32_t active(uint32_t i) const
-        { return data[i]; }
-    __host__ __device__ uint32_t& active(uint32_t i)
-        { return data[i]; }
-
     // Returns the subtape head of the tile t
     __host__ __device__ uint32_t head(uint32_t t) const
         { return data[total + t]; }
@@ -105,9 +99,6 @@ struct Tiles {
             atomicMax(&filled(t), i.z * TILE_SIZE_PX + TILE_SIZE_PX - 1);
         }
     }
-    __device__ void insertActive(uint32_t t) {
-        active(atomicAdd(&num_active, 1)) = t;
-    }
 
     // Checks whether the given tile is masked by a filled tile in front of it
     __device__ bool isMasked(uint32_t t) const {
@@ -117,7 +108,6 @@ struct Tiles {
 #endif
 
     void reset() {
-        num_active = 0;
         num_filled = 0;
         cudaMemset(&data[total], 0,
                    sizeof(uint32_t) * (total + pow(per_side, 2)));
@@ -126,7 +116,6 @@ struct Tiles {
     const uint32_t per_side;
     const uint32_t total;
 
-    uint32_t num_active;
     uint32_t num_filled;
 
     uint8_t* __restrict__ const terminal;

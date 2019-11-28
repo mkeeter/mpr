@@ -9,6 +9,7 @@
 #include "gpu_deriv.hpp"
 #include "image.hpp"
 #include "parameters.hpp"
+#include "queue.hpp"
 #include "subtapes.hpp"
 #include "tape.hpp"
 #include "tiles.hpp"
@@ -24,10 +25,11 @@ public:
     //      Ambiguous -> Pushes it to the list of active tiles and builds tape
     //      Empty -> Does nothing
     //  Reverses the tapes
-    __device__ void check(const uint32_t tile, const View& v);
+    //
+    //  Returns true if the region is ambiguous
+    __device__ bool check(const uint32_t tile, const View& v);
 
     const Tape& tape;
-    Image& image;
 
     Tiles<TILE_SIZE_PX, DIMENSION> tiles;
 
@@ -57,16 +59,12 @@ public:
 
     // Same functions as in TileRenderer, but these take a subtape because
     // they're refining a tile into subtiles
-    __device__ void check(
+    __device__ bool check(
             const uint32_t subtile,
             const uint32_t tile,
             const View& v);
 
-    // Refines a tile tape into a subtile tape based on choices
-    __device__ void buildTape(const uint32_t subtile,
-                              const uint32_t tile);
     const Tape& tape;
-    Image& image;
 
     // Reference to tiles generated in previous stage
     Tiles<TILE_SIZE_PX, DIMENSION>& tiles;
@@ -164,6 +162,8 @@ public:
 protected:
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
     Subtapes subtapes;
+    Queue queue_ping;
+    Queue queue_pong;
 
     Renderable(libfive::Tree tree, uint32_t image_size_px);
     Renderable(const Renderable& other)=delete;
