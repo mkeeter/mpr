@@ -10,7 +10,7 @@ struct Tiles {
     Tiles(const uint32_t image_size_px)
         : per_side(image_size_px / TILE_SIZE_PX),
           total(pow(per_side, DIMENSION)),
-          data(CUDA_MALLOC(uint32_t, 2 * total + pow(per_side, 2))),
+          data(CUDA_MALLOC(uint32_t, total + pow(per_side, 2))),
           terminal(CUDA_MALLOC(uint8_t, total))
     {
         reset();
@@ -68,25 +68,25 @@ struct Tiles {
     // anything behind them, so only the highest Z value matters.
     __device__ uint32_t& filled(uint32_t t) {
         uint3 i = unpack(t);
-        return data[total*2 + i.x + i.y * per_side];
+        return data[total + i.x + i.y * per_side];
     }
     __device__ uint32_t filled(uint32_t t) const {
         uint3 i = unpack(t);
-        return data[total*2 + i.x + i.y * per_side];
+        return data[total + i.x + i.y * per_side];
     }
 
     // Returns the Z height of the given pixels
     __host__ __device__ uint32_t filledAt(uint32_t px, uint32_t py) const {
         const auto tx = px / TILE_SIZE_PX;
         const auto ty = py / TILE_SIZE_PX;
-        return data[total*2 + tx + ty * per_side];
+        return data[total + tx + ty * per_side];
     }
 
     // Returns the subtape head of the tile t
     __host__ __device__ uint32_t head(uint32_t t) const
-        { return data[total + t]; }
+        { return data[t]; }
     __host__ __device__ uint32_t& head(uint32_t t)
-        { return data[total + t]; }
+        { return data[t]; }
 
 #ifdef __CUDACC__
     // Marks that the tile at t is filled.  Filled tiles occlude
@@ -109,8 +109,7 @@ struct Tiles {
 
     void reset() {
         num_filled = 0;
-        cudaMemset(&data[total], 0,
-                   sizeof(uint32_t) * (total + pow(per_side, 2)));
+        cudaMemset(data, 0, sizeof(uint32_t) * (total + pow(per_side, 2)));
     }
 
     const uint32_t per_side;
