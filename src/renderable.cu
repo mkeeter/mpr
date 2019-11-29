@@ -286,7 +286,7 @@ __global__ void TileRenderer_check(
     assert(gridDim.z == 1);
 
     const uint32_t tile = threadIdx.x + blockIdx.x * blockDim.x + offset;
-    if (tile < r->tiles.total &&
+    if (tile < r->tiles.size &&
         !filled_tiles->isMasked(tile))
     {
         switch (r->check(tile, v)) {
@@ -541,6 +541,7 @@ void SubtileRenderer_check(
         // Pick out the next active tile
         // (this will be the same for every thread in a block)
         const uint32_t tile = (*active_tiles)[i];
+        const uint32_t tile_pos = r->tiles.pos(tile);
 
         // Convert from tile position to pixels
         const uint3 p = r->tiles.lowerCornerVoxel(tile);
@@ -559,15 +560,22 @@ void SubtileRenderer_check(
             assert(tz == 0);
         }
 
-        // Finally, unconvert back into a single index
-        const uint32_t subtile = tx + ty * r->subtiles.per_side
+        // This is the subtile index, which isn't the same as its
+        // absolute position
+        const uint32_t subtile = i * r->subtilesPerTile() + q;
+
+        // Absolute position of the subtile
+        const uint32_t pos = tx + ty * r->subtiles.per_side
              + tz * r->subtiles.per_side * r->subtiles.per_side;
 
-        if (!filled_tiles->isMasked(tile) &&
-            !filled_subtiles->isMasked(subtile))
+        // Record the absolute position of the tile
+        r->subtiles.pos(subtile) = pos;
+
+        if (!filled_tiles->isMasked(tile_pos) &&
+            !filled_subtiles->isMasked(pos))
         {
             switch (r->check(subtile, tile, v)) {
-                case TILE_FILLED:       filled_subtiles->insert(subtile); break;
+                case TILE_FILLED:       filled_subtiles->insert(pos); break;
                 case TILE_AMBIGUOUS:    active_subtiles->insert(subtile); break;
                 case TILE_EMPTY:        break;
             }
@@ -708,7 +716,8 @@ __global__ void PixelRenderer_draw(
 
     if (i < active->count) {
         const uint32_t subtile = (*active)[i];
-        if (!filled->isMasked(subtile)) {
+        const uint32_t subtile_pos = r->subtiles.pos(subtile);
+        if (!filled->isMasked(subtile_pos)) {
             r->draw(subtile, v);
         }
     }
@@ -842,15 +851,14 @@ uint32_t Renderable3D::drawNormals(const float3 f,
 __device__
 uint32_t Renderable3D::subtapeHeadAt(const uint3 v) const
 {
-    if (auto h = pixel_renderer.subtiles.headAtVoxel(v)) {
+    const auto s = tile_renderer.tiles.sizePx();
+    const uint32_t t = v.x / s +
+                       (v.y / s) * tile_renderer.tiles.per_side +
+                       (v.z / s) * tile_renderer.tiles.per_side * tile_renderer.tiles.per_side;
+    if (auto h = tile_renderer.tiles.head(t)) {
         return h;
-    } else if (auto h = subtile_renderer.subtiles.headAtVoxel(v)) {
-        return h;
-    } else if (auto h = tile_renderer.tiles.headAtVoxel(v)) {
-        return h;
-    } else {
-        return 0;
     }
+    return 0;
 }
 
 __device__
@@ -1079,10 +1087,18 @@ void Renderable3D::run(const View& view)
     {   // Do per-tile evaluation to get filled / ambiguous tiles
         const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
                                 LIBFIVE_CUDA_TILE_BLOCKS;
-        const uint32_t total_tiles = tile_renderer->tiles.total;
+
+        const uint32_t total_tiles = pow(
+                image.size_px / tile_renderer->tiles.sizePx(),
+                tile_renderer->tiles.dimension());
+        tile_renderer->tiles.resizeToFit(total_tiles);
+        tile_renderer->tiles.setDefaultPositions();
+
         auto queue_out = &this->queue_ping;
         queue_out->resizeToFit(total_tiles);
+
         auto filled_out = &this->filled_tiles;
+
         for (unsigned i=0; i < total_tiles; i += stride) {
             TileRenderer_check<<<
                 LIBFIVE_CUDA_TILE_BLOCKS,
@@ -1098,11 +1114,17 @@ void Renderable3D::run(const View& view)
         const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                 LIBFIVE_CUDA_REFINE_TILES;
         auto queue_in  = &this->queue_ping;
+        const uint32_t active = queue_in->count;
+
         auto queue_out = &this->queue_pong;
+        queue_out->resizeToFit(active * subtile_renderer->subtilesPerTile());
+
         auto filled_in  = &this->filled_tiles;
         auto filled_out = &this->filled_subtiles;
-        const uint32_t active = queue_in->count;
-        queue_out->resizeToFit(active * subtile_renderer->subtilesPerTile());
+
+        subtile_renderer->subtiles.resizeToFit(
+                active * subtile_renderer->subtilesPerTile());
+
         for (unsigned i=0; i < active; i += stride) {
             SubtileRenderer_check<<<
                 LIBFIVE_CUDA_SUBTILE_BLOCKS,
@@ -1122,12 +1144,19 @@ void Renderable3D::run(const View& view)
     {   // Refine ambiguous tiles from their subtapes
         const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                 LIBFIVE_CUDA_REFINE_TILES;
+
         auto queue_in  = &this->queue_pong;
-        auto queue_out = &this->queue_ping;
+        const uint32_t active = queue_in->count;
+
         auto filled_in  = &this->filled_subtiles;
         auto filled_out = &this->filled_microtiles;
-        const uint32_t active = queue_in->count;
+
+        auto queue_out = &this->queue_ping;
         queue_out->resizeToFit(active * microtile_renderer->subtilesPerTile());
+
+        microtile_renderer->subtiles.resizeToFit(
+                active * microtile_renderer->subtilesPerTile());
+
         for (unsigned i=0; i < active; i += stride) {
             SubtileRenderer_check<<<
                 LIBFIVE_CUDA_SUBTILE_BLOCKS,
@@ -1147,9 +1176,12 @@ void Renderable3D::run(const View& view)
     {   // Do pixel-by-pixel rendering for active subtiles
         const uint32_t stride = LIBFIVE_CUDA_RENDER_BLOCKS *
                                 LIBFIVE_CUDA_RENDER_SUBTILES;
+
         auto queue_in  = &this->queue_ping;
-        auto filled_in = &this->filled_microtiles;
         const uint32_t active = queue_in->count;
+
+        auto filled_in = &this->filled_microtiles;
+
         for (unsigned i=0; i < active; i += stride) {
             PixelRenderer_draw<<<
                 LIBFIVE_CUDA_RENDER_BLOCKS,
@@ -1208,10 +1240,18 @@ void Renderable2D::run(const View& view)
     {   // Do per-tile evaluation to get filled / ambiguous tiles
         const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
                                 LIBFIVE_CUDA_TILE_BLOCKS;
-        const uint32_t total_tiles = tile_renderer->tiles.total;
+
+        const uint32_t total_tiles = pow(
+                image.size_px / tile_renderer->tiles.sizePx(),
+                tile_renderer->tiles.dimension());
+        tile_renderer->tiles.resizeToFit(total_tiles);
+        tile_renderer->tiles.setDefaultPositions();
+
         auto queue_out = &this->queue_ping;
         queue_out->resizeToFit(total_tiles);
+
         auto filled_out = &this->filled_tiles;
+
         for (unsigned i=0; i < total_tiles; i += stride) {
             TileRenderer_check<<<
                 LIBFIVE_CUDA_TILE_BLOCKS,
@@ -1226,12 +1266,19 @@ void Renderable2D::run(const View& view)
     {   // Refine ambiguous tiles from their subtapes
         const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
                                 LIBFIVE_CUDA_REFINE_TILES;
+
         auto queue_in  = &this->queue_ping;
+        const uint32_t active = queue_in->count;
+
         auto queue_out = &this->queue_pong;
+        queue_out->resizeToFit(active * subtile_renderer->subtilesPerTile());
+
         auto filled_in  = &this->filled_tiles;
         auto filled_out = &this->filled_subtiles;
-        const uint32_t active = queue_in->count;
-        queue_out->resizeToFit(active * subtile_renderer->subtilesPerTile());
+
+        subtile_renderer->subtiles.resizeToFit(
+                active * subtile_renderer->subtilesPerTile());
+
         for (unsigned i=0; i < active; i += stride) {
             SubtileRenderer_check<<<
                 LIBFIVE_CUDA_SUBTILE_BLOCKS,
