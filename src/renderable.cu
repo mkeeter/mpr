@@ -599,16 +599,16 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     float regs[128];
 
     // Convert from tile position to pixels
-    const uint3 p = subtiles.lowerCornerVoxel(subtile);
+    const uint3 q = subtiles.lowerCornerVoxel(subtile);
+    const uint3 p = make_uint3(d.x + q.x, d.y + q.y, d.z + q.z);
 
     // Skip this pixel if it's already below the image
-    if (DIMENSION == 3 && image(p.x + d.x, p.y + d.y) >= p.z + d.z) {
+    if (DIMENSION == 3 && image(p.x, p.y) >= p.z) {
         return;
     }
 
     {   // Prepopulate axis values
-        float3 f = image.voxelPos(make_uint3(
-                    p.x + d.x, p.y + d.y, p.z + d.z));
+        float3 f = image.voxelPos(p);
         if (tape.axes.reg[0] != UINT16_MAX) {
             regs[tape.axes.reg[0]] = f.x * v.scale - v.center[0];
         }
@@ -640,9 +640,9 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             } else {
                 if (regs[tape[s - 1].out] < 0.0f) {
                     if (DIMENSION == 2) {
-                        image(p.x + d.x, p.y + d.y) = 255;
+                        image(p.x, p.y) = 255;
                     } else {
-                        atomicMax(&image(p.x + d.x, p.y + d.y), p.z + d.z);
+                        atomicMax(&image(p.x, p.y), p.z);
                     }
                 }
                 return;
