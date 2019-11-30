@@ -867,12 +867,49 @@ uint32_t Renderable3D::drawNormals(const float3 f,
 __device__
 uint32_t Renderable3D::subtapeHeadAt(const uint3 v) const
 {
-    const auto s = tile_renderer.tiles.sizePx();
-    const uint32_t t = v.x / s +
-                       (v.y / s) * tile_renderer.tiles.per_side +
-                       (v.z / s) * tile_renderer.tiles.per_side * tile_renderer.tiles.per_side;
-    if (auto h = tile_renderer.tiles.head(t)) {
-        return h;
+    constexpr auto size = decltype(tile_renderer.tiles)::sizePx();
+    const uint32_t tx = v.x / size;
+    const uint32_t ty = v.y / size;
+    const uint32_t tz = v.z / size;
+
+    const uint32_t tile = tx
+        + ty * tile_renderer.tiles.per_side
+        + tz * pow(tile_renderer.tiles.per_side, 2);
+    if (auto h = tile_renderer.tiles.head(tile)) {
+        // Map the subtile within the tile
+        constexpr auto subsize = decltype(subtile_renderer.subtiles)::sizePx();
+        uint32_t sx = (v.x - tx * size) / subsize;
+        uint32_t sy = (v.y - ty * size) / subsize;
+        uint32_t sz = (v.z - tz * size) / subsize;
+
+        const uint32_t index = tile_renderer.tiles.index(tile);
+        const uint32_t subtile = index * subtile_renderer.subtilesPerTile()
+            + sx
+            + sy * subtile_renderer.subtilesPerTileSide()
+            + sz * pow(subtile_renderer.subtilesPerTileSide(), 2);
+
+        if (auto sub_h = subtile_renderer.subtiles.head(subtile)) {
+            // Map the microtile within the subtile
+            constexpr auto microsize = decltype(microtile_renderer.subtiles)::sizePx();
+            uint32_t mx = (v.x - tx * size - sx * subsize) / microsize;
+            uint32_t my = (v.y - ty * size - sy * subsize) / microsize;
+            uint32_t mz = (v.z - tz * size - sz * subsize) / microsize;
+
+            const uint32_t index = subtile_renderer.subtiles.index(subtile);
+            const uint32_t microtile =
+                index * microtile_renderer.subtilesPerTile()
+                + mx
+                + my * microtile_renderer.subtilesPerTileSide()
+                + mz * pow(microtile_renderer.subtilesPerTileSide(), 2);
+
+            if (auto micro_h = microtile_renderer.subtiles.head(microtile)) {
+                return micro_h;
+            } else {
+                return sub_h;
+            }
+        } else {
+            return h;
+        }
     }
     return 0;
 }
@@ -1105,8 +1142,8 @@ void Renderable3D::run(const View& view)
                                 LIBFIVE_CUDA_TILE_BLOCKS;
 
         const uint32_t total_tiles = pow(
-                image.size_px / tile_renderer->tiles.sizePx(),
-                tile_renderer->tiles.dimension());
+                image.size_px / decltype(tile_renderer->tiles)::sizePx(),
+                decltype(tile_renderer->tiles)::dimension());
         tile_renderer->tiles.resizeToFit(total_tiles);
         tile_renderer->tiles.setDefaultPositions();
 
@@ -1258,8 +1295,8 @@ void Renderable2D::run(const View& view)
                                 LIBFIVE_CUDA_TILE_BLOCKS;
 
         const uint32_t total_tiles = pow(
-                image.size_px / tile_renderer->tiles.sizePx(),
-                tile_renderer->tiles.dimension());
+                image.size_px / decltype(tile_renderer->tiles)::sizePx(),
+                decltype(tile_renderer->tiles)::dimension());
         tile_renderer->tiles.resizeToFit(total_tiles);
         tile_renderer->tiles.setDefaultPositions();
 
