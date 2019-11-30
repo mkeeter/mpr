@@ -290,9 +290,14 @@ __global__ void TileRenderer_check(
         !filled_tiles->isMasked(tile))
     {
         switch (r->check(tile, v)) {
-            case TILE_FILLED:       filled_tiles->insert(tile); break;
-            case TILE_AMBIGUOUS:    active_tiles->insert(tile); break;
-            case TILE_EMPTY:        break;
+            case TILE_FILLED:
+                filled_tiles->insert(tile);
+                break;
+            case TILE_AMBIGUOUS:
+                r->tiles.index(tile) = active_tiles->insert(tile);
+                break;
+            case TILE_EMPTY:
+                break;
         }
     }
 }
@@ -532,9 +537,14 @@ void SubtileRenderer_check(
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
+    constexpr uint32_t subtiles_per_tile =
+        std::remove_pointer<decltype(r)>::type::subtilesPerTile();
+    constexpr uint32_t subtiles_per_tile_side =
+        std::remove_pointer<decltype(r)>::type::subtilesPerTileSide();
+
     // Pick an active tile from the list.  Each block executes multiple tiles!
-    const uint32_t stride = blockDim.x / r->subtilesPerTile();
-    const uint32_t sub = threadIdx.x / r->subtilesPerTile();
+    const uint32_t stride = blockDim.x / subtiles_per_tile;
+    const uint32_t sub = threadIdx.x / subtiles_per_tile;
     const uint32_t i = offset + blockIdx.x * stride + sub;
 
     if (i < active_tiles->count) {
@@ -547,11 +557,11 @@ void SubtileRenderer_check(
         const uint3 p = r->tiles.lowerCornerVoxel(tile);
 
         // Calculate the subtile's offset within the tile
-        const uint32_t q = threadIdx.x % r->subtilesPerTile();
+        const uint32_t q = threadIdx.x % subtiles_per_tile;
         const uint3 d = make_uint3(
-             q % r->subtilesPerTileSide(),
-             (q / r->subtilesPerTileSide()) % r->subtilesPerTileSide(),
-             (q / r->subtilesPerTileSide()) / r->subtilesPerTileSide());
+                q % subtiles_per_tile_side,
+                (q / subtiles_per_tile_side) % subtiles_per_tile_side,
+                (q / subtiles_per_tile_side) / subtiles_per_tile_side);
 
         const uint32_t tx = p.x / SUBTILE_SIZE_PX + d.x;
         const uint32_t ty = p.y / SUBTILE_SIZE_PX + d.y;
@@ -562,11 +572,12 @@ void SubtileRenderer_check(
 
         // This is the subtile index, which isn't the same as its
         // absolute position
-        const uint32_t subtile = i * r->subtilesPerTile() + q;
+        const uint32_t subtile = i * subtiles_per_tile + q;
 
         // Absolute position of the subtile
-        const uint32_t pos = tx + ty * r->subtiles.per_side
-             + tz * r->subtiles.per_side * r->subtiles.per_side;
+        const uint32_t subtiles_per_side = r->subtiles.per_side;
+        const uint32_t pos = tx + ty * subtiles_per_side
+             + tz * subtiles_per_side * subtiles_per_side;
 
         // Record the absolute position of the tile
         r->subtiles.pos(subtile) = pos;
@@ -575,9 +586,14 @@ void SubtileRenderer_check(
             !filled_subtiles->isMasked(pos))
         {
             switch (r->check(subtile, tile, v)) {
-                case TILE_FILLED:       filled_subtiles->insert(pos); break;
-                case TILE_AMBIGUOUS:    active_subtiles->insert(subtile); break;
-                case TILE_EMPTY:        break;
+                case TILE_FILLED:
+                    filled_subtiles->insert(pos);
+                    break;
+                case TILE_AMBIGUOUS:
+                    r->subtiles.index(subtile) = active_subtiles->insert(subtile);
+                    break;
+                case TILE_EMPTY:
+                    break;
             }
         }
     }

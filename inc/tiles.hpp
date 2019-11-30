@@ -7,7 +7,8 @@ static constexpr unsigned __host__ __device__ pow(unsigned p, unsigned n)
 
 struct Tile {
     uint32_t head;
-    uint32_t pos; // absolute position
+    uint32_t pos;   // absolute position
+    uint32_t index; // index of this tile in the active list
 };
 
 template <unsigned TILE_SIZE_PX, unsigned DIMENSION>
@@ -99,6 +100,13 @@ struct Tiles {
     }
     __host__ __device__ inline uint32_t pos(uint32_t t) const {
         return data[t].pos;
+    }
+
+    __host__ __device__ inline uint32_t& index(uint32_t t) {
+        return data[t].index;
+    }
+    __host__ __device__ inline uint32_t index(uint32_t t) const {
+        return data[t].index;
     }
 
     void reset() {

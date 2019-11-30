@@ -19,8 +19,10 @@ struct Queue {
 
 #ifdef __CUDACC__
     __device__
-    void insert(uint32_t t) {
-        data[atomicAdd(&count, 1)] = t;
+    uint32_t insert(uint32_t t) {
+        const uint32_t out = atomicAdd(&count, 1);
+        data[out] = t;
+        return out;
     }
 #endif
 
