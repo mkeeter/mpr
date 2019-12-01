@@ -495,6 +495,16 @@ int main(int argc, char** argv)
                                                s.second.dimension);
                     s.second.handle = std::move(h);
                 }
+                if (ImGui::Button("Save shape.frep")) {
+                    auto a = libfive::Archive();
+                    a.addShape(s.second.tree);
+                    std::ofstream out("shape.frep");
+                    if (out.is_open()) {
+                        a.serialize(out);
+                    } else {
+                        std::cerr << "Could not open shape.frep\n";
+                    }
+                }
 
                 ImGui::Separator();
 
