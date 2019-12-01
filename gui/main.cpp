@@ -205,9 +205,6 @@ eval-sandboxed
 struct Shape {
     Renderable::Handle handle;
     libfive::Tree tree;
-    int size;
-    int dimension;
-    int mode;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -306,6 +303,10 @@ int main(int argc, char** argv)
     bool just_saved = false;
 
     // Main loop
+    int render_size = 1024;
+    int render_dimension = 2;
+    int render_mode = 0;
+
     while (!glfwWindowShouldClose(window))
     {
         // Poll and handle events (inputs, window resize, etc.)
@@ -401,15 +402,11 @@ int main(int argc, char** argv)
                 // Create new shapes from the script
                 for (auto& t : interpreter.shapes) {
                     if (shapes.find(t.first) == shapes.end()) {
-                        const uint32_t default_size = 1024;
-                        const uint32_t default_dim = 2;
-                        const uint32_t default_mode = 0;
                         Shape s = { Renderable::build(
-                                        t.second, default_size, default_dim),
-                                    t.second,
-                                    default_size,
-                                    default_dim,
-                                    default_mode};
+                                        t.second,
+                                        render_size,
+                                        render_dimension),
+                                    t.second };
                         shapes.emplace(t.first, std::move(s));
                     }
                 }
@@ -431,6 +428,27 @@ int main(int argc, char** argv)
                 ImGui::Text("%s", interpreter.result_str.c_str());
             } else {
                 ImGui::Text("%s", interpreter.result_err_str.c_str());
+            }
+        ImGui::End();
+
+        ImGui::Begin("Settings");
+            ImGui::Text("Render size:");
+            ImGui::RadioButton("512", &render_size, 512);
+            ImGui::SameLine();
+            ImGui::RadioButton("1024", &render_size, 1024);
+            ImGui::SameLine();
+            ImGui::RadioButton("2048", &render_size, 2048);
+
+            ImGui::Text("Dimension:");
+            ImGui::RadioButton("2D", &render_dimension, 2);
+            ImGui::SameLine();
+            ImGui::RadioButton("3D", &render_dimension, 3);
+
+            if (render_dimension == 3) {
+                ImGui::Text("Render mode:");
+                ImGui::RadioButton("Heightmap", &render_mode, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("Normals", &render_mode, 1);
             }
         ImGui::End();
 
@@ -463,36 +481,19 @@ int main(int argc, char** argv)
 
                     start = high_resolution_clock::now();
                         s.second.handle->copyToTexture(cuda_tex, TEXTURE_SIZE,
-                                                       append, s.second.mode);
+                                                       append, render_mode);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Texture load time: %f s", dt.count() / 1e6);
                 }
 
-                ImGui::Text("Render size:");
-                ImGui::RadioButton("512", &s.second.size, 512);
-                ImGui::SameLine();
-                ImGui::RadioButton("1024", &s.second.size, 1024);
-                ImGui::SameLine();
-                ImGui::RadioButton("2048", &s.second.size, 2048);
-
-                ImGui::Text("Dimension:");
-                ImGui::RadioButton("2D", &s.second.dimension, 2);
-                ImGui::SameLine();
-                ImGui::RadioButton("3D", &s.second.dimension, 3);
-
-                if (s.second.dimension == 3) {
-                    ImGui::Text("Render mode:");
-                    ImGui::RadioButton("Heightmap", &s.second.mode, 0);
-                    ImGui::SameLine();
-                    ImGui::RadioButton("Normals", &s.second.mode, 1);
-                }
-
-                if (s.second.size != (int)s.second.handle->image.size_px ||
-                    s.second.dimension != (int)s.second.handle->dimension())
+                if (render_size != (int)s.second.handle->image.size_px ||
+                    render_dimension != (int)s.second.handle->dimension())
                 {
-                    auto h = Renderable::build(s.second.tree, s.second.size,
-                                               s.second.dimension);
+                    s.second.handle.reset();
+                    auto h = Renderable::build(s.second.tree,
+                                               render_size,
+                                               render_dimension);
                     s.second.handle = std::move(h);
                 }
                 if (ImGui::Button("Save shape.frep")) {
