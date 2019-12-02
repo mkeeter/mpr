@@ -454,9 +454,13 @@ int main(int argc, char** argv)
 
         // Draw the shapes, and add them to the draw list
         auto background = ImGui::GetBackgroundDrawList();
+
         ImGui::Begin("Shapes");
             const float max_pixels = fmax(io.DisplaySize.x, io.DisplaySize.y);
-            const float render_scale = max_pixels / scale / 2.0f;
+
+            Eigen::Affine3f t = Eigen::Affine3f::Identity();
+            t.translate(Eigen::Vector3f(-center.x, center.y, 0.0f));
+            t.scale(max_pixels / scale / 2.0f);
 
             const float cx = center.x * scale + io.DisplaySize.x / 2.0f;
             const float cy = center.y * scale + io.DisplaySize.y / 2.0f;
@@ -474,7 +478,7 @@ int main(int argc, char** argv)
                 {   // Timed rendering pass
                     using namespace std::chrono;
                     auto start = high_resolution_clock::now();
-                        s.second.handle->run({{center.x, -center.y}, render_scale});
+                        s.second.handle->run({t.matrix()});
                     auto end = high_resolution_clock::now();
                     auto dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);

@@ -17,15 +17,21 @@ __device__ void storeAxes(const uint32_t tile,
     Interval Z(lower.z, upper.z);
 
     if (tape.axes.reg[0] != UINT16_MAX) {
-        regs[tape.axes.reg[0]] = X * v.scale - v.center[0];
+        regs[tape.axes.reg[0]] = v.mat(0, 0) * X +
+                                 v.mat(0, 1) * Y +
+                                 v.mat(0, 2) * Z + v.mat(0, 3);
     }
     if (tape.axes.reg[1] != UINT16_MAX) {
-        regs[tape.axes.reg[1]] = Y * v.scale - v.center[1];
+        regs[tape.axes.reg[1]] = v.mat(1, 0) * X +
+                                 v.mat(1, 1) * Y +
+                                 v.mat(1, 2) * Z + v.mat(1, 3);
     }
     if (tape.axes.reg[2] != UINT16_MAX) {
         regs[tape.axes.reg[2]] = (D == 3)
-            ? (Z * v.scale - v.center[2])
-            : Interval{v.center[2], v.center[2]};
+            ? (v.mat(2, 0) * X +
+               v.mat(2, 1) * Y +
+               v.mat(2, 2) * Z + v.mat(2, 3))
+            : Interval{v.mat(2,3), v.mat(2,3)};
     }
 }
 
@@ -633,16 +639,18 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
 
     {   // Prepopulate axis values
         float3 f = image.voxelPos(p);
+        Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
+        pos = v.mat * pos;
         if (tape.axes.reg[0] != UINT16_MAX) {
-            regs[tape.axes.reg[0]] = f.x * v.scale - v.center[0];
+            regs[tape.axes.reg[0]] = pos.x();
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
-            regs[tape.axes.reg[1]] = f.y * v.scale - v.center[1];
+            regs[tape.axes.reg[1]] = pos.y();
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
             regs[tape.axes.reg[2]] = (DIMENSION == 3)
-                ? (f.z * v.scale)
-                : v.center[2];
+                ? pos.z()
+                : v.mat(2,3);
         }
     }
 
@@ -756,17 +764,16 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
     Deriv regs[128];
 
     {   // Prepopulate axis values
+        Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
+        pos = v.mat * pos;
         if (tape.axes.reg[0] != UINT16_MAX) {
-            const float x = f.x * v.scale - v.center[0];
-            regs[tape.axes.reg[0]] = Deriv(x, 1.0f, 0.0f, 0.0f);
+            regs[tape.axes.reg[0]] = Deriv(pos.x(), 1.0f, 0.0f, 0.0f);
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
-            const float y = f.y * v.scale - v.center[1];
-            regs[tape.axes.reg[1]] = Deriv(y, 0.0f, 1.0f, 0.0f);
+            regs[tape.axes.reg[1]] = Deriv(pos.y(), 0.0f, 1.0f, 0.0f);
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
-            const float z = (f.z * v.scale);
-            regs[tape.axes.reg[2]] = Deriv(z, 0.0f, 0.0f, 1.0f);
+            regs[tape.axes.reg[2]] = Deriv(pos.z(), 0.0f, 0.0f, 1.0f);
         }
     }
 

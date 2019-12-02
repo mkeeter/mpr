@@ -1,4 +1,5 @@
+#include <Eigen/Eigen>
+
 struct View {
-    float center[3];
-    float scale;
+    Eigen::Matrix4f mat;
 };
