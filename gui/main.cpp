@@ -282,6 +282,8 @@ int main(int argc, char** argv)
     // View matrix, as it were
     Eigen::Vector3f view_center{0.f, 0.0f, 0.0f};
     float view_scale = 2.0f;
+    float view_pitch = 0.0f;
+    float view_yaw = 0.0f;
 
     // Function to pack view_center and view_scale into the matrix
     Eigen::Affine3f model;
@@ -290,6 +292,8 @@ int main(int argc, char** argv)
         model = Eigen::Affine3f::Identity();
         model.translate(view_center);
         model.scale(view_scale);
+        model.rotate(Eigen::AngleAxisf(view_yaw, Eigen::Vector3f::UnitZ()));
+        model.rotate(Eigen::AngleAxisf(view_pitch, Eigen::Vector3f::UnitX()));
 
         view = Eigen::Affine3f::Identity();
         auto s = 2.0f / fmax(io.DisplaySize.x, io.DisplaySize.y);
@@ -345,13 +349,24 @@ int main(int argc, char** argv)
             const Eigen::Vector3f mouse = Eigen::Vector3f{
                 io.MousePos.x, io.MousePos.y, 0.0f};
 
-            if (ImGui::IsMouseDragging()) {
-                const auto d = ImGui::GetMouseDragDelta();
+            if (ImGui::IsMouseDragging(0)) {
+                const auto d = ImGui::GetMouseDragDelta(0);
                 const Eigen::Vector3f drag(d.x, d.y, 0.0f);
                 view_center += (model * view * (mouse - drag)) -
                                (model * view * mouse);
                 update_mats();
-                ImGui::ResetMouseDragDelta();
+                ImGui::ResetMouseDragDelta(0);
+            }
+
+            if (ImGui::IsMouseDragging(1)) {
+                const auto d = ImGui::GetMouseDragDelta(1);
+                view_yaw   -= d.x / 100.0f;
+                view_pitch -= d.y / 100.0f;
+                view_pitch = fmax(-M_PI / 2, view_pitch);
+                view_pitch = fmin( M_PI / 2, view_pitch);
+                view_yaw = fmod(view_yaw, 2 * M_PI);
+                update_mats();
+                ImGui::ResetMouseDragDelta(1);
             }
 
             // Handle scrolling
