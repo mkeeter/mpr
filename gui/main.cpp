@@ -280,8 +280,23 @@ int main(int argc, char** argv)
     ImVec4 clear_color = ImVec4(0.0f, 0.0f, 0.0f, 1.00f);
 
     // View matrix, as it were
-    ImVec2 center = ImVec2(0.0f, 0.0f);
-    float scale = 100.0f; // scale = pixels per model units
+    Eigen::Vector3f view_center{0.f, 0.0f, 0.0f};
+    float view_scale = 2.0f;
+
+    // Function to pack view_center and view_scale into the matrix
+    Eigen::Affine3f model;
+    Eigen::Affine3f view;
+    auto update_mats = [&]() {
+        model = Eigen::Affine3f::Identity();
+        model.translate(view_center);
+        model.scale(view_scale);
+
+        view = Eigen::Affine3f::Identity();
+        auto s = 2.0f / fmax(io.DisplaySize.x, io.DisplaySize.y);
+        view.scale(Eigen::Vector3f{s, -s, 1.0f});
+        view.translate(Eigen::Vector3f{-io.DisplaySize.x / 2.0f, -io.DisplaySize.y / 2.0f, 0.0f});
+    };
+    update_mats();
 
     std::map<libfive::Tree::Id, Shape> shapes;
 
@@ -321,12 +336,21 @@ int main(int argc, char** argv)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        // Rebuild the transform matrix, in case the window size has changed
+        update_mats();
+
         // Handle panning
         if (!io.WantCaptureMouse) {
+            // Start position in world coordinates
+            const Eigen::Vector3f mouse = Eigen::Vector3f{
+                io.MousePos.x, io.MousePos.y, 0.0f};
+
             if (ImGui::IsMouseDragging()) {
-                const auto drag = ImGui::GetMouseDragDelta();
-                center.x += drag.x / scale;
-                center.y += drag.y / scale;
+                const auto d = ImGui::GetMouseDragDelta();
+                const Eigen::Vector3f drag(d.x, d.y, 0.0f);
+                view_center += (model * view * (mouse - drag)) -
+                               (model * view * mouse);
+                update_mats();
                 ImGui::ResetMouseDragDelta();
             }
 
@@ -337,19 +361,17 @@ int main(int argc, char** argv)
                 io.MouseWheel = 0.0f;
 
                 // Start position in world coordinates
-                auto mouse = io.MousePos;
-                const auto sx = (mouse.x - io.DisplaySize.x / 2.0f) / scale;
-                const auto sy = (mouse.y - io.DisplaySize.y / 2.0f) / scale;
+                const Eigen::Vector3f start = (model * view * mouse);
 
-                scale *= powf(1.01f, scroll);
+                // Update matrix
+                view_scale *= powf(1.01f, scroll);
+                update_mats();
 
-                // End position in world coordinates
-                const auto ex = (mouse.x - io.DisplaySize.x / 2.0f) / scale;
-                const auto ey = (mouse.y - io.DisplaySize.y / 2.0f) / scale;
+                const Eigen::Vector3f end = (model * view * mouse);
 
                 // Shift so that world position is constant
-                center.x += (ex - sx);
-                center.y += (ey - sy);
+                view_center -= (end - start);
+                update_mats();
             }
         }
 
@@ -456,15 +478,8 @@ int main(int argc, char** argv)
         auto background = ImGui::GetBackgroundDrawList();
 
         ImGui::Begin("Shapes");
-            const float max_pixels = fmax(io.DisplaySize.x, io.DisplaySize.y);
-
-            Eigen::Affine3f t = Eigen::Affine3f::Identity();
-            t.translate(Eigen::Vector3f(-center.x, center.y, 0.0f));
-            t.scale(max_pixels / scale / 2.0f);
-
-            const float cx = center.x * scale + io.DisplaySize.x / 2.0f;
-            const float cy = center.y * scale + io.DisplaySize.y / 2.0f;
             bool append = false;
+
             for (auto& s : shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
                 ImGui::Columns(2);
@@ -478,7 +493,7 @@ int main(int argc, char** argv)
                 {   // Timed rendering pass
                     using namespace std::chrono;
                     auto start = high_resolution_clock::now();
-                        s.second.handle->run({t.matrix()});
+                        s.second.handle->run({model.matrix()});
                     auto end = high_resolution_clock::now();
                     auto dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
@@ -513,20 +528,36 @@ int main(int argc, char** argv)
 
                 ImGui::Separator();
 
-                background->AddImage((void*)(intptr_t)gl_tex,
-                        {io.DisplaySize.x / 2.0f - max_pixels / 2.0f,
-                         io.DisplaySize.y / 2.0f - max_pixels / 2.0f},
-                        {io.DisplaySize.x / 2.0f + max_pixels / 2.0f,
-                         io.DisplaySize.y / 2.0f + max_pixels / 2.0f});
-
                 // Later render passes will only append to the texture,
                 // instead of writing both filled and empty pixels.
                 append = true;
             }
 
-        // Draw XY axes based on current position
-        background->AddLine({cx, cy}, {cx + scale, cy}, 0xFF0000FF);
-        background->AddLine({cx, cy}, {cx, cy - scale}, 0xFF00FF00);
+            const float max_pixels = fmax(io.DisplaySize.x, io.DisplaySize.y);
+            background->AddImage((void*)(intptr_t)gl_tex,
+                    {io.DisplaySize.x / 2.0f - max_pixels / 2.0f,
+                     io.DisplaySize.y / 2.0f - max_pixels / 2.0f},
+                    {io.DisplaySize.x / 2.0f + max_pixels / 2.0f,
+                     io.DisplaySize.y / 2.0f + max_pixels / 2.0f});
+
+
+            // Draw XY axes based on current position
+            {
+                Eigen::Vector3f center = Eigen::Vector3f::Zero();
+                Eigen::Vector3f ax = Eigen::Vector3f{1.0f, 0.0f, 0.0f};
+                Eigen::Vector3f ay = Eigen::Vector3f{0.0f, 1.0f, 0.0f};
+                Eigen::Vector3f az = Eigen::Vector3f{0.0f, 0.0f, 1.0f};
+
+                for (auto pt : {&center, &ax, &ay, &az}) {
+                    *pt = (model * view).inverse() * (*pt);
+                }
+                background->AddLine({center.x(), center.y()},
+                                    {ax.x(), ax.y()}, 0xFF0000FF);
+                background->AddLine({center.x(), center.y()},
+                                    {ay.x(), ay.y()}, 0xFF00FF00);
+                background->AddLine({center.x(), center.y()},
+                                    {az.x(), az.y()}, 0xFFFF0000);
+            }
 
         ImGui::End();
 
