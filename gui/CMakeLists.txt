@@ -1,5 +1,6 @@
 add_executable(demo MACOSX_BUNDLE
     main.cpp
+    interpreter.cpp
 
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
