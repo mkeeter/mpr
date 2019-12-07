@@ -12,3 +12,5 @@ endmacro()
 
 benchmark(render_2d)
 benchmark(render_3d)
+benchmark(circle)
+benchmark(donut)

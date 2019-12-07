@@ -26,11 +26,11 @@ struct Filled
     //
     // This ignores Z coordinates, because filled tiles occlude
     // anything behind them, so only the highest Z value matters.
-    __device__ uint32_t& filled(uint32_t t) {
+    __host__ __device__ uint32_t& filled(uint32_t t) {
         uint3 i = unpack(t);
         return data[i.x + i.y * per_side];
     }
-    __device__ uint32_t filled(uint32_t t) const {
+    __host__ __device__ uint32_t filled(uint32_t t) const {
         uint3 i = unpack(t);
         return data[i.x + i.y * per_side];
     }

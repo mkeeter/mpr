@@ -470,6 +470,8 @@ int main(int argc, char** argv)
 
         ImGui::Begin("Settings");
             ImGui::Text("Render size:");
+            ImGui::RadioButton("256", &render_size, 256);
+            ImGui::SameLine();
             ImGui::RadioButton("512", &render_size, 512);
             ImGui::SameLine();
             ImGui::RadioButton("1024", &render_size, 1024);
