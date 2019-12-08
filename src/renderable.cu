@@ -747,6 +747,93 @@ __global__ void PixelRenderer_draw(
     }
 }
 
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+__device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::drawBrute(
+        const uint2 p, const View& v)
+{
+    float regs[128];
+
+    {   // Prepopulate axis values
+        float3 f = image.voxelPos(make_uint3(p.x, p.y, 0));
+        Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
+        pos = v.mat * pos;
+        if (tape.axes.reg[0] != UINT16_MAX) {
+            regs[tape.axes.reg[0]] = pos.x();
+        }
+        if (tape.axes.reg[1] != UINT16_MAX) {
+            regs[tape.axes.reg[1]] = pos.y();
+        }
+        if (tape.axes.reg[2] != UINT16_MAX) {
+            regs[tape.axes.reg[2]] = (DIMENSION == 3)
+                ? pos.z()
+                : v.mat(2,3);
+        }
+    }
+
+    const Clause* __restrict__ clause_ptr = &tape[0];
+    const float* __restrict__ constant_ptr = &tape.constant(0);
+    const auto num_clauses = tape.num_clauses;
+
+    for (uint32_t i=0; i < num_clauses; ++i) {
+        using namespace libfive::Opcode;
+        const Clause c = clause_ptr[i];
+
+        // All clauses must have at least one argument, since constants
+        // and VAR_X/Y/Z are handled separately.
+        float lhs;
+        if (c.banks & 1) {
+            lhs = constant_ptr[c.lhs];
+        } else {
+            lhs = regs[c.lhs];
+        }
+
+        float rhs;
+        if (c.banks & 2) {
+            rhs = constant_ptr[c.rhs];
+        } else if (c.opcode >= OP_ADD) {
+            rhs = regs[c.rhs];
+        }
+
+        float out;
+        switch (c.opcode) {
+            case OP_SQUARE: out = lhs * lhs; break;
+            case OP_SQRT: out = sqrtf(lhs); break;
+            case OP_NEG: out = -lhs; break;
+            // Skipping transcendental functions for now
+
+            case OP_ADD: out = lhs + rhs; break;
+            case OP_MUL: out = lhs * rhs; break;
+            case OP_DIV: out = lhs / rhs; break;
+            case OP_MIN: out = fminf(lhs, rhs); break;
+            case OP_MAX: out = fmaxf(lhs, rhs); break;
+            case OP_SUB: out = lhs - rhs; break;
+
+            // Skipping various hard functions here
+            default: break;
+        }
+        regs[c.out] = out;
+    }
+
+    const Clause c = clause_ptr[num_clauses - 1];
+    const float result = regs[c.out];
+    if (result < 0.0f) {
+        image(p.x, p.y) = 255;
+    }
+}
+
+template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
+__global__ void PixelRenderer_drawBrute(
+        PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>* r,
+        View v)
+{
+    uint32_t px = threadIdx.x + blockIdx.x * blockDim.x;
+    uint32_t py = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (px < r->image.size_px && py < r->image.size_px) {
+        r->drawBrute(make_uint2(px, py), v);
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 NormalRenderer::NormalRenderer(const Tape& tape,
@@ -1375,6 +1462,17 @@ void Renderable2D::run(const View& view)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     Renderable2D_copyDepthToImage<<<dim3(256, 256), dim3(16, 16)>>>(this);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void Renderable2D::runBrute(const View& view)
+{
+    // Reset everything in preparation for a render
+    image.reset();
+
+    PixelRenderer_drawBrute<<<dim3(256, 256), dim3(16, 16)>>>(
+            &this->pixel_renderer, view);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }

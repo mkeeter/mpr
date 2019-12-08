@@ -98,6 +98,7 @@ public:
 
     // Draws the given tile, starting from the given subtape
     __device__ void draw(const uint32_t subtile, const View& v);
+    __device__ void drawBrute(const uint2 pixel, const View& v);
 
     const Tape& tape;
     Image& image;
@@ -234,6 +235,7 @@ protected:
 class Renderable2D : public Renderable {
 public:
     void run(const View& v) override;
+    void runBrute(const View& v);
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
                        bool append, bool mode) override;

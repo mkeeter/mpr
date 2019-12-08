@@ -10,7 +10,7 @@ add_definitions(-DLIBFIVE_PACKED_OPCODES)
 # Compile the core libfive libraries
 add_subdirectory(libfive)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -g -fPIC -pedantic -Werror=switch -march=native")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wall -Wextra -g -fPIC -pedantic -Werror=switch -march=native")
 
 add_subdirectory(src)
 add_subdirectory(gui)
