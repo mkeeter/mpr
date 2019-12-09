@@ -1483,7 +1483,8 @@ void Renderable2D::runBrute(const View& view)
     // Reset everything in preparation for a render
     image.reset();
 
-    PixelRenderer_drawBrute<<<dim3(256, 256), dim3(16, 16)>>>(
+    const unsigned bs = (image.size_px + 15) / 16;
+    PixelRenderer_drawBrute<<<dim3(bs, bs), dim3(16, 16)>>>(
             &this->pixel_renderer, view);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -1494,7 +1495,8 @@ void Renderable2D::runBruteKernel(const View& v)
     // Reset everything in preparation for a render
     image.reset();
 
-    evalRawTape<<<dim3(256, 256), dim3(16, 16)>>>(&this->image, v);
+    const unsigned bs = (image.size_px + 15) / 16;
+    evalRawTape<<<dim3(bs, bs), dim3(16, 16)>>>(&this->image, v);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
