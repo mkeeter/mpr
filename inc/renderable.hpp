@@ -236,6 +236,7 @@ class Renderable2D : public Renderable {
 public:
     void run(const View& v) override;
     void runBrute(const View& v);
+    void runBruteKernel(const View& v);
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
                        bool append, bool mode) override;

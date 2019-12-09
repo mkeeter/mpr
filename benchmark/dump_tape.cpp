@@ -31,7 +31,31 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
 
-    for (auto& o : t.orderedDfs()) {
+    std::cout << R"(__global__ void evalRawTape(Image* image, View v)
+{
+
+    uint32_t px = threadIdx.x + blockIdx.x * blockDim.x;
+    uint32_t py = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (px >= image->size_px && py >= image->size_px) {
+        return;
+    }
+
+    const float3 f = image->voxelPos(make_uint3(px, py, 0));
+    const float x = v.mat(0, 0) * f.x +
+                    v.mat(0, 1) * f.y +
+                    v.mat(0, 2) * f.z + v.mat(0, 3);
+    const float y = v.mat(1, 0) * f.x +
+                    v.mat(1, 1) * f.y +
+                    v.mat(1, 2) * f.z + v.mat(1, 3);
+    const float z = v.mat(2, 0) * f.x +
+                    v.mat(2, 1) * f.y +
+                    v.mat(2, 2) * f.z + v.mat(2, 3);
+
+)";
+
+    const auto ordered = t.orderedDfs();
+    for (auto& o : ordered) {
         using namespace libfive::Opcode;
 
         switch (o->op) {
@@ -135,4 +159,10 @@ int main(int argc, char **argv)
         }
         std::cout << ";\n";
     }
+
+    std::cout << "    if (v" << (unsigned long)ordered.rbegin()->id() << R"( < 0.0f) {
+        (*image)(px, py) = 255;
+    }
+}
+)";
 }

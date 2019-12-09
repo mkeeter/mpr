@@ -1,6 +1,18 @@
 #include <cassert>
 #include "renderable.hpp"
 
+// Copy-and paste the result of benchmark/dump_tape into this block
+// to test out a kernel without the overhead of the interpreter
+__global__ void evalRawTape(Image* image, View v)
+{
+    uint32_t px = threadIdx.x + blockIdx.x * blockDim.x;
+    uint32_t py = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (px >= image->size_px && py >= image->size_px) {
+        return;
+    }
+    assert(false);
+}
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename R, unsigned T, unsigned D>
@@ -1473,6 +1485,16 @@ void Renderable2D::runBrute(const View& view)
 
     PixelRenderer_drawBrute<<<dim3(256, 256), dim3(16, 16)>>>(
             &this->pixel_renderer, view);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void Renderable2D::runBruteKernel(const View& v)
+{
+    // Reset everything in preparation for a render
+    image.reset();
+
+    evalRawTape<<<dim3(256, 256), dim3(16, 16)>>>(&this->image, v);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
