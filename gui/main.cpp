@@ -118,7 +118,7 @@ int main(int argc, char** argv)
         model.rotate(Eigen::AngleAxisf(view_pitch, Eigen::Vector3f::UnitX()));
 
         view = Eigen::Affine3f::Identity();
-        auto s = 2.0f / fmax(io.DisplaySize.x, io.DisplaySize.y);
+        float s = 2.0f / fmax(io.DisplaySize.x, io.DisplaySize.y);
         view.scale(Eigen::Vector3f{s, -s, 1.0f});
         view.translate(Eigen::Vector3f{-io.DisplaySize.x / 2.0f, -io.DisplaySize.y / 2.0f, 0.0f});
     };
