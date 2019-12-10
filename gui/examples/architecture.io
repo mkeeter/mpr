@@ -13,9 +13,10 @@
       (box [5.7 -0.2 6] [6.8 0.9 8.3])
       (scale-z (sphere 0.5 [6.25 0.35 8.1])
         2 8.3)
-      (cylinder-z 0.1 1 [6.25 0.35 8.3]) 
-      (sphere 0.1 [6.25 0.35 9.3])
+      (cylinder-z 0.1 0.8 [6.25 0.35 8.3]) 
+      (sphere 0.1 [6.25 0.35 9.1])
       ))
+      
 (define railing-cut
     (box [0.1 0 6.9] [0.9 1 7.6]))
 (define railing-multicut
@@ -23,6 +24,7 @@
     (move railing-cut [2.9 0 0])
     (move railing-cut [3.85 0 0])
     (move railing-cut [4.8 0 0])))
+
 (define arches-tight
   (sequence
     (difference
@@ -36,21 +38,91 @@
   (reflect-xy)
   (move [6 0])))
 
+(define stair-wall-cutouts
+  (union
+    (difference
+      (box [14 -2.6 5] [14.8 -0.6 20])
+      (lambda-shape (x y z)
+        (- (- z 5) (* (- x 14) 0.8))
+      ))
+    (box [14 1 6.6] [14.8 9.7 9.5])
+    (box [14 1.2 6.8] [15 9.5 9.3])))
+
+(define stairs-angle
+  (difference
+    (lambda-shape (x y z)
+      (- (* 3 (- z 4)) (- y -2.8)))
+    (lambda-shape (x y z) (- x 14.5))
+    (lambda-shape (x y z) (- 18 x))
+))
+    
+(define stairs
+  (sequence
+    (move stairs-angle [0 0 0.5])
+    (difference
+      (move stairs-angle [0 0 -0.3])
+      (lambda-shape (x y z) (- 3.7 z))
+      (lambda-shape (x y z) (+ y 5))
+          (lambda-shape (x y z) (+ y 5))
+      )
+    (union
+      (box [16 -3.7 3.4] [18 0.3 3.7])
+      (box [16 8.9 6.3] [18 10 6.6])
+      (difference
+        (move
+          (difference (move stairs-angle [0 0 0.5])
+            (move stairs-angle [0 0 -0.3]))
+            [0 5.25 0.45])
+          (lambda-shape (x y z) (- z 3.4))
+          (lambda-shape (x y z) (- 6.6 z)))
+      )
+    (difference    
+      (move 
+        (apply union (map
+          (lambda (i)
+           (lambda-shape (x y z)
+              (max (- (* i 0.171) z)
+                   (- y (/ i 2))))) 
+          (iota 20)))
+          [0 0.5 3.7])
+      (move 
+        (apply union (map
+          (lambda (i)
+           (lambda-shape (x y z)
+              (max (- (* i 0.171) z)
+                   (- y (/ i 2))))) 
+          (iota 5)))
+          [0 -5.7 2.85])
+          ))
+)
+
+stairs
 (define stair-wall
   (sequence
     (box [14.5 -5 0] [16 10 10])
     (difference
-      (box [14 1 6.6] [14.8 9.7 9.5])
-      (box [14 1.2 6.8] [15 9.5 9.3])
-      (box [14 -10 6.8] [18 -0.6 20])
+      (box [14 -10 7] [18 -0.6 20])
       (box [14 -5 4] [18 -4 20])
-      (box [14 -2.6 4.5] [14.8 -0.6 20])
+      stair-wall-cutouts
+      (reflect-x stair-wall-cutouts 15.25)
     )
     (union
-      (box [14.3 -0.8 10] [16.2 9.6 10.2])
+      (box [14.7 -3 6.8] [15.8 -1.9 7])
+      (box [14.3 -0.8 10] [16.2 10 10.2])
       (difference
         (pyramid-z [14.5 -4] [16 -2.6] 6.8 4)
         (lambda-shape (x y z) (- 7.4 z)))
+      (sequence
+        (circle 1.5)
+        (extrude-z -0.45 0.45)
+        (reflect-xz)
+        (move [15.25 -0.6 6.8]))
+      (sequence
+        (difference (circle 1.5) (circle 1.3))
+        (extrude-z -0.55 0.55)
+        (reflect-xz)
+        (difference (lambda-shape (x y z) z))
+        (move [15.25 -0.6 6.8]))
     
     )))
 (define arches
@@ -86,13 +158,13 @@
     (box [5.7 -0.2 0] [6.8 0.9 10])
     (scale-z (sphere 0.5 [6.25 0.35 9.8])
       2 10)
-    (cylinder-z 0.1 1 [6.25 0.35 10]) 
-    (sphere 0.1 [6.25 0.35 11])
+    (cylinder-z 0.1 0.9 [6.25 0.35 10]) 
+    (sphere 0.1 [6.25 0.35 10.9])
     
     ;; Subpillars
     (move subpillar [-3.8 0 0])
     (move subpillar [3.8 0 0])
-        (move subpillar [7.6 0 0])
+    (move subpillar [7.6 0 0])
 
     ;; Stair wall
 
