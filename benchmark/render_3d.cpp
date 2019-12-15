@@ -47,7 +47,11 @@ int main(int argc, char **argv)
     for (unsigned x=0; x < r->image.size_px; ++x) {
         for (unsigned y=0; y < r->image.size_px; ++y) {
             out.depth(y, x) = r->heightAt(x, y);
-            out.norm(y, x) = r->normalAt(x, y);
+            if (r->heightAt(x, y)) {
+                out.norm(y, x) = r->normalAt(x, y);
+            } else {
+                out.norm(y, x) = 0;
+            }
         }
     }
     out.savePNG("out_gpu_depth.png");
