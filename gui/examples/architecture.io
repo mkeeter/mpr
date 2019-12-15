@@ -28,10 +28,11 @@
 (define arches-tight
   (sequence
     (difference
-      (rectangle [0 0] [10 6])
+      (rectangle [0 0] [12.5 6])
       (move arch [2 0])
       (move arch [5.5 0])
       (move arch [9 0])
+      (move arch [12.5 0])
     )
     (extrude-z 0 0.5)
   (reflect-yz)
@@ -67,7 +68,7 @@
       )
     (union
       (box [16 -3.7 3.4] [18 0.3 3.7])
-      (box [16 8.9 6.3] [18 10 6.6])
+      (box [0 8.9 6.3] [18 12.5 6.6])
       (difference
         (move
           (difference (move stairs-angle [0 0 0.5])
@@ -96,13 +97,13 @@
           ))
 )
 
-stairs
 (define stair-wall
   (sequence
-    (box [14.5 -5 0] [16 10 10])
+    (box [14.5 -5 0] [16 12.5 10])
     (difference
       (box [14 -10 7] [18 -0.6 20])
       (box [14 -5 4] [18 -4 20])
+      (box [12 10 6.6] [18 14 10])
       stair-wall-cutouts
       (reflect-x stair-wall-cutouts 15.25)
     )
@@ -123,7 +124,7 @@ stairs
         (reflect-xz)
         (difference (lambda-shape (x y z) z))
         (move [15.25 -0.6 6.8]))
-    
+
     )))
 (define arches
   (sequence
@@ -147,37 +148,44 @@ stairs
   )
   (union
     ;; Floor
-    (box [0 -5 -0.5] [16 10 0])
+    (box [0 -5 -0.5] [16 12.5 0])
 
     ;; Balcony
-    (box [0 -0.4 5.5] [16 10 5.8])
-    (box [0 -0.3 5.8] [16 10 6.4])
+    (box [0 -0.4 5.5] [16 12.5 5.8])
+    (box [0 -0.3 5.8] [16 12.5 6.6])
     (box [0 -0.4 6.4] [16 0 6.7])
-    
+
     ;; Pillar
     (box [5.7 -0.2 0] [6.8 0.9 10])
     (scale-z (sphere 0.5 [6.25 0.35 9.8])
       2 10)
     (cylinder-z 0.1 0.9 [6.25 0.35 10]) 
     (sphere 0.1 [6.25 0.35 10.9])
-    
+
     ;; Subpillars
     (move subpillar [-3.8 0 0])
     (move subpillar [3.8 0 0])
     (move subpillar [7.6 0 0])
 
     ;; Stair wall
+    stair-wall
 
-    
     ;; Internal arches
     arches-tight
     (move arches-tight [8.2 0 0])
-      stair-wall
+
+    stairs
   )
 
 ))
-arches
-
-
-
-
+(define s 0.05)
+(sequence
+  (union arches
+    (reflect-x arches)
+    ;(reflect-y arches 12.5)
+    )
+  (rotate-z -0.2)
+  (rotate-x -1)
+  (scale-xyz [s s s])
+)
+  
