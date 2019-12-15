@@ -211,6 +211,16 @@ __device__ inline Interval square(const Interval& x) {
     }
 }
 
+__device__ inline Interval abs(const Interval& x) {
+    if (x.lower() >= 0.0f) {
+        return x;
+    } else if (x.upper() < 0.0f) {
+        return -x;
+    } else {
+        return {0.0f, fmaxf(-x.lower(), x.upper())};
+    }
+}
+
 __device__ inline float square(const float& x) {
     return x * x;
 }

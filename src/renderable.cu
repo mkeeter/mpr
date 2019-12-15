@@ -55,6 +55,7 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
         case OP_SQUARE: return square(lhs);
         case OP_SQRT: return sqrt(lhs);
         case OP_NEG: return -lhs;
+        case OP_ABS: return abs(lhs);
         // Skipping transcendental functions for now
 
         case OP_ADD: return lhs + rhs;
@@ -94,6 +95,7 @@ __device__ inline Deriv derivOp(uint8_t op, A lhs, B rhs)
         case OP_SQUARE: return lhs * lhs;
         case OP_SQRT: return sqrt(lhs);
         case OP_NEG: return -lhs;
+        case OP_ABS: return abs(lhs);
         // Skipping transcendental functions for now
 
         case OP_ADD: return lhs + rhs;
@@ -715,6 +717,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             case OP_SQUARE: out = lhs * lhs; break;
             case OP_SQRT: out = sqrtf(lhs); break;
             case OP_NEG: out = -lhs; break;
+            case OP_ABS: out = fabsf(lhs); break;
             // Skipping transcendental functions for now
 
             case OP_ADD: out = lhs + rhs; break;
@@ -811,6 +814,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::drawBrute(
             case OP_SQUARE: out = lhs * lhs; break;
             case OP_SQRT: out = sqrtf(lhs); break;
             case OP_NEG: out = -lhs; break;
+            case OP_ABS: out = fabsf(lhs); break;
             // Skipping transcendental functions for now
 
             case OP_ADD: out = lhs + rhs; break;

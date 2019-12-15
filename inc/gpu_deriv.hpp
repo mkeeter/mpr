@@ -118,6 +118,14 @@ __device__ inline Deriv square(const Deriv& a) {
             a.dz() * a.value() * 2};
 }
 
+__device__ inline Deriv abs(const Deriv& a) {
+    if (a.value() < 0.0f) {
+        return -a;
+    } else {
+        return a;
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 __device__ inline Deriv operator-(const Deriv& a, const Deriv& b) {
