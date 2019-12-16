@@ -1521,6 +1521,7 @@ void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
                                  bool append, bool mode)
 {
     (void)mode; // (unused in 2D)
+    const unsigned u = (texture_size + 15) / 16;
 
     cudaArray* array;
     CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
@@ -1537,7 +1538,7 @@ void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
     CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    Renderable2D_copyToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
+    Renderable2D_copyToSurface<<<dim3(u, u), dim3(16, 16)>>>(
             this, surf, texture_size, append);
     CUDA_CHECK(cudaGetLastError());
 
@@ -1550,6 +1551,8 @@ void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
                                  uint32_t texture_size,
                                  bool append, bool mode)
 {
+    const unsigned u = (texture_size + 15) / 16;
+
     cudaArray* array;
     CUDA_CHECK(cudaGraphicsMapResources(1, &gl_tex));
     CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(&array, gl_tex, 0, 0));
@@ -1566,10 +1569,10 @@ void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
 
     CUDA_CHECK(cudaDeviceSynchronize());
     if (mode) {
-        Renderable3D_copyNormalToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
+        Renderable3D_copyNormalToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
     } else {
-        Renderable3D_copyDepthToSurface<<<dim3(256, 256), dim3(16, 16)>>>(
+        Renderable3D_copyDepthToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
     }
     CUDA_CHECK(cudaGetLastError());
