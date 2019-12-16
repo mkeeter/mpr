@@ -159,7 +159,7 @@ public:
     static cudaGraphicsResource* registerTexture(GLuint t);
     virtual void copyToTexture(cudaGraphicsResource* gl_tex,
                                uint32_t texture_size,
-                               bool append, bool mode)=0;
+                               bool append, int mode)=0;
     virtual uint32_t dimension() const=0;
 
     Image image;
@@ -183,7 +183,7 @@ public:
     void run(const View& v) override;
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
-                       bool append, bool mode) override;
+                       bool append, int mode) override;
 
     __device__
     void copyDepthToSurface(cudaSurfaceObject_t surf,
@@ -195,6 +195,10 @@ public:
     __device__
     void copyNormalToSurface(cudaSurfaceObject_t surf,
                              uint32_t texture_size, bool append);
+
+    __device__
+    void copySSAOToSurface(cudaSurfaceObject_t surf,
+                           uint32_t texture_size, bool append);
 
     uint32_t normalAt(const uint32_t x, const uint32_t y) const override {
         return norm(x, y);
@@ -227,6 +231,8 @@ protected:
     Renderable3D(const Renderable3D& other)=delete;
     Renderable3D& operator=(const Renderable3D& other)=delete;
 
+    Eigen::Matrix<float, 8, 3> ssao_kernel;
+
     friend class Renderable;
 };
 
@@ -239,7 +245,7 @@ public:
     void runBruteKernel(const View& v);
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
-                       bool append, bool mode) override;
+                       bool append, int mode) override;
 
     __device__
     void copyToSurface(cudaSurfaceObject_t surf,

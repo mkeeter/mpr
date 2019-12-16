@@ -310,6 +310,8 @@ int main(int argc, char** argv)
                 ImGui::RadioButton("Heightmap", &render_mode, 0);
                 ImGui::SameLine();
                 ImGui::RadioButton("Normals", &render_mode, 1);
+                ImGui::SameLine();
+                ImGui::RadioButton("SSAO", &render_mode, 2);
             }
         ImGui::End();
 

@@ -1091,6 +1091,60 @@ void Renderable3D::copyDepthToSurface(cudaSurfaceObject_t surf,
 }
 
 __device__
+void Renderable3D::copySSAOToSurface(cudaSurfaceObject_t surf,
+                                     uint32_t texture_size,
+                                     bool append)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < texture_size && y < texture_size) {
+        uint32_t px = x * image.size_px / texture_size;
+        uint32_t py = y * image.size_px / texture_size;
+        const auto h = image(px, image.size_px - py - 1);
+        const float3 pos = image.voxelPos(make_uint3(px, py, h));
+        if (h) {
+            // Based on http://john-chapman-graphics.blogspot.com/2013/01/ssao-tutorial.html
+            uint32_t n = norm(px, image.size_px - py - 1);
+
+            // Get normal from image
+            float dx = (float)(n & 0xFF) - 128.0f;
+            float dy = (float)((n >> 8) & 0xFF) - 128.0f;
+            float dz = (float)((n >> 16) & 0xFF) - 128.0f;
+            Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
+
+            Eigen::Vector3f rvec{0.707f, 0.707f, 0.0f}; // TODO: make this random
+            Eigen::Vector3f tangent = (rvec - normal * rvec.dot(normal)).normalized();
+            Eigen::Vector3f bitangent = normal.cross(tangent);
+            Eigen::Matrix3f tbn;
+            tbn.row(0) = tangent;
+            tbn.row(1) = bitangent;
+            tbn.row(2) = normal;
+
+            float occlusion = 0.0f;
+            const float uRadius = 0.01f;
+            for (unsigned i=0; i < ssao_kernel.rows(); ++i) {
+                Eigen::Vector3f sample_pos =
+                    tbn * ssao_kernel.row(i).transpose() * uRadius +
+                    Eigen::Vector3f{pos.x, pos.y, pos.z};
+
+                const unsigned px = (sample_pos.x() / 2.0f - 0.5f) * image.size_px;
+                const unsigned py = (sample_pos.y() / 2.0f - 0.5f) * image.size_px;
+                const unsigned actual_h = image(px, image.size_px - py - 1);
+                const float actual_z = 2.0f * ((actual_h + 0.5f) / image.size_px - 0.5f);
+                if (fabsf(sample_pos.z() - actual_z) < uRadius) {
+                    occlusion += actual_z <= sample_pos.z();
+                }
+            }
+            occlusion = 1.0 - (occlusion / ssao_kernel.rows());
+            const uint8_t o = occlusion * 255;
+            surf2Dwrite((0xFF << 24) | (o << 16) | (o << 8) | o, surf, x*4, y);
+        } else if (!append) {
+            surf2Dwrite(0, surf, x*4, y);
+        }
+    }
+}
+__device__
 void Renderable3D::copyNormalToSurface(cudaSurfaceObject_t surf,
                                        uint32_t texture_size,
                                        bool append)
@@ -1142,6 +1196,14 @@ void Renderable3D_copyNormalToSurface(Renderable3D* r,
                                       uint32_t texture_size, bool append)
 {
     r->copyNormalToSurface(surf, texture_size, append);
+}
+
+__global__
+void Renderable3D_copySSAOToSurface(Renderable3D* r,
+                                      cudaSurfaceObject_t surf,
+                                      uint32_t texture_size, bool append)
+{
+    r->copySSAOToSurface(surf, texture_size, append);
 }
 
 __global__
@@ -1207,7 +1269,19 @@ Renderable3D::Renderable3D(libfive::Tree tree, uint32_t image_size_px)
       pixel_renderer(tape, subtapes, image, microtile_renderer.subtiles),
       normal_renderer(tape, subtapes, norm)
 {
-    // Nothing to do here
+    // Based on http://john-chapman-graphics.blogspot.com/2013/01/ssao-tutorial.html
+    for (unsigned i = 0; i < ssao_kernel.rows(); ++i) {
+        ssao_kernel.row(i) = Eigen::RowVector3f{
+            2.0f * ((float)(rand()) / (float)(RAND_MAX) - 0.5f),
+            2.0f * ((float)(rand()) / (float)(RAND_MAX) - 0.5f),
+            (float)(rand()) / (float)(RAND_MAX) };
+        ssao_kernel.row(i) /= ssao_kernel.row(i).norm();
+
+        // Scale to keep most samples near the center
+        float scale = float(i) / float(ssao_kernel.rows() - 1);
+        scale = (scale * scale) * 0.9f + 0.1f;
+        ssao_kernel.row(i) *= scale;
+    }
 }
 
 Renderable2D::Renderable2D(libfive::Tree tree, uint32_t image_size_px)
@@ -1518,7 +1592,7 @@ cudaGraphicsResource* Renderable::registerTexture(GLuint t)
 
 void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
                                  uint32_t texture_size,
-                                 bool append, bool mode)
+                                 bool append, int mode)
 {
     (void)mode; // (unused in 2D)
     const unsigned u = (texture_size + 15) / 16;
@@ -1549,7 +1623,7 @@ void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
 
 void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
                                  uint32_t texture_size,
-                                 bool append, bool mode)
+                                 bool append, int mode)
 {
     const unsigned u = (texture_size + 15) / 16;
 
@@ -1568,11 +1642,14 @@ void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
     CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    if (mode) {
+    if (mode == 0) {
+        Renderable3D_copyDepthToSurface<<<dim3(u, u), dim3(16, 16)>>>(
+                this, surf, texture_size, append);
+    } else if (mode == 1) {
         Renderable3D_copyNormalToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
-    } else {
-        Renderable3D_copyDepthToSurface<<<dim3(u, u), dim3(16, 16)>>>(
+    } else if (mode == 2) {
+        Renderable3D_copySSAOToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
     }
     CUDA_CHECK(cudaGetLastError());
