@@ -213,7 +213,11 @@ public:
     __device__
     uint32_t drawNormals(const float3 f, const uint32_t subtape_index, const View& v);
 
+    __device__
+    void drawSSAO(const float radius);
+
     Image norm;
+    Image ssao;
 
     Renderable3D(libfive::Tree tree, uint32_t image_size_px);
 

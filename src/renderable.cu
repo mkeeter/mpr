@@ -220,6 +220,7 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     Clause* __restrict__ out = subtapes.data[subtape_index];
 
     bool terminal = true;
+
     for (uint32_t i=0; i < num_clauses; i++) {
         using namespace libfive::Opcode;
         Clause c = clause_ptr[num_clauses - i - 1];
@@ -966,6 +967,11 @@ __global__ void Renderable3D_drawNormals(
     }
 }
 
+__global__ void Renderable3D_drawSSAO(Renderable3D* r, const float radius)
+{
+    r->drawSSAO(radius);
+}
+
 __device__
 uint32_t Renderable3D::drawNormals(const float3 f,
                                    const uint32_t subtape_index,
@@ -1102,10 +1108,29 @@ void Renderable3D::copySSAOToSurface(cudaSurfaceObject_t surf,
         uint32_t px = x * image.size_px / texture_size;
         uint32_t py = y * image.size_px / texture_size;
         const auto h = image(px, image.size_px - py - 1);
-        const float3 pos = image.voxelPos(make_uint3(px, py, h));
+        // TODO: actually use SSAO here
+        if (h) {
+            const uint8_t o = ssao(px, image.size_px - py - 1);
+            surf2Dwrite((0xFF << 24) | (o << 16) | (o << 8) | (o << 0),
+                        surf, x*4, y);
+        } else if (!append) {
+            surf2Dwrite(0, surf, x*4, y);
+        }
+    }
+}
+
+__device__
+void Renderable3D::drawSSAO(float radius)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < image.size_px && y < image.size_px) {
+        const auto h = image(x, y);
+        const float3 pos = image.voxelPos(make_uint3(x, y, h));
         if (h) {
             // Based on http://john-chapman-graphics.blogspot.com/2013/01/ssao-tutorial.html
-            uint32_t n = norm(px, image.size_px - py - 1);
+            uint32_t n = norm(x, y);
 
             // Get normal from image
             float dx = (float)(n & 0xFF) - 128.0f;
@@ -1113,37 +1138,55 @@ void Renderable3D::copySSAOToSurface(cudaSurfaceObject_t surf,
             float dz = (float)((n >> 16) & 0xFF) - 128.0f;
             Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
 
-            Eigen::Vector3f rvec{0.707f, 0.707f, 0.0f}; // TODO: make this random
+            /*
+            printf("%u:%u Got normal %f %f %f at %f %f %f [%u %u]\n", x, y, normal.x(), normal.y(), normal.z(), pos.x, pos.y, pos.z,
+                    x, y);
+                    */
+
+            Eigen::Vector3f rvec{-0.707f, 0.707f, 0.0f}; // TODO: make this random
             Eigen::Vector3f tangent = (rvec - normal * rvec.dot(normal)).normalized();
             Eigen::Vector3f bitangent = normal.cross(tangent);
             Eigen::Matrix3f tbn;
-            tbn.row(0) = tangent;
-            tbn.row(1) = bitangent;
-            tbn.row(2) = normal;
+            tbn.col(0) = tangent;
+            tbn.col(1) = bitangent;
+            tbn.col(2) = normal;
 
             float occlusion = 0.0f;
-            const float uRadius = 0.01f;
             for (unsigned i=0; i < ssao_kernel.rows(); ++i) {
                 Eigen::Vector3f sample_pos =
-                    tbn * ssao_kernel.row(i).transpose() * uRadius +
+                    tbn * ssao_kernel.row(i).transpose() * radius +
                     Eigen::Vector3f{pos.x, pos.y, pos.z};
 
-                const unsigned px = (sample_pos.x() / 2.0f - 0.5f) * image.size_px;
-                const unsigned py = (sample_pos.y() / 2.0f - 0.5f) * image.size_px;
-                const unsigned actual_h = image(px, image.size_px - py - 1);
+                const unsigned px = (sample_pos.x() / 2.0f + 0.5f) * image.size_px;
+                const unsigned py = (sample_pos.y() / 2.0f + 0.5f) * image.size_px;
+                const unsigned actual_h = image(px, py);
                 const float actual_z = 2.0f * ((actual_h + 0.5f) / image.size_px - 0.5f);
-                if (fabsf(sample_pos.z() - actual_z) < uRadius) {
-                    occlusion += actual_z <= sample_pos.z();
+
+                /*
+                printf("%u:%u   checking %f %f %f [%u %u] => %f (%u), %f\n",
+                       x, y,
+                       sample_pos.x(), sample_pos.y(), sample_pos.z(),
+                       px, py,
+                       actual_z, actual_h, sample_pos.z());
+                       */
+                if (fabsf(sample_pos.z() - actual_z) < radius) {
+                    /*
+                    if (sample_pos.z() <= actual_z) {
+                        printf("%u:%u        occluded!\n", x, y);
+                    } else {
+                        printf("%u:%u        not occluded!\n", x, y);
+                    }
+                    */
+                    occlusion += sample_pos.z() <= actual_z;
                 }
             }
             occlusion = 1.0 - (occlusion / ssao_kernel.rows());
             const uint8_t o = occlusion * 255;
-            surf2Dwrite((0xFF << 24) | (o << 16) | (o << 8) | o, surf, x*4, y);
-        } else if (!append) {
-            surf2Dwrite(0, surf, x*4, y);
+            ssao(x, y) = o;
         }
     }
 }
+
 __device__
 void Renderable3D::copyNormalToSurface(cudaSurfaceObject_t surf,
                                        uint32_t texture_size,
@@ -1257,6 +1300,7 @@ Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)
 Renderable3D::Renderable3D(libfive::Tree tree, uint32_t image_size_px)
     : Renderable(tree, image_size_px),
       norm(image_size_px),
+      ssao(image_size_px),
 
       filled_tiles(image_size_px),
       filled_subtiles(image_size_px),
@@ -1282,6 +1326,7 @@ Renderable3D::Renderable3D(libfive::Tree tree, uint32_t image_size_px)
         scale = (scale * scale) * 0.9f + 0.1f;
         ssao_kernel.row(i) *= scale;
     }
+    ssao_kernel.row(0) = Eigen::RowVector3f{0.0f, 0.0f, 1.0f};
 }
 
 Renderable2D::Renderable2D(libfive::Tree tree, uint32_t image_size_px)
@@ -1304,6 +1349,7 @@ void Renderable3D::run(const View& view)
     subtapes.reset();
     image.reset();
     norm.reset();
+    ssao.reset();
     tile_renderer.tiles.reset();
     subtile_renderer.subtiles.reset();
     microtile_renderer.subtiles.reset();
@@ -1451,6 +1497,15 @@ void Renderable3D::run(const View& view)
                     this, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    {   // Do pixel-by-pixel rendering for SSAO
+        const unsigned u = (image.size_px + 15) / 16;
+        // Pick a radius to detect shadowing within 2 pixels
+        const float units_per_pixel = 2.0f / image.size_px;
+        const float radius = 4 * units_per_pixel;
+        Renderable3D_drawSSAO<<<dim3(u, u), dim3(16, 16)>>>(this, radius);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }

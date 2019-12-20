@@ -144,9 +144,9 @@ int main(int argc, char** argv)
     bool just_saved = false;
 
     // Main loop
-    int render_size = 1024;
-    int render_dimension = 2;
-    int render_mode = 0;
+    int render_size = 256;
+    int render_dimension = 3;
+    int render_mode = 2;
 
     while (!glfwWindowShouldClose(window))
     {
