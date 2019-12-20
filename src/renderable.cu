@@ -870,13 +870,13 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
         Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
         pos = v.mat * pos;
         if (tape.axes.reg[0] != UINT16_MAX) {
-            regs[tape.axes.reg[0]] = Deriv(pos.x(), 1.0f, 0.0f, 0.0f);
+            regs[tape.axes.reg[0]] = Deriv(pos.x(), v.mat(0, 0), v.mat(0, 1), v.mat(0, 2));
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
-            regs[tape.axes.reg[1]] = Deriv(pos.y(), 0.0f, 1.0f, 0.0f);
+            regs[tape.axes.reg[1]] = Deriv(pos.y(), v.mat(1, 0), v.mat(1, 1), v.mat(1, 2));
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
-            regs[tape.axes.reg[2]] = Deriv(pos.z(), 0.0f, 0.0f, 1.0f);
+            regs[tape.axes.reg[2]] = Deriv(pos.z(), v.mat(2, 0), v.mat(2, 1), v.mat(2, 2));
         }
     }
 
