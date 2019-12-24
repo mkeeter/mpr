@@ -972,6 +972,11 @@ __global__ void Renderable3D_drawSSAO(Renderable3D* r, const float radius)
     r->drawSSAO(radius);
 }
 
+__global__ void Renderable3D_blurSSAO(Renderable3D* r)
+{
+    r->blurSSAO();
+}
+
 __device__
 uint32_t Renderable3D::drawNormals(const float3 f,
                                    const uint32_t subtape_index,
@@ -1159,7 +1164,10 @@ void Renderable3D::drawSSAO(float radius)
 
                 const unsigned px = (sample_pos.x() / 2.0f + 0.5f) * image.size_px;
                 const unsigned py = (sample_pos.y() / 2.0f + 0.5f) * image.size_px;
-                const unsigned actual_h = image(px, py);
+                const unsigned actual_h =
+                    (px < image.size_px && py < image.size_px)
+                    ? image(px, py)
+                    : 0;
                 const float actual_z = 2.0f * ((actual_h + 0.5f) / image.size_px - 0.5f);
 
                 /*
@@ -1184,6 +1192,33 @@ void Renderable3D::drawSSAO(float radius)
             const uint8_t o = occlusion * 255;
             ssao(x, y) = o;
         }
+    }
+}
+
+__device__
+void Renderable3D::blurSSAO(void)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < image.size_px && y < image.size_px) {
+        unsigned sum = 0;
+        unsigned count = 0;
+        for (int i=-2; i <= 2; ++i) {
+            for (int j=-2; j <= 2; ++j) {
+                int tx = x + i;
+                int ty = y + j;
+                if (tx >= 0 && tx < image.size_px &&
+                    ty >= 0 && ty < image.size_px)
+                {
+                    if (image(tx, ty)) {
+                        sum += ssao(tx, ty);
+                        count++;
+                    }
+                }
+            }
+        }
+        temp(x, y) = sum / count;
     }
 }
 
@@ -1301,6 +1336,7 @@ Renderable3D::Renderable3D(libfive::Tree tree, uint32_t image_size_px)
     : Renderable(tree, image_size_px),
       norm(image_size_px),
       ssao(image_size_px),
+      temp(image_size_px),
 
       filled_tiles(image_size_px),
       filled_subtiles(image_size_px),
@@ -1512,6 +1548,7 @@ void Renderable3D::run(const View& view)
         const float units_per_pixel = 2.0f / image.size_px;
         const float radius = 4 * units_per_pixel;
         Renderable3D_drawSSAO<<<dim3(u, u), dim3(16, 16)>>>(this, radius);
+        Renderable3D_blurSSAO<<<dim3(u, u), dim3(16, 16)>>>(this);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }

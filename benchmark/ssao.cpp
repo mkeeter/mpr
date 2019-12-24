@@ -33,7 +33,7 @@ int main(int, char**)
     for (unsigned x=0; x < r->image.size_px; ++x) {
         for (unsigned y=0; y < r->image.size_px; ++y) {
             if (r->heightAt(x, y)) {
-                const auto o = static_cast<Renderable3D*>(r.get())->ssao(x, y);
+                const auto o = static_cast<Renderable3D*>(r.get())->temp(x, y);
                 out.norm(y, x) = (0xFF << 24) | (o << 16) | (o << 8) | o;
             }
         }
