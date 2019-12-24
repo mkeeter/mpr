@@ -54,6 +54,7 @@ int main(int argc, char **argv)
                 shaded.norm(y, x) = r->temp(x, y);
             } else {
                 out.norm(y, x) = 0;
+                shaded.norm(y, x) = 0;
             }
         }
     }
