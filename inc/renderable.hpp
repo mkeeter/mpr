@@ -235,7 +235,8 @@ protected:
     Renderable3D(const Renderable3D& other)=delete;
     Renderable3D& operator=(const Renderable3D& other)=delete;
 
-    Eigen::Matrix<float, 8, 3> ssao_kernel;
+    Eigen::Matrix<float, 32, 3> ssao_kernel;
+    Eigen::Matrix<float, 16*16, 3> ssao_rvecs;
 
     friend class Renderable;
 };

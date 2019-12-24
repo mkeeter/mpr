@@ -17,7 +17,13 @@ int main(int, char**)
     auto Z = libfive::Tree::Z();
     auto t = sqrt(X*X + Y*Y + Z*Z) - 0.1;
     t = max(t, -max(-Z, max(X, Y)));
-    auto r = Renderable::build(t, 256, 3);
+
+    // Rotate by a little bit about the X axis
+    const auto angle = -M_PI/4;
+    t = t.remap(X, cos(angle) * Y + sin(angle) * Z,
+                  -sin(angle) * Y + cos(angle) * Z);
+
+    auto r = Renderable::build(t, 1024, 3);
     r->tape.print();
 
     r->run({Eigen::Matrix4f::Identity()});

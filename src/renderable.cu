@@ -1143,7 +1143,7 @@ void Renderable3D::drawSSAO(float radius)
                     x, y);
                     */
 
-            Eigen::Vector3f rvec{-0.707f, 0.707f, 0.0f}; // TODO: make this random
+            Eigen::Vector3f rvec = ssao_rvecs.row((threadIdx.x % 16) * 16 + (threadIdx.y % 16));
             Eigen::Vector3f tangent = (rvec - normal * rvec.dot(normal)).normalized();
             Eigen::Vector3f bitangent = normal.cross(tangent);
             Eigen::Matrix3f tbn;
@@ -1326,7 +1326,13 @@ Renderable3D::Renderable3D(libfive::Tree tree, uint32_t image_size_px)
         scale = (scale * scale) * 0.9f + 0.1f;
         ssao_kernel.row(i) *= scale;
     }
-    ssao_kernel.row(0) = Eigen::RowVector3f{0.0f, 0.0f, 1.0f};
+    for (unsigned i = 0; i < ssao_rvecs.rows(); ++i) {
+        ssao_rvecs.row(i) = Eigen::RowVector3f{
+            2.0f * ((float)(rand()) / (float)(RAND_MAX) - 0.5f),
+            2.0f * ((float)(rand()) / (float)(RAND_MAX) - 0.5f),
+            0.0f };
+        ssao_rvecs.row(i) /= ssao_rvecs.row(i).norm();
+    }
 }
 
 Renderable2D::Renderable2D(libfive::Tree tree, uint32_t image_size_px)
