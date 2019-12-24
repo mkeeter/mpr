@@ -1206,7 +1206,7 @@ void Renderable3D::copyShadedToSurface(cudaSurfaceObject_t surf,
         uint32_t py = y * image.size_px / texture_size;
         const auto h = image(px, image.size_px - py - 1);
         if (h) {
-            const uint32_t c = temp(px, py);
+            const uint32_t c = temp(px, image.size_px - py - 1);
             surf2Dwrite(c, surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
