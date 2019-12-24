@@ -148,6 +148,7 @@ public:
         MODE_HEIGHTMAP,
         MODE_NORMALS,
         MODE_SSAO,
+        MODE_SHADED,
     };
 
     // Returns a GPU-allocated Renderable struct
@@ -205,6 +206,10 @@ public:
     __device__
     void copySSAOToSurface(cudaSurfaceObject_t surf,
                            uint32_t texture_size, bool append);
+
+    __device__
+    void copyShadedToSurface(cudaSurfaceObject_t surf,
+                             uint32_t texture_size, bool append);
 
     uint32_t normalAt(const uint32_t x, const uint32_t y) const override {
         return norm(x, y);

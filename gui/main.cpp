@@ -312,6 +312,8 @@ int main(int argc, char** argv)
                 ImGui::RadioButton("Normals", &render_mode, Renderable::MODE_NORMALS);
                 ImGui::SameLine();
                 ImGui::RadioButton("SSAO", &render_mode, Renderable::MODE_SSAO);
+                ImGui::SameLine();
+                ImGui::RadioButton("Shaded", &render_mode, Renderable::MODE_SHADED);
             }
         ImGui::End();
 

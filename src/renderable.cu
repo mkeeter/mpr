@@ -1113,10 +1113,53 @@ void Renderable3D::copySSAOToSurface(cudaSurfaceObject_t surf,
         uint32_t px = x * image.size_px / texture_size;
         uint32_t py = y * image.size_px / texture_size;
         const auto h = image(px, image.size_px - py - 1);
-        // TODO: actually use SSAO here
         if (h) {
             const uint8_t o = ssao(px, image.size_px - py - 1);
             surf2Dwrite((0xFF << 24) | (o << 16) | (o << 8) | (o << 0),
+                        surf, x*4, y);
+        } else if (!append) {
+            surf2Dwrite(0, surf, x*4, y);
+        }
+    }
+}
+
+__device__
+void Renderable3D::copyShadedToSurface(cudaSurfaceObject_t surf,
+                                       uint32_t texture_size,
+                                       bool append)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < texture_size && y < texture_size) {
+        uint32_t px = x * image.size_px / texture_size;
+        uint32_t py = y * image.size_px / texture_size;
+        const auto h = image(px, image.size_px - py - 1);
+        if (h) {
+            const uint8_t s = ssao(px, image.size_px - py - 1);
+
+            // Get normal from image
+            const auto n = norm(px, image.size_px - py - 1);
+            float dx = (float)(n & 0xFF) - 128.0f;
+            float dy = (float)((n >> 8) & 0xFF) - 128.0f;
+            float dz = (float)((n >> 16) & 0xFF) - 128.0f;
+            Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
+
+            // Apply a single light
+            const float3 pos_f3 = image.voxelPos(make_uint3(px, py, h));
+            const Eigen::Vector3f pos { pos_f3.x, pos_f3.y, pos_f3.z };
+
+            const Eigen::Vector3f light_pos { 0, 0, 1 };
+            const Eigen::Vector3f light_dir = (light_pos - pos).normalized();
+
+            // Apply light
+            float light = light_dir.dot(normal);
+
+            // Apply SSAO
+            light *= s / 255.0f;
+
+            const uint8_t color = light * 255.0f;
+            surf2Dwrite((0xFF << 24) | (color << 16) | (color << 8) | (color << 0),
                         surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
@@ -1177,15 +1220,13 @@ void Renderable3D::drawSSAO(float radius)
                        px, py,
                        actual_z, actual_h, sample_pos.z());
                        */
-                if (fabsf(sample_pos.z() - actual_z) < radius) {
-                    /*
-                    if (sample_pos.z() <= actual_z) {
-                        printf("%u:%u        occluded!\n", x, y);
-                    } else {
-                        printf("%u:%u        not occluded!\n", x, y);
-                    }
-                    */
+                const auto dz = fabsf(sample_pos.z() - actual_z);
+                if (dz < radius) {
                     occlusion += sample_pos.z() <= actual_z;
+                } else if (dz < radius * 2.0f) {
+                    if (sample_pos.z() <= actual_z) {
+                        occlusion += powf((dz - radius) / radius, 2.0f);
+                    }
                 }
             }
             occlusion = 1.0 - (occlusion / ssao_kernel.rows());
@@ -1282,6 +1323,14 @@ void Renderable3D_copySSAOToSurface(Renderable3D* r,
                                       uint32_t texture_size, bool append)
 {
     r->copySSAOToSurface(surf, texture_size, append);
+}
+
+__global__
+void Renderable3D_copyShadedToSurface(Renderable3D* r,
+                                      cudaSurfaceObject_t surf,
+                                      uint32_t texture_size, bool append)
+{
+    r->copyShadedToSurface(surf, texture_size, append);
 }
 
 __global__
@@ -1544,10 +1593,8 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
-    if (mode == MODE_SSAO) {
-        // Pick a radius to detect shadowing within 2 pixels
-        const float units_per_pixel = 2.0f / image.size_px;
-        const float radius = 4 * units_per_pixel;
+    if (mode >= MODE_SSAO) {
+        const float radius = 0.1f;
         Renderable3D_drawSSAO<<<dim3(u, u), dim3(16, 16)>>>(this, radius);
         Renderable3D_blurSSAO<<<dim3(u, u), dim3(16, 16)>>>(this);
         CUDA_CHECK(cudaDeviceSynchronize());
@@ -1757,6 +1804,9 @@ void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
                 this, surf, texture_size, append);
     } else if (mode == MODE_SSAO) {
         Renderable3D_copySSAOToSurface<<<dim3(u, u), dim3(16, 16)>>>(
+                this, surf, texture_size, append);
+    } else if (mode == MODE_SHADED) {
+        Renderable3D_copyShadedToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
     }
     CUDA_CHECK(cudaGetLastError());
