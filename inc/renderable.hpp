@@ -159,9 +159,6 @@ public:
     uint32_t heightAt(const uint32_t x, const uint32_t y) const {
         return image(x, y);
     }
-    virtual uint32_t normalAt(const uint32_t, const uint32_t) const {
-        return 0;
-    }
 
     static cudaGraphicsResource* registerTexture(GLuint t);
     virtual void copyToTexture(cudaGraphicsResource* gl_tex,
@@ -211,10 +208,6 @@ public:
     void copyShadedToSurface(cudaSurfaceObject_t surf,
                              uint32_t texture_size, bool append);
 
-    uint32_t normalAt(const uint32_t x, const uint32_t y) const override {
-        return norm(x, y);
-    }
-
     uint32_t dimension() const override { return 3; };
 
     // Returns the subtape head at the given voxel, or 0
@@ -229,8 +222,10 @@ public:
     void drawSSAO(const float radius);
 
     // Blurs from ssao into temp
-    __device__
-    void blurSSAO();
+    __device__ void blurSSAO();
+
+    // Applies shading from depth, norm, and ssao to temp
+    __device__ void shade();
 
     Image norm;
     Image ssao;
@@ -252,7 +247,7 @@ protected:
     Renderable3D(const Renderable3D& other)=delete;
     Renderable3D& operator=(const Renderable3D& other)=delete;
 
-    Eigen::Matrix<float, 32, 3> ssao_kernel;
+    Eigen::Matrix<float, 64, 3> ssao_kernel;
     Eigen::Matrix<float, 16*16, 3> ssao_rvecs;
 
     friend class Renderable;

@@ -977,6 +977,11 @@ __global__ void Renderable3D_blurSSAO(Renderable3D* r)
     r->blurSSAO();
 }
 
+__global__ void Renderable3D_shade(Renderable3D* r)
+{
+    r->shade();
+}
+
 __device__
 uint32_t Renderable3D::drawNormals(const float3 f,
                                    const uint32_t subtape_index,
@@ -1124,6 +1129,43 @@ void Renderable3D::copySSAOToSurface(cudaSurfaceObject_t surf,
 }
 
 __device__
+void Renderable3D::shade()
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < image.size_px && y < image.size_px) {
+        const auto h = image(x, y);
+        if (h) {
+            const uint8_t s = ssao(x, y);
+
+            // Get normal from image
+            const auto n = norm(x, y);
+            float dx = (float)(n & 0xFF) - 128.0f;
+            float dy = (float)((n >> 8) & 0xFF) - 128.0f;
+            float dz = (float)((n >> 16) & 0xFF) - 128.0f;
+            Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
+
+            // Apply a single light
+            const float3 pos_f3 = image.voxelPos(make_uint3(x, y, h));
+            const Eigen::Vector3f pos { pos_f3.x, pos_f3.y, pos_f3.z };
+
+            const Eigen::Vector3f light_pos { 5, 5, 10 };
+            const Eigen::Vector3f light_dir = (light_pos - pos).normalized();
+
+            // Apply light
+            float light = light_dir.dot(normal);
+
+            // Apply SSAO
+            light *= s / 255.0f;
+
+            const uint8_t color = light * 255.0f;
+            temp(x, y) = (0xFF << 24) | (color << 16) | (color << 8) | (color << 0);
+        }
+    }
+}
+
+__device__
 void Renderable3D::copyShadedToSurface(cudaSurfaceObject_t surf,
                                        uint32_t texture_size,
                                        bool append)
@@ -1136,31 +1178,8 @@ void Renderable3D::copyShadedToSurface(cudaSurfaceObject_t surf,
         uint32_t py = y * image.size_px / texture_size;
         const auto h = image(px, image.size_px - py - 1);
         if (h) {
-            const uint8_t s = ssao(px, image.size_px - py - 1);
-
-            // Get normal from image
-            const auto n = norm(px, image.size_px - py - 1);
-            float dx = (float)(n & 0xFF) - 128.0f;
-            float dy = (float)((n >> 8) & 0xFF) - 128.0f;
-            float dz = (float)((n >> 16) & 0xFF) - 128.0f;
-            Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
-
-            // Apply a single light
-            const float3 pos_f3 = image.voxelPos(make_uint3(px, py, h));
-            const Eigen::Vector3f pos { pos_f3.x, pos_f3.y, pos_f3.z };
-
-            const Eigen::Vector3f light_pos { 0, 0, 1 };
-            const Eigen::Vector3f light_dir = (light_pos - pos).normalized();
-
-            // Apply light
-            float light = light_dir.dot(normal);
-
-            // Apply SSAO
-            light *= s / 255.0f;
-
-            const uint8_t color = light * 255.0f;
-            surf2Dwrite((0xFF << 24) | (color << 16) | (color << 8) | (color << 0),
-                        surf, x*4, y);
+            const uint32_t c = temp(px, py);
+            surf2Dwrite(c, surf, x*4, y);
         } else if (!append) {
             surf2Dwrite(0, surf, x*4, y);
         }
@@ -1242,13 +1261,17 @@ void Renderable3D::blurSSAO(void)
     unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
     unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
 
-    if (x < image.size_px && y < image.size_px) {
-        unsigned sum = 0;
-        unsigned count = 0;
-        for (int i=-2; i <= 2; ++i) {
-            for (int j=-2; j <= 2; ++j) {
-                int tx = x + i;
-                int ty = y + j;
+    const int BLUR_RADIUS = 2;
+
+    float best = 1000000.0f;
+    float value = 0.0f;
+    auto run = [x, y, this, &best, &value](int xmin, int ymin) {
+        float sum = 0.0f;
+        float count = 0.0f;
+        for (int i=0; i <= BLUR_RADIUS; ++i) {
+            for (int j=0; j <= BLUR_RADIUS; ++j) {
+                const int tx = x + xmin + i;
+                const int ty = y + ymin + j;
                 if (tx >= 0 && tx < image.size_px &&
                     ty >= 0 && ty < image.size_px)
                 {
@@ -1259,8 +1282,35 @@ void Renderable3D::blurSSAO(void)
                 }
             }
         }
-        temp(x, y) = sum / count;
+        const float mean = sum / count;
+        float stdev = 0.0f;
+        for (int i=0; i <= BLUR_RADIUS; ++i) {
+            for (int j=0; j <= BLUR_RADIUS; ++j) {
+                const int tx = xmin + i;
+                const int ty = ymin + j;
+                if (tx >= 0 && tx < image.size_px &&
+                    ty >= 0 && ty < image.size_px)
+                {
+                    if (image(tx, ty)) {
+                        const float d = (mean - ssao(tx, ty));
+                        stdev += d * d;
+                    }
+                }
+            }
+        }
+        stdev /= count - 1.0f;
+        stdev = sqrtf(stdev);
+        if (stdev < best) {
+            best = stdev;
+            value = mean;
+        }
+    };
+
+    for (unsigned i=0; i < 4; ++i) {
+        run((i & 1) ? 0 : -BLUR_RADIUS,
+            (i & 2) ? 0 : -BLUR_RADIUS);
     }
+    temp(x, y) = value;
 }
 
 __device__
@@ -1601,6 +1651,11 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
         cudaMemcpy(ssao.data, temp.data,
                    sizeof(uint32_t) * image.size_px * image.size_px,
                    cudaMemcpyDeviceToDevice);
+        CUDA_CHECK(cudaDeviceSynchronize());
+    }
+
+    if (mode >= MODE_SHADED) {
+        Renderable3D_shade<<<dim3(u, u), dim3(16, 16)>>>(this);
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 }
