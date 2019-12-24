@@ -144,7 +144,6 @@ public:
 
     virtual ~Renderable();
 
-
     enum Mode {
         MODE_HEIGHTMAP,
         MODE_NORMALS,

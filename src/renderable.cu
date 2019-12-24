@@ -1551,6 +1551,10 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
         Renderable3D_drawSSAO<<<dim3(u, u), dim3(16, 16)>>>(this, radius);
         Renderable3D_blurSSAO<<<dim3(u, u), dim3(16, 16)>>>(this);
         CUDA_CHECK(cudaDeviceSynchronize());
+        cudaMemcpy(ssao.data, temp.data,
+                   sizeof(uint32_t) * image.size_px * image.size_px,
+                   cudaMemcpyDeviceToDevice);
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 }
 
