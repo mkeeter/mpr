@@ -1385,7 +1385,7 @@ Renderable2D::Renderable2D(libfive::Tree tree, uint32_t image_size_px)
     // Nothing to do here
 }
 
-void Renderable3D::run(const View& view)
+void Renderable3D::run(const View& view, Renderable::Mode mode)
 {
     // Reset everything in preparation for a render
     subtapes.reset();
@@ -1523,11 +1523,12 @@ void Renderable3D::run(const View& view)
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    Renderable3D_copyDepthToImage<<<dim3(256, 256), dim3(16, 16)>>>(this);
+    const unsigned u = (image.size_px + 15) / 16;
+    Renderable3D_copyDepthToImage<<<dim3(u, u), dim3(16, 16)>>>(this);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    {   // Do pixel-by-pixel rendering for normals
+    if (mode >= MODE_NORMALS) {
         const uint32_t active = pow(image.size_px / 16, 2);
         const uint32_t stride = LIBFIVE_CUDA_NORMAL_BLOCKS *
                                 LIBFIVE_CUDA_NORMAL_TILES;
@@ -1539,22 +1540,24 @@ void Renderable3D::run(const View& view)
                     this, i, view);
             CUDA_CHECK(cudaGetLastError());
         }
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
 
-    {   // Do pixel-by-pixel rendering for SSAO
-        const unsigned u = (image.size_px + 15) / 16;
+    if (mode == MODE_SSAO) {
         // Pick a radius to detect shadowing within 2 pixels
         const float units_per_pixel = 2.0f / image.size_px;
         const float radius = 4 * units_per_pixel;
         Renderable3D_drawSSAO<<<dim3(u, u), dim3(16, 16)>>>(this, radius);
         Renderable3D_blurSSAO<<<dim3(u, u), dim3(16, 16)>>>(this);
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-void Renderable2D::run(const View& view)
+void Renderable2D::run(const View& view, Renderable::Mode mode)
 {
+    // 2D rendering only uses heightmap
+    (void)mode;
+
     // Reset everything in preparation for a render
     subtapes.reset();
     image.reset();
@@ -1652,7 +1655,8 @@ void Renderable2D::run(const View& view)
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    Renderable2D_copyDepthToImage<<<dim3(256, 256), dim3(16, 16)>>>(this);
+    const unsigned u = (image.size_px + 15) / 16;
+    Renderable2D_copyDepthToImage<<<dim3(u, u), dim3(16, 16)>>>(this);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
@@ -1690,7 +1694,7 @@ cudaGraphicsResource* Renderable::registerTexture(GLuint t)
 
 void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
                                  uint32_t texture_size,
-                                 bool append, int mode)
+                                 bool append, Renderable::Mode mode)
 {
     (void)mode; // (unused in 2D)
     const unsigned u = (texture_size + 15) / 16;
@@ -1721,7 +1725,7 @@ void Renderable2D::copyToTexture(cudaGraphicsResource* gl_tex,
 
 void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
                                  uint32_t texture_size,
-                                 bool append, int mode)
+                                 bool append, Mode mode)
 {
     const unsigned u = (texture_size + 15) / 16;
 
@@ -1740,13 +1744,13 @@ void Renderable3D::copyToTexture(cudaGraphicsResource* gl_tex,
     CUDA_CHECK(cudaCreateSurfaceObject(&surf, &res_desc));
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    if (mode == 0) {
+    if (mode == MODE_HEIGHTMAP) {
         Renderable3D_copyDepthToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
-    } else if (mode == 1) {
+    } else if (mode == MODE_NORMALS) {
         Renderable3D_copyNormalToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
-    } else if (mode == 2) {
+    } else if (mode == MODE_SSAO) {
         Renderable3D_copySSAOToSurface<<<dim3(u, u), dim3(16, 16)>>>(
                 this, surf, texture_size, append);
     }

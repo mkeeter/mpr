@@ -26,7 +26,7 @@ int main(int, char**)
     auto r = Renderable::build(t, 1024, 3);
     r->tape.print();
 
-    r->run({Eigen::Matrix4f::Identity()});
+    r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_SSAO);
 
     libfive::Heightmap out(r->image.size_px, r->image.size_px);
     out.norm = 0;

@@ -27,7 +27,7 @@ int main(int, char**)
     const auto size = 1024;
     auto r_ = Renderable::build(t, size, 2);
     auto r = dynamic_cast<Renderable2D*>(r_.get());
-    r->run({Eigen::Matrix4f::Identity()});
+    r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
 
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(r->image.size_px, r->image.size_px);

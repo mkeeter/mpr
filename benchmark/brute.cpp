@@ -122,13 +122,13 @@ int main(int argc, char **argv)
         auto r_ = Renderable::build(t, i, 2);
         auto r = dynamic_cast<Renderable2D*>(r_.get());
         for (unsigned i=0; i < 10; ++i) {
-            r->run({Eigen::Matrix4f::Identity()});
+            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
         }
         // Benchmark
         std::vector<double> times_ms;
         for (unsigned i=0; i < 100; ++i) {
             auto start_gpu = std::chrono::steady_clock::now();
-            r->run({Eigen::Matrix4f::Identity()});
+            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
             auto end_gpu = std::chrono::steady_clock::now();
             times_ms.push_back(
                     std::chrono::duration_cast<std::chrono::nanoseconds>(end_gpu - start_gpu).count()
