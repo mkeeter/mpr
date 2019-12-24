@@ -144,10 +144,17 @@ public:
 
     virtual ~Renderable();
 
+
+    enum Mode {
+        MODE_HEIGHTMAP,
+        MODE_NORMALS,
+        MODE_SSAO,
+    };
+
     // Returns a GPU-allocated Renderable struct
     static Handle build(libfive::Tree tree, uint32_t image_size_px,
                         uint8_t dimension);
-    virtual void run(const View& v)=0;
+    virtual void run(const View& v, Mode m)=0;
 
     uint32_t heightAt(const uint32_t x, const uint32_t y) const {
         return image(x, y);
@@ -159,7 +166,7 @@ public:
     static cudaGraphicsResource* registerTexture(GLuint t);
     virtual void copyToTexture(cudaGraphicsResource* gl_tex,
                                uint32_t texture_size,
-                               bool append, int mode)=0;
+                               bool append, Mode mode)=0;
     virtual uint32_t dimension() const=0;
 
     Image image;
@@ -180,10 +187,10 @@ protected:
 
 class Renderable3D : public Renderable {
 public:
-    void run(const View& v) override;
+    void run(const View& v, Mode m) override;
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
-                       bool append, int mode) override;
+                       bool append, Renderable::Mode mode) override;
 
     __device__
     void copyDepthToSurface(cudaSurfaceObject_t surf,
@@ -213,7 +220,17 @@ public:
     __device__
     uint32_t drawNormals(const float3 f, const uint32_t subtape_index, const View& v);
 
+    // Renders from depth + norm into ssao
+    __device__
+    void drawSSAO(const float radius);
+
+    // Blurs from ssao into temp
+    __device__
+    void blurSSAO();
+
     Image norm;
+    Image ssao;
+    Image temp;
 
     Renderable3D(libfive::Tree tree, uint32_t image_size_px);
 
@@ -231,7 +248,8 @@ protected:
     Renderable3D(const Renderable3D& other)=delete;
     Renderable3D& operator=(const Renderable3D& other)=delete;
 
-    Eigen::Matrix<float, 8, 3> ssao_kernel;
+    Eigen::Matrix<float, 32, 3> ssao_kernel;
+    Eigen::Matrix<float, 16*16, 3> ssao_rvecs;
 
     friend class Renderable;
 };
@@ -240,12 +258,12 @@ protected:
 
 class Renderable2D : public Renderable {
 public:
-    void run(const View& v) override;
+    void run(const View& v, Renderable::Mode m) override;
     void runBrute(const View& v);
     void runBruteKernel(const View& v);
     void copyToTexture(cudaGraphicsResource* gl_tex,
                        uint32_t texture_size,
-                       bool append, int mode) override;
+                       bool append, Renderable::Mode mode) override;
 
     __device__
     void copyToSurface(cudaSurfaceObject_t surf,

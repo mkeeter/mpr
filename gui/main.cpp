@@ -144,9 +144,9 @@ int main(int argc, char** argv)
     bool just_saved = false;
 
     // Main loop
-    int render_size = 1024;
-    int render_dimension = 2;
-    int render_mode = 0;
+    int render_size = 256;
+    int render_dimension = 3;
+    int render_mode = 2;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -307,11 +307,11 @@ int main(int argc, char** argv)
 
             if (render_dimension == 3) {
                 ImGui::Text("Render mode:");
-                ImGui::RadioButton("Heightmap", &render_mode, 0);
+                ImGui::RadioButton("Heightmap", &render_mode, Renderable::MODE_HEIGHTMAP);
                 ImGui::SameLine();
-                ImGui::RadioButton("Normals", &render_mode, 1);
+                ImGui::RadioButton("Normals", &render_mode, Renderable::MODE_NORMALS);
                 ImGui::SameLine();
-                ImGui::RadioButton("SSAO", &render_mode, 2);
+                ImGui::RadioButton("SSAO", &render_mode, Renderable::MODE_SSAO);
             }
         ImGui::End();
 
@@ -333,15 +333,16 @@ int main(int argc, char** argv)
 
                 {   // Timed rendering pass
                     using namespace std::chrono;
+                    const auto m = static_cast<Renderable::Mode>(render_mode);
                     auto start = high_resolution_clock::now();
-                        s.second.handle->run({model.matrix()});
+                        s.second.handle->run({model.matrix()}, m);
                     auto end = high_resolution_clock::now();
                     auto dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
                     start = high_resolution_clock::now();
                         s.second.handle->copyToTexture(cuda_tex, TEXTURE_SIZE,
-                                                       append, render_mode);
+                                                       append, m);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Texture load time: %f s", dt.count() / 1e6);

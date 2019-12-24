@@ -10,38 +10,36 @@
 
 #include "renderable.hpp"
 
-int main(int argc, char **argv)
+int main(int, char**)
 {
-    libfive::Tree t = libfive::Tree::X();
-    if (argc == 2) {
-        std::ifstream ifs;
-        ifs.open(argv[1]);
-        if (ifs.is_open()) {
-            auto a = libfive::Archive::deserialize(ifs);
-            t = a.shapes.front().tree;
-        } else {
-            fprintf(stderr, "Could not open file %s\n", argv[1]);
-            exit(1);
-        }
-    } else {
-        auto X = libfive::Tree::X();
-        auto Y = libfive::Tree::Y();
-        auto Z = libfive::Tree::Z();
-        t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
-                sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
-    }
-    auto r = Renderable::build(t, 2048, 2);
+    auto X = libfive::Tree::X();
+    auto Y = libfive::Tree::Y();
+    auto Z = libfive::Tree::Z();
+    auto t = sqrt(X*X + Y*Y + Z*Z) - 0.1;
+    t = max(t, -max(-Z, max(X, Y)));
+
+    // Rotate by a little bit about the X axis
+    const auto angle = -M_PI/4;
+    t = t.remap(X, cos(angle) * Y + sin(angle) * Z,
+                  -sin(angle) * Y + cos(angle) * Z);
+
+    auto r = Renderable::build(t, 1024, 3);
     r->tape.print();
 
-    auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 100; ++i) {
-        r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
-    }
-    auto end_gpu = std::chrono::steady_clock::now();
-    std::cout << "GPU rendering took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() <<
-        " ms\n";
+    r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_SSAO);
 
+    libfive::Heightmap out(r->image.size_px, r->image.size_px);
+    out.norm = 0;
+    for (unsigned x=0; x < r->image.size_px; ++x) {
+        for (unsigned y=0; y < r->image.size_px; ++y) {
+            if (r->heightAt(x, y)) {
+                const auto o = static_cast<Renderable3D*>(r.get())->temp(x, y);
+                out.norm(y, x) = (0xFF << 24) | (o << 16) | (o << 8) | o;
+            }
+        }
+    }
+    out.saveNormalPNG("out_gpu_ssao.png");
+    /*
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(r->image.size_px, r->image.size_px);
     for (unsigned x=0; x < r->image.size_px; ++x) {
@@ -62,6 +60,8 @@ int main(int argc, char **argv)
         std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu).count() <<
         " ms\n";
     libfive::Heightmap::render(t, vox, abort)->savePNG("out_cpu.png");
+    */
 
     return 0;
 }
+
