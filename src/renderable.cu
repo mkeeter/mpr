@@ -1205,11 +1205,6 @@ void Renderable3D::drawSSAO(float radius)
             float dz = (float)((n >> 16) & 0xFF) - 128.0f;
             Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
 
-            /*
-            printf("%u:%u Got normal %f %f %f at %f %f %f [%u %u]\n", x, y, normal.x(), normal.y(), normal.z(), pos.x, pos.y, pos.z,
-                    x, y);
-                    */
-
             Eigen::Vector3f rvec = ssao_rvecs.row((threadIdx.x % 16) * 16 + (threadIdx.y % 16));
             Eigen::Vector3f tangent = (rvec - normal * rvec.dot(normal)).normalized();
             Eigen::Vector3f bitangent = normal.cross(tangent);
@@ -1232,19 +1227,12 @@ void Renderable3D::drawSSAO(float radius)
                     : 0;
                 const float actual_z = 2.0f * ((actual_h + 0.5f) / image.size_px - 0.5f);
 
-                /*
-                printf("%u:%u   checking %f %f %f [%u %u] => %f (%u), %f\n",
-                       x, y,
-                       sample_pos.x(), sample_pos.y(), sample_pos.z(),
-                       px, py,
-                       actual_z, actual_h, sample_pos.z());
-                       */
                 const auto dz = fabsf(sample_pos.z() - actual_z);
                 if (dz < radius) {
                     occlusion += sample_pos.z() <= actual_z;
                 } else if (dz < radius * 2.0f) {
                     if (sample_pos.z() <= actual_z) {
-                        occlusion += powf((dz - radius) / radius, 2.0f);
+                        occlusion += powf((radius - (dz - radius)) / radius, 2.0f);
                     }
                 }
             }
