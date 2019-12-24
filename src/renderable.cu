@@ -28,23 +28,40 @@ __device__ void storeAxes(const uint32_t tile,
     Interval Y(lower.y, upper.y);
     Interval Z(lower.z, upper.z);
 
+    Interval X_, Y_, Z_, W_;
+    X_ = v.mat(0, 0) * X +
+         v.mat(0, 1) * Y +
+         v.mat(0, 2) * Z + v.mat(0, 3);
+    Y_ = v.mat(1, 0) * X +
+         v.mat(1, 1) * Y +
+         v.mat(1, 2) * Z + v.mat(1, 3);
+    if (D == 3) {
+        Z_ = v.mat(2, 0) * X +
+             v.mat(2, 1) * Y +
+             v.mat(2, 2) * Z + v.mat(2, 3);
+        W_ = v.mat(3, 0) * X +
+             v.mat(3, 1) * Y +
+             v.mat(3, 2) * Z + v.mat(3, 3);
+
+        // Projection!
+        X_ = X_ / W_;
+        Y_ = Y_ / W_;
+        Z_ = Z_ / W_;
+    } else {
+        Z_ = Interval{v.mat(2,3), v.mat(2,3)};
+    }
+
+
     if (tape.axes.reg[0] != UINT16_MAX) {
-        regs[tape.axes.reg[0]] = v.mat(0, 0) * X +
-                                 v.mat(0, 1) * Y +
-                                 v.mat(0, 2) * Z + v.mat(0, 3);
+        regs[tape.axes.reg[0]] = X_;
     }
     if (tape.axes.reg[1] != UINT16_MAX) {
-        regs[tape.axes.reg[1]] = v.mat(1, 0) * X +
-                                 v.mat(1, 1) * Y +
-                                 v.mat(1, 2) * Z + v.mat(1, 3);
+        regs[tape.axes.reg[1]] = Y_;
     }
     if (tape.axes.reg[2] != UINT16_MAX) {
-        regs[tape.axes.reg[2]] = (D == 3)
-            ? (v.mat(2, 0) * X +
-               v.mat(2, 1) * Y +
-               v.mat(2, 2) * Z + v.mat(2, 3))
-            : Interval{v.mat(2,3), v.mat(2,3)};
+        regs[tape.axes.reg[2]] = Z_;
     }
+
 }
 
 template <typename A, typename B>
@@ -653,9 +670,9 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
     }
 
     {   // Prepopulate axis values
-        float3 f = image.voxelPos(p);
-        Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
-        pos = v.mat * pos;
+        const float3 f = image.voxelPos(p);
+        const Eigen::Vector4f pos_(f.x, f.y, f.z, 1.0f);
+        const Eigen::Vector3f pos = (v.mat * pos_).hnormalized();
         if (tape.axes.reg[0] != UINT16_MAX) {
             regs[tape.axes.reg[0]] = pos.x();
         }
@@ -770,9 +787,9 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::drawBrute(
     float regs[128];
 
     {   // Prepopulate axis values
-        float3 f = image.voxelPos(make_uint3(p.x, p.y, 0));
-        Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
-        pos = v.mat * pos;
+        const float3 f = image.voxelPos(make_uint3(p.x, p.y, 0));
+        const Eigen::Vector4f pos_(f.x, f.y, f.z, 1.0f);
+        const Eigen::Vector3f pos = (v.mat * pos_).hnormalized();
         if (tape.axes.reg[0] != UINT16_MAX) {
             regs[tape.axes.reg[0]] = pos.x();
         }
@@ -868,8 +885,8 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
     Deriv regs[128];
 
     {   // Prepopulate axis values
-        Eigen::Vector4f pos(f.x, f.y, f.z, 1.0f);
-        pos = v.mat * pos;
+        const Eigen::Vector4f pos_(f.x, f.y, f.z, 1.0f);
+        const Eigen::Vector3f pos = (v.mat * pos_).hnormalized();
         if (tape.axes.reg[0] != UINT16_MAX) {
             regs[tape.axes.reg[0]] = Deriv(pos.x(), v.mat(0, 0), v.mat(0, 1), v.mat(0, 2));
         }
@@ -1154,12 +1171,23 @@ void Renderable3D::shade()
             const Eigen::Vector3f light_dir = (light_pos - pos).normalized();
 
             // Apply light
-            float light = light_dir.dot(normal);
+            float light = fmaxf(0.0f, light_dir.dot(normal)) * 0.8f;
 
-            // Apply SSAO
+            // SSAO dimming
             light *= s / 255.0f;
 
-            const uint8_t color = light * 255.0f;
+            // Ambient
+            light += 0.2f;
+
+            // Clamp
+            if (light < 0.0f) {
+                light = 0.0f;
+            } else if (light > 1.0f) {
+                light = 1.0f;
+            }
+
+            uint8_t color = light * 255.0f;
+
             temp(x, y) = (0xFF << 24) | (color << 16) | (color << 8) | (color << 0);
         }
     }

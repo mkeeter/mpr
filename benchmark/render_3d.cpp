@@ -35,8 +35,10 @@ int main(int argc, char **argv)
     r->tape.print();
 
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 10; ++i) {
-        r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_SHADED);
+    Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+    T(3,2) = 0.4f;
+    for (unsigned i=0; i < 1; ++i) {
+        r->run({T}, Renderable::MODE_SHADED);
     }
     auto end_gpu = std::chrono::steady_clock::now();
     std::cout << "GPU rendering took " <<
