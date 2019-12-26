@@ -1,8 +1,5 @@
 
 (define s 0.123)
-(union
- (difference (rectangle [-1 -1] [1 1])
-     (rectangle [-0.99 -0.99] [0.99 0.99]))
  (sequence
   (text
  "  But this rough magic I
@@ -19,5 +16,5 @@ earth, and deeper than did
     I'll drown my book.")
   (move [-8 5.8])
   (scale-xyz [s s 1])
-  ))
+  )
  
