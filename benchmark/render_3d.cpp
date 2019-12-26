@@ -35,7 +35,7 @@ int main(int argc, char **argv)
     r->tape.print();
 
     Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
-    T(3,2) = 0.4f;
+    T(3,2) = 0.3f;
 
     // Warm-up runs
     for (unsigned i=0; i < 10; ++i) {

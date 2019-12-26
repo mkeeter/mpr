@@ -1431,12 +1431,15 @@ Renderable::Handle Renderable::build(libfive::Tree tree, uint32_t image_size_px,
         out = CUDA_MALLOC(Renderable3D, 1);
         new (out) Renderable3D(tree, image_size_px);
     }
-    std::cout << "choices: " << out->tape.num_csg_choices << "\n";
-    std::cout << "regs: " << out->tape.num_regs << "\n";
-    std::cout << "clauses: " << out->tape.num_clauses << "\n";
-    std::cout << "constants: " << out->tape.num_constants << "\n";
     cudaDeviceSynchronize();
     return Handle(out);
+}
+
+void Renderable::printStats() const {
+    std::cout << "choices: " << tape.num_csg_choices << "\n";
+    std::cout << "regs: " << tape.num_regs << "\n";
+    std::cout << "clauses: " << tape.num_clauses << "\n";
+    std::cout << "constants: " << tape.num_constants << "\n";
 }
 
 Renderable::Renderable(libfive::Tree tree, uint32_t image_size_px)

@@ -156,6 +156,9 @@ public:
                         uint8_t dimension);
     virtual void run(const View& v, Mode m)=0;
 
+    // Prints details about the tape
+    void printStats() const;
+
     uint32_t heightAt(const uint32_t x, const uint32_t y) const {
         return image(x, y);
     }

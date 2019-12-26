@@ -12,6 +12,7 @@ endfunction()
 
 benchmark(render_2d)
 benchmark(render_3d)
+benchmark(render_3d_multi)
 benchmark(circle)
 benchmark(donut)
 benchmark(tape_size ../gui/interpreter.cpp)
