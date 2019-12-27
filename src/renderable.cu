@@ -77,6 +77,10 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
         case OP_ASIN: return asin(lhs);
         case OP_ACOS: return acos(lhs);
         case OP_ATAN: return atan(lhs);
+        case OP_EXP: return exp(lhs);
+        case OP_SIN: return sin(lhs);
+        case OP_COS: return cos(lhs);
+        case OP_LOG: return log(lhs);
         // Skipping other transcendental functions for now
 
         case OP_ADD: return lhs + rhs;
@@ -121,6 +125,10 @@ __device__ inline Deriv derivOp(uint8_t op, A lhs, B rhs)
         case OP_ASIN: return asin(lhs);
         case OP_ACOS: return acos(lhs);
         case OP_ATAN: return atan(lhs);
+        case OP_EXP: return exp(lhs);
+        case OP_SIN: return sin(lhs);
+        case OP_COS: return cos(lhs);
+        case OP_LOG: return log(lhs);
         // Skipping other transcendental functions for now
 
         case OP_ADD: return lhs + rhs;
@@ -748,6 +756,10 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             case OP_ASIN: out = asinf(lhs); break;
             case OP_ACOS: out = acosf(lhs); break;
             case OP_ATAN: out = atanf(lhs); break;
+            case OP_EXP: out = expf(lhs); break;
+            case OP_SIN: out = sinf(lhs); break;
+            case OP_COS: out = cosf(lhs); break;
+            case OP_LOG: out = logf(lhs); break;
             // Skipping other transcendental functions for now
 
             case OP_ADD: out = lhs + rhs; break;
@@ -849,6 +861,10 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::drawBrute(
             case OP_ASIN: out = asinf(lhs); break;
             case OP_ACOS: out = acosf(lhs); break;
             case OP_ATAN: out = atanf(lhs); break;
+            case OP_EXP: out = expf(lhs); break;
+            case OP_SIN: out = sinf(lhs); break;
+            case OP_COS: out = cosf(lhs); break;
+            case OP_LOG: out = logf(lhs); break;
             // Skipping other transcendental functions for now
 
             case OP_ADD: out = lhs + rhs; break;

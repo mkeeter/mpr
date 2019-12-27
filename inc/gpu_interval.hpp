@@ -8,6 +8,13 @@ struct Interval {
     __device__ inline Interval(float a, float b) : v(make_float2(a, b)) {}
     __device__ inline float upper() const { return v.y; }
     __device__ inline float lower() const { return v.x; }
+
+#ifdef __CUDACC__
+    __device__ inline float width() const {
+        return __fsub_ru(upper(), lower());
+    }
+#endif
+
     float2 v;
 };
 
@@ -270,6 +277,65 @@ __device__ inline Interval asin(const Interval& x) {
 __device__ inline Interval atan(const Interval& x) {
     // Use double precision, since there aren't _ru / _rd primitives
     return {atan(x.lower()), atan(x.upper())};
+}
+
+__device__ inline Interval exp(const Interval& x) {
+    // Use double precision, since there aren't _ru / _rd primitives
+    return {exp(x.lower()), exp(x.upper())};
+}
+
+__device__ inline Interval fmod(const Interval& x, const Interval& y) {
+    // Caveats from the Boost Interval library also apply here:
+    //  This is only useful for clamping trig functions
+    const float yb = x.lower() < 0.0f ? y.lower() : y.upper();
+    const float n = floorf(__fdiv_rd(x.lower(), yb));
+    return x - n * y;
+}
+
+__device__ inline Interval cos(const Interval& x) {
+    static const float pi_f_l = 13176794.0f/(1<<22);
+    static const float pi_f_u = 13176795.0f/(1<<22);
+
+    const Interval pi{pi_f_l, pi_f_u};
+    const Interval pi2 = pi * 2.0f;
+
+    return Interval{-1.0f, 1.0f};
+
+    Interval tmp = fmod(x, pi2);
+
+    // We are covering a full period!
+    if (tmp.width() >= pi2.lower()) {
+        return Interval{-1.0f, 1.0f};
+    }
+
+    if (tmp.lower() >= pi.upper()) {
+        return -cos(tmp - pi);
+    }
+
+    // Use double precision, since there aren't _ru / _rd primitives
+    const float l = tmp.lower();
+    const float u = tmp.lower();
+    if (u <= pi.lower()) {
+        return {cos(u), cos(l)};
+    } else if (u <= pi2.lower()) {
+        return {-1.0f, cos(fminf(__fsub_rd(pi2.lower(), u), l))};
+    } else {
+        return {-1.0f, 1.0f};
+    }
+}
+
+__device__ inline Interval sin(const Interval& x) {
+    return cos(x - Interval{M_PI, M_PI} / 2.0f);
+}
+
+__device__ inline Interval log(const Interval& x) {
+    if (x.upper() < 0.0f) {
+        return {CUDART_NAN_F, CUDART_NAN_F};
+    } else if (x.lower() <= 0.0f) {
+        return {0.0f, log(x.upper())};
+    } else {
+        return {log(x.lower()), log(x.upper())};
+    }
 }
 
 #endif

@@ -162,4 +162,24 @@ __device__ inline Deriv asin(const Deriv& a) {
     const float d = sqrtf(1 - a.value() * a.value());
     return {asinf(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
 }
+
+__device__ inline Deriv exp(const Deriv& a) {
+    const float v = expf(a.value());
+    return {v, v * a.dx(), v * a.dy(), v * a.dz()};
+}
+
+__device__ inline Deriv cos(const Deriv& a) {
+    const float s = -sinf(a.value());
+    return {cosf(a.value()), s * a.dx(), s * a.dy(), s * a.dz()};
+}
+
+__device__ inline Deriv sin(const Deriv& a) {
+    const float c = cosf(a.value());
+    return {sinf(a.value()), c * a.dx(), c * a.dy(), c * a.dz()};
+}
+
+__device__ inline Deriv log(const Deriv& a) {
+    const float v = logf(a.value());
+    return {v, a.dx() / v, a.dy() / v, a.dz() / v};
+}
 #endif

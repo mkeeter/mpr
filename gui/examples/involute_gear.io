@@ -1,40 +1,58 @@
-(define r 3) ;; pitch radius
-(define pa 0.3) ;; pressure angle (radians)
-(define p 8) ;; diametral pitch
+;; pitch radius, pressure angle (radians), diametral pitch
+(define (gear r pa p)
+    ;; Round to the nearest number of teeth
+    (let* ((n (round (* r p 2)))
 
-;; Round to the nearest number of teeth
-(define n (round (* r p 2)))
+    ;; Updated pitch radius based on number of teeth
+    (r (/ n p 2))
 
-;; Updated pitch radius based on number of teeth
-(define r (/ n p 2))
+    (rb (* r (cos pa))) ;; base circle radius
+    (a (/ p)) ;; addendum
+    (d (/ 1.157 p)) ;; dedendum
+    (ro (+ r a)) ;; outer radius
+    (rr (- r d)) ;; inner radius
 
-(define rb (* r (cos pa))) ;; base circle radius
-(define a (/ p)) ;; addendum
-(define d (/ 1.157 p)) ;; dedendum
-(define ro (+ r a)) ;; outer radius
-(define rr (- r d)) ;; inner radius
+    (t (sqrt (- (/ (square r) (square rb)) 1)))
+    (rot (+ (atan (- (sin t) (* t (cos t)))
+                         (+ (cos t) (* t (sin t)))) (/ pi 2 n)))
 
-(define t (sqrt (- (/ (square r) (square rb)) 1)))
-(define rot (+ (atan (- (sin t) (* t (cos t)))
-                     (+ (cos t) (* t (sin t)))) (/ pi 2 n)))
+    (tooth (lambda-shape (x y z)
+      (let* ((r2 (+ (square x) (square y)))
+             (r (sqrt r2)))
+      (- (sqrt (max 0 (- r2 (square rb))))
+         (* rb (+ (atan (/ y x)) (acos (min 1 (max -1 (/ rb r)))) rot))))))
 
-(define-shape (tooth x y z)
-  (let* ((r2 (+ (square x) (square y)))
-         (r (sqrt r2)))
-  (- (sqrt (max 0 (- r2 (square rb))))
-     (* rb (+ (atan (/ y x)) (acos (min 1 (max -1 (/ rb r)))) rot)))))
+    (tooth (intersection tooth
+        (reflect-y tooth)
+        (lambda-shape (x y z) (- x))))
+    (teeth
+        (apply union
+            (map (lambda (i) (rotate-z tooth (* 2 pi (/ i n))))
+                 (iota n)))))
+    (scale-xyz
+      (intersection (circle ro) (union teeth (circle rr)))
+      [0.3 0.3 0.1])
+))
 
-(define tooth (intersection tooth
-    (reflect-y tooth)
-    (lambda-shape (x y z) (- x))))
-(define teeth
-    (apply union
-        (map (lambda (i) (rotate-z tooth (* 2 pi (/ i n))))
-             (iota n))))
-(scale-xyz
-  (intersection (circle ro) (union teeth (circle rr)))
-  [0.3 0.3 0.1])
-
+(define out (union
+  (sequence
+    (gear 1.25 0.3 8)
+    (difference(circle 0.1))
+    (extrude-z -0.08 0.08))
+  (sequence
+    (gear 0.6 0.3 8)
+    (difference (circle 0.11))
+    (rotate-z 0.0)
+    (move [0 0.57])
+    (extrude-z -0.04 0.04))
+  (sequence
+    (gear 0.8 0.3 8)
+    (difference (circle 0.09))
+    (rotate-z 0.0)
+    (move [0.63 0])
+    (extrude-z -0.12 0.12))
+  ))
+out
 #|
 Notes:
 
