@@ -248,4 +248,28 @@ __device__ inline Interval sqrt(const Interval& x) {
         return {__fsqrt_rd(x.lower()), __fsqrt_ru(x.upper())};
     }
 }
+
+__device__ inline Interval acos(const Interval& x) {
+    if (x.upper() < -1.0f || x.lower() > 1.0f) {
+        return {CUDART_NAN_F, CUDART_NAN_F};
+    } else {
+        // Use double precision, since there aren't _ru / _rd primitives
+        return {acos(x.upper()), acos(x.lower())};
+    }
+}
+
+__device__ inline Interval asin(const Interval& x) {
+    if (x.upper() < -1.0f || x.lower() > 1.0f) {
+        return {CUDART_NAN_F, CUDART_NAN_F};
+    } else {
+        // Use double precision, since there aren't _ru / _rd primitives
+        return {asin(x.lower()), asin(x.upper())};
+    }
+}
+
+__device__ inline Interval atan(const Interval& x) {
+    // Use double precision, since there aren't _ru / _rd primitives
+    return {atan(x.lower()), atan(x.upper())};
+}
+
 #endif

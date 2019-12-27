@@ -73,7 +73,11 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
         case OP_SQRT: return sqrt(lhs);
         case OP_NEG: return -lhs;
         case OP_ABS: return abs(lhs);
-        // Skipping transcendental functions for now
+
+        case OP_ASIN: return asin(lhs);
+        case OP_ACOS: return acos(lhs);
+        case OP_ATAN: return atan(lhs);
+        // Skipping other transcendental functions for now
 
         case OP_ADD: return lhs + rhs;
         case OP_MUL: return lhs * rhs;
@@ -113,7 +117,11 @@ __device__ inline Deriv derivOp(uint8_t op, A lhs, B rhs)
         case OP_SQRT: return sqrt(lhs);
         case OP_NEG: return -lhs;
         case OP_ABS: return abs(lhs);
-        // Skipping transcendental functions for now
+
+        case OP_ASIN: return asin(lhs);
+        case OP_ACOS: return acos(lhs);
+        case OP_ATAN: return atan(lhs);
+        // Skipping other transcendental functions for now
 
         case OP_ADD: return lhs + rhs;
         case OP_MUL: return lhs * rhs;
@@ -736,7 +744,11 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             case OP_SQRT: out = sqrtf(lhs); break;
             case OP_NEG: out = -lhs; break;
             case OP_ABS: out = fabsf(lhs); break;
-            // Skipping transcendental functions for now
+
+            case OP_ASIN: out = asinf(lhs); break;
+            case OP_ACOS: out = acosf(lhs); break;
+            case OP_ATAN: out = atanf(lhs); break;
+            // Skipping other transcendental functions for now
 
             case OP_ADD: out = lhs + rhs; break;
             case OP_MUL: out = lhs * rhs; break;
@@ -833,7 +845,11 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::drawBrute(
             case OP_SQRT: out = sqrtf(lhs); break;
             case OP_NEG: out = -lhs; break;
             case OP_ABS: out = fabsf(lhs); break;
-            // Skipping transcendental functions for now
+
+            case OP_ASIN: out = asinf(lhs); break;
+            case OP_ACOS: out = acosf(lhs); break;
+            case OP_ATAN: out = atanf(lhs); break;
+            // Skipping other transcendental functions for now
 
             case OP_ADD: out = lhs + rhs; break;
             case OP_MUL: out = lhs * rhs; break;

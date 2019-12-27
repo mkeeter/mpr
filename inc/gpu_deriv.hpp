@@ -144,7 +144,22 @@ __device__ inline Deriv operator-(const float& a, const Deriv& b) {
 }
 
 __device__ inline Deriv sqrt(const Deriv& a) {
-    const float d = (2 * sqrt(a.value()));
-    return {sqrt(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
+    const float d = (2 * sqrtf(a.value()));
+    return {sqrtf(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
+}
+
+__device__ inline Deriv atan(const Deriv& a) {
+    const float d = (a.value() * a.value() + 1);
+    return {atanf(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
+}
+
+__device__ inline Deriv acos(const Deriv& a) {
+    const float d = -sqrtf(1 - a.value() * a.value());
+    return {acosf(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
+}
+
+__device__ inline Deriv asin(const Deriv& a) {
+    const float d = sqrtf(1 - a.value() * a.value());
+    return {asinf(a.value()), a.dx() / d, a.dy() / d, a.dz() / d};
 }
 #endif
