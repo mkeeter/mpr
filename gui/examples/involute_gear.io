@@ -57,7 +57,7 @@
 
   (rotate-y -0.3)
   (rotate-x 0.5)
-  (move [-0.2 -0.2 0])
+  (move [-0.2 -0.3 0])
   )
 #|
 Notes:
