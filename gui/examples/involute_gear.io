@@ -38,7 +38,7 @@
   (sequence
     (gear 1.25 0.3 8)
     (difference(circle 0.1))
-    (extrude-z -0.08 0.08))
+    (extrude-z -0.07 0.07))
   (sequence
     (gear 0.6 0.3 8)
     (difference (circle 0.11))
@@ -51,7 +51,14 @@
     (move [0.57 0])
     (extrude-z -0.12 0.12))
   ))
-out
+(sequence
+  out
+  (scale-xyz [1.5 1.5 1.5])
+
+  (rotate-y -0.3)
+  (rotate-x 0.5)
+  (move [-0.2 -0.2 0])
+  )
 #|
 Notes:
 
