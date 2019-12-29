@@ -27,3 +27,5 @@
 /*  Generating normals is done with this many threads + blocks */
 #define LIBFIVE_CUDA_NORMAL_TILES 4
 #define LIBFIVE_CUDA_NORMAL_BLOCKS 256
+
+//#define USE_AFFINE

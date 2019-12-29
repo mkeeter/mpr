@@ -38,11 +38,11 @@ int main(int argc, char **argv)
     T(3,2) = 0.3f;
 
     // Warm-up runs
-    for (unsigned i=0; i < 0; ++i) {
+    for (unsigned i=0; i < 10; ++i) {
         r->run({T}, Renderable::MODE_SHADED);
     }
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 1; ++i) {
+    for (unsigned i=0; i < 10; ++i) {
         r->run({T}, Renderable::MODE_SHADED);
     }
     auto end_gpu = std::chrono::steady_clock::now();

@@ -32,10 +32,10 @@ struct Affine {
 #define CHECK(d) do {                           \
             if (d >= 0.0f) {                    \
                 lower = __fsub_rd(lower, d);    \
-                upper = __fadd_ru(lower, d);    \
+                upper = __fadd_ru(upper, d);    \
             } else {                            \
                 lower = __fadd_rd(lower, d);    \
-                upper = __fsub_ru(lower, d);    \
+                upper = __fsub_ru(upper, d);    \
             }                                   \
         } while (0)
 
@@ -45,6 +45,14 @@ struct Affine {
         CHECK(err);
 #undef CHECK
         return {lower, upper};
+    }
+
+    __device__ float upper() const {
+        return as_interval().upper();
+    }
+
+    __device__ float lower() const {
+        return as_interval().lower();
     }
 #endif
 
@@ -58,6 +66,14 @@ struct Affine {
 #ifdef __CUDACC__
 __device__ inline Affine operator-(const Affine& a) {
     return {-a.v0, -a.d1, -a.d2, -a.d3, a.err};
+}
+
+__device__ inline float lower(const Affine& a) {
+    return a.lower();
+}
+
+__device__ inline float upper(const Affine& a) {
+    return a.upper();
 }
 
 // General form of affine binary operations,
@@ -120,7 +136,7 @@ __device__ inline Affine sqrt(const Affine& input) {
     const float sq1 = sqrtf(i.lower());
     const float sq2 = sqrtf(i.upper());
     const float alpha = 1.0f / (sq1 + sq2);
-    const float zeta = (sq1 + sq2) / 8.0f + 0.5f * sq2 * sq2 / (sq1 + sq2);
+    const float zeta = (sq1 + sq2) / 8.0f + 0.5f * sq1 * sq2 / (sq1 + sq2);
     double delta = (sq2 - sq1) * (sq2 - sq1) / (8.0f * (sq1 + sq2));
     return unary_op(input, alpha, zeta, delta);
 }
@@ -165,7 +181,7 @@ __device__ inline Affine operator*(const Affine& a, const Affine& b) {
         + u * v - 0.5f * (fabsf(a.d1 * b.d1) +
                           fabsf(a.d2 * b.d2) +
                           fabsf(a.d3 * b.d3));
-    return {a.v0 + b.v0 + 0.5f * (a.d1 * b.d1 + a.d2 * b.d2 + a.d3 * b.d3),
+    return {a.v0 * b.v0 + 0.5f * (a.d1 * b.d1 + a.d2 * b.d2 + a.d3 * b.d3),
             (a.v0 * b.d1 + a.d1 * b.v0),
             (a.v0 * b.d2 + a.d2 * b.v0),
             (a.v0 * b.d3 + a.d3 * b.v0),
@@ -176,8 +192,8 @@ __device__ inline Affine operator*(const Affine& a, const float& b) {
     return {a.v0 * b, a.d1 * b, a.d2 * b, a.d3 * b, a.err * fabsf(b)};
 }
 
-__device__ inline Affine operator*(const float& b, const Affine& a) {
-    return {a.v0 * b, a.d1 * b, a.d2 * b, a.d3 * b, a.err * fabsf(b)};
+__device__ inline Affine operator*(const float& a, const Affine& b) {
+    return b * a;
 }
 
 __device__ inline Affine operator-(const Affine& a, const Affine& b) {
@@ -186,6 +202,10 @@ __device__ inline Affine operator-(const Affine& a, const Affine& b) {
             a.d2 - b.d2,
             a.d3 - b.d3,
             a.err + b.err};
+}
+
+__device__ inline Affine square(const Affine& a) {
+    return a * a;
 }
 
 __device__ inline Affine operator-(const Affine& a, const float& b) {
@@ -206,6 +226,53 @@ __device__ inline Affine operator-(const float& b, const Affine& a) {
 
 __device__ inline Affine operator/(const Affine& a, const Affine& b) {
     return a * reciprocal(b);
+}
+
+__device__ inline Affine min(const Affine& a, const Affine& b) {
+    const Interval ia = a.as_interval();
+    const Interval ib = b.as_interval();
+    if (ia.upper() <= ib.lower()) {
+        return a;
+    } else if (ib.upper() <= ia.lower()) {
+        return b;
+    } else {
+        return 0.5f * ((a + b) - abs(a - b));
+    }
+}
+
+__device__ inline Affine max(const Affine& a, const Affine& b) {
+    const Interval ia = a.as_interval();
+    const Interval ib = b.as_interval();
+    if (ia.lower() >= ib.upper()) {
+        return a;
+    } else if (ib.lower() >= ia.upper()) {
+        return b;
+    } else {
+        return 0.5f * ((a + b) + abs(a - b));
+    }
+}
+
+// TODO
+__device__ inline Affine asin(const Affine& a) {
+    return Affine();
+}
+__device__ inline Affine acos(const Affine& a) {
+    return Affine();
+}
+__device__ inline Affine atan(const Affine& a) {
+    return Affine();
+}
+__device__ inline Affine sin(const Affine& a) {
+    return Affine();
+}
+__device__ inline Affine cos(const Affine& a) {
+    return Affine();
+}
+__device__ inline Affine log(const Affine& a) {
+    return Affine();
+}
+__device__ inline Affine exp(const Affine& a) {
+    return Affine();
 }
 
 #endif

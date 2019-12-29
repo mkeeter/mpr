@@ -120,7 +120,7 @@ Tape Tape::build(libfive::Tree tree) {
     }
 
     auto data = CUDA_MALLOC(char, sizeof(Clause) * flat.size() +
-                                  sizeof(float) * constant_data.size());
+                                  sizeof(float) * std::max(1UL, constant_data.size()));
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // Copy everything onto the GPU

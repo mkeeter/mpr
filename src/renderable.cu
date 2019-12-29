@@ -5,6 +5,12 @@
 #include "gpu_deriv.hpp"
 #include "gpu_interval.hpp"
 
+#ifdef USE_AFFINE
+#define IntervalType Affine
+#else
+#define IntervalType Interval
+#endif
+
 // Copy-and paste the result of benchmark/dump_tape into this block
 // to test out a kernel without the overhead of the interpreter
 __global__ void evalRawTape(Image* image, View v)
@@ -28,11 +34,11 @@ __device__ void storeAxes(const uint32_t tile,
     const float3 lower = tiles.tileToLowerPos(tile);
     const float3 upper = tiles.tileToUpperPos(tile);
 
-    Interval X(lower.x, upper.x);
-    Interval Y(lower.y, upper.y);
-    Interval Z(lower.z, upper.z);
+    IntervalType X(Interval{lower.x, upper.x});
+    IntervalType Y(Interval{lower.y, upper.y});
+    IntervalType Z(Interval{lower.z, upper.z});
 
-    Interval X_, Y_, Z_, W_;
+    IntervalType X_, Y_, Z_, W_;
     X_ = v.mat(0, 0) * X +
          v.mat(0, 1) * Y +
          v.mat(0, 2) * Z + v.mat(0, 3);
@@ -52,7 +58,7 @@ __device__ void storeAxes(const uint32_t tile,
         Y_ = Y_ / W_;
         Z_ = Z_ / W_;
     } else {
-        Z_ = Interval{v.mat(2,3), v.mat(2,3)};
+        Z_ = IntervalType(Interval(v.mat(2,3), v.mat(2,3)));
     }
 
 
@@ -69,7 +75,7 @@ __device__ void storeAxes(const uint32_t tile,
 }
 
 template <typename A, typename B>
-__device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
+__device__ inline IntervalType intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
 {
     using namespace libfive::Opcode;
     switch (op) {
@@ -113,7 +119,7 @@ __device__ inline Interval intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
         // Skipping various hard functions here
         default: break;
     }
-    return {0.0f, 0.0f};
+    return IntervalType(Interval(0.0f, 0.0f));
 }
 
 template <typename A, typename B>
@@ -163,7 +169,7 @@ __device__
 TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         const uint32_t tile, const View& v)
 {
-    Interval regs[128];
+    IntervalType regs[128];
     storeAxes(tile, v, tiles, tape, regs);
 
     // Unpack a 1D offset into the data arrays
@@ -179,23 +185,23 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         using namespace libfive::Opcode;
 
         const Clause c = clause_ptr[i];
-        Interval out;
+        IntervalType out;
         uint8_t choice = 0;
         switch (c.banks) {
             case 0: // Interval op Interval
-                out = intervalOp<Interval, Interval>(c.opcode,
+                out = intervalOp<IntervalType, IntervalType>(c.opcode,
                         regs[c.lhs],
                         regs[c.rhs],
                         choice);
                 break;
             case 1: // Constant op Interval
-                out = intervalOp<float, Interval>(c.opcode,
+                out = intervalOp<float, IntervalType>(c.opcode,
                         constant_ptr[c.lhs],
                         regs[c.rhs],
                         choice);
                 break;
             case 2: // Interval op Constant
-                out = intervalOp<Interval, float>(c.opcode,
+                out = intervalOp<IntervalType, float>(c.opcode,
                         regs[c.lhs],
                         constant_ptr[c.rhs],
                         choice);
@@ -217,7 +223,7 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
     }
 
     const Clause c = clause_ptr[num_clauses - 1];
-    const Interval result = regs[c.out];
+    const IntervalType result = regs[c.out];
 
     // If this tile is unambiguously filled, then mark it at the end
     // of the tiles list
@@ -377,7 +383,7 @@ __device__
 TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const uint32_t subtile, const uint32_t tile, const View& v)
 {
-    Interval regs[128];
+    IntervalType regs[128];
     storeAxes(subtile, v, subtiles, tape, regs);
 
     uint32_t choices[256];
@@ -390,7 +396,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     const Clause* __restrict__ tape = subtapes.data[subtape_index];
     const float* __restrict__ constant_ptr = &this->tape.constant(0);
 
-    Interval result;
+    IntervalType result;
     bool has_any_choices = false;
     while (true) {
         using namespace libfive::Opcode;
@@ -408,21 +414,21 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         }
         const Clause c = tape[s++];
 
-        Interval out;
+        IntervalType out;
         uint8_t choice = 0;
         switch (c.banks) {
             case 0: // Interval op Interval
-                out = intervalOp<Interval, Interval>(c.opcode,
+                out = intervalOp<IntervalType, IntervalType>(c.opcode,
                         regs[c.lhs],
                         regs[c.rhs], choice);
                 break;
             case 1: // Constant op Interval
-                out = intervalOp<float, Interval>(c.opcode,
+                out = intervalOp<float, IntervalType>(c.opcode,
                         constant_ptr[c.lhs],
                         regs[c.rhs], choice);
                 break;
             case 2: // Interval op Constant
-                out = intervalOp<Interval, float>(c.opcode,
+                out = intervalOp<IntervalType, float>(c.opcode,
                          regs[c.lhs],
                          constant_ptr[c.rhs], choice);
                 break;
