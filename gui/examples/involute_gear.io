@@ -42,14 +42,13 @@
   (sequence
     (gear 0.6 0.3 8)
     (difference (circle 0.11))
-    (rotate-z 0.0)
     (move [0 0.57])
     (extrude-z -0.04 0.04))
   (sequence
-    (gear 0.8 0.3 8)
+    (gear 0.6 0.3 8)
     (difference (circle 0.09))
-    (rotate-z 0.0)
-    (move [0.63 0])
+    (reflect-xy)
+    (move [0.57 0])
     (extrude-z -0.12 0.12))
   ))
 out

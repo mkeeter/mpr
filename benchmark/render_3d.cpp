@@ -30,7 +30,7 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    auto r_ = Renderable::build(t, 512, 3);
+    auto r_ = Renderable::build(t, 1024, 3);
     auto r = dynamic_cast<Renderable3D*>(r_.get());
     r->tape.print();
 

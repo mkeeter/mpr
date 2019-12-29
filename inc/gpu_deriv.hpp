@@ -179,7 +179,7 @@ __device__ inline Deriv sin(const Deriv& a) {
 }
 
 __device__ inline Deriv log(const Deriv& a) {
-    const float v = logf(a.value());
-    return {v, a.dx() / v, a.dy() / v, a.dz() / v};
+    const float v = a.value();
+    return {logf(v), a.dx() / v, a.dy() / v, a.dz() / v};
 }
 #endif
