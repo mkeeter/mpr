@@ -31,7 +31,7 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
 
-    for (unsigned size=512; size < 2048; size += 128) {
+    for (unsigned size=512; size <= 2048; size += 128) {
         std::cout << size << " " << std::flush;
         auto r_ = Renderable::build(t, size, 3);
         auto r = dynamic_cast<Renderable3D*>(r_.get());
