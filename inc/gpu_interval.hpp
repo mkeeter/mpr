@@ -10,6 +10,13 @@ struct Interval {
     __device__ inline float lower() const { return v.x; }
 
 #ifdef __CUDACC__
+    __device__ inline float mid() const {
+        return __fdiv_ru(lower(), 2.0f) + __fdiv_rd(upper(), 2.0f);
+    }
+    __device__ inline float rad() const {
+        const float m = mid();
+        return fmaxf(__fsub_ru(m, lower()), __fsub_ru(upper(), m));
+    }
     __device__ inline float width() const {
         return __fsub_ru(upper(), lower());
     }

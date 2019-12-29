@@ -1,6 +1,10 @@
 #include <cassert>
 #include "renderable.hpp"
 
+#include "gpu_affine.hpp"
+#include "gpu_deriv.hpp"
+#include "gpu_interval.hpp"
+
 // Copy-and paste the result of benchmark/dump_tape into this block
 // to test out a kernel without the overhead of the interpreter
 __global__ void evalRawTape(Image* image, View v)

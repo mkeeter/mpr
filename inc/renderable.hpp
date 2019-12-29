@@ -4,10 +4,7 @@
 #include <libfive/tree/tree.hpp>
 
 #include "check.hpp"
-#include "clause.hpp"
 #include "filled.hpp"
-#include "gpu_interval.hpp"
-#include "gpu_deriv.hpp"
 #include "image.hpp"
 #include "parameters.hpp"
 #include "queue.hpp"

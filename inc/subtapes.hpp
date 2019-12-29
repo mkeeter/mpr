@@ -1,4 +1,6 @@
 #include <cstdint>
+
+#include "clause.hpp"
 #include "parameters.hpp"
 
 struct Subtapes {
