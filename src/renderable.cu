@@ -387,6 +387,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     const float* __restrict__ constant_ptr = &this->tape.constant(0);
 
     Interval result;
+    bool has_any_choices = false;
     while (true) {
         using namespace libfive::Opcode;
 
@@ -428,6 +429,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                 break;
         }
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
+            has_any_choices |= (choice != 0);
             choices[choice_index / 16] |= (choice << ((choice_index % 16) * 2));
             choice_index++;
         }
@@ -453,7 +455,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     // Re-use the previous tape and return immediately if the previous
     // tape was terminal (i.e. having no min/max clauses to specialize)
     bool terminal = tiles.terminal(tile);
-    if (terminal) {
+    if (terminal || !has_any_choices) {
         subtiles.setHead(subtile, tiles.head(tile), true);
         return TILE_AMBIGUOUS;
     }
