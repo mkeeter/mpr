@@ -11,6 +11,7 @@ function(benchmark)
 endfunction()
 
 benchmark(render_2d)
+benchmark(render_2d_table)
 benchmark(render_3d)
 benchmark(render_3d_multi)
 benchmark(circle)
