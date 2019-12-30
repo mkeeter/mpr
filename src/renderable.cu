@@ -79,47 +79,31 @@ __device__ inline IntervalType intervalOp(uint8_t op, A lhs, B rhs, uint8_t& cho
 {
     using namespace libfive::Opcode;
     switch (op) {
-        case OP_SQUARE: return square(lhs);
-        case OP_SQRT: return sqrt(lhs);
-        case OP_NEG: return -lhs;
-        case OP_ABS: return abs(lhs);
+        case OP_SQUARE: return IntervalType(square(lhs));
+        case OP_SQRT: return IntervalType(sqrt(lhs));
+        case OP_NEG: return IntervalType(-lhs);
+        case OP_ABS: return IntervalType(abs(lhs));
 
-        case OP_ASIN: return asin(lhs);
-        case OP_ACOS: return acos(lhs);
-        case OP_ATAN: return atan(lhs);
-        case OP_EXP: return exp(lhs);
-        case OP_SIN: return sin(lhs);
-        case OP_COS: return cos(lhs);
-        case OP_LOG: return log(lhs);
+        case OP_ASIN: return IntervalType(asin(lhs));
+        case OP_ACOS: return IntervalType(acos(lhs));
+        case OP_ATAN: return IntervalType(atan(lhs));
+        case OP_EXP: return IntervalType(exp(lhs));
+        case OP_SIN: return IntervalType(sin(lhs));
+        case OP_COS: return IntervalType(cos(lhs));
+        case OP_LOG: return IntervalType(log(lhs));
         // Skipping other transcendental functions for now
 
-        case OP_ADD: return lhs + rhs;
-        case OP_MUL: return lhs * rhs;
-        case OP_DIV: return lhs / rhs;
-        case OP_MIN: if (upper(lhs) < lower(rhs)) {
-                         choice = 1;
-                         return lhs;
-                     } else if (upper(rhs) < lower(lhs)) {
-                         choice = 2;
-                         return rhs;
-                     } else {
-                         return min(lhs, rhs);
-                     }
-        case OP_MAX: if (lower(lhs) > upper(rhs)) {
-                         choice = 1;
-                         return lhs;
-                     } else if (lower(rhs) > upper(lhs)) {
-                         choice = 2;
-                         return rhs;
-                     } else {
-                         return max(lhs, rhs);
-                     }
-        case OP_SUB: return lhs - rhs;
+        case OP_ADD: return IntervalType(lhs + rhs);
+        case OP_MUL: return IntervalType(lhs * rhs);
+        case OP_DIV: return IntervalType(lhs / rhs);
+        case OP_MIN: return IntervalType(min(lhs, rhs, choice));
+        case OP_MAX: return IntervalType(max(lhs, rhs, choice));
+        case OP_SUB: return IntervalType(lhs - rhs);
 
         // Skipping various hard functions here
         default: break;
     }
-    return IntervalType(Interval(0.0f, 0.0f));
+    return IntervalType(0.0f);
 }
 
 template <typename A, typename B>

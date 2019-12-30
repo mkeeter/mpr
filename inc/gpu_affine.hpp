@@ -11,7 +11,7 @@
 struct Affine {
     __device__ inline Affine() {}
 
-    __device__ inline Affine(float f)
+    __device__ inline explicit Affine(float f)
         : v0(f), d1(0.0f), d2(0.0f), d3(0.0f), err(0.0f)
     {}
 
@@ -194,18 +194,16 @@ __device__ inline Affine operator*(const Affine& a, const Affine& b) {
 }
 
 __device__ inline Affine square(const Affine& a) {
-    return Affine(square(a.as_interval()));
-    const float u = fabsf(a.d1) + fabsf(a.d2) + fabsf(a.d3);
-    const float w = (a.d1 * a.d1) +
+    const float u = fabsf(a.d1) + fabsf(a.d2) + fabsf(a.d3) + fabsf(a.err);
+    const float s = (a.d1 * a.d1) +
                     (a.d2 * a.d2) +
                     (a.d3 * a.d3) +
                     (a.err * a.err);
-    const float e_xx = a.err * (a.err + 2.0f * (fabsf(a.v0) + u))
-        - 0.5f * w;
-    return {a.v0 * a.v0 + 0.5f * w,
-            2.0f * a.v0 * a.d1,
-            2.0f * a.v0 * a.d2,
-            2.0f * a.v0 * a.d3,
+    const float e_xx = u * u - 0.5f * s;
+    return {a.v0 * a.v0 + 0.5f * s,
+            2 * a.v0 * a.d1,
+            2 * a.v0 * a.d2,
+            2 * a.v0 * a.d3,
             e_xx};
 }
 
@@ -249,48 +247,26 @@ __device__ inline Affine operator/(const Affine& a, const float& b) {
     return a * Affine(1.0f/b);
 }
 
-__device__ inline Affine min(const Affine& a, const Affine& b) {
-    const Interval ia = a.as_interval();
-    const Interval ib = b.as_interval();
-    if (ia.upper() <= ib.lower()) {
-        return a;
-    } else if (ib.upper() <= ia.lower()) {
-        return b;
-    }
-    // Do fancier checking!
-    bool a_always_below = true;
-    bool b_always_below = true;
-    for (unsigned i=0; i < 8 && (a_always_below || b_always_below); ++i) {
-        // These are values before uncorrelated error terms are applied
-        const float ai = a.v0 + ((i & 1) ? a.d1 : (-a.d1)) +
-                                ((i & 2) ? a.d2 : (-a.d2)) +
-                                ((i & 4) ? a.d3 : (-a.d3));
-        const float bi = b.v0 + ((i & 1) ? b.d1 : (-b.d1)) +
-                                ((i & 2) ? b.d2 : (-b.d2)) +
-                                ((i & 4) ? b.d3 : (-b.d3));
-        a_always_below &= (__fadd_ru(ai, a.err) < __fsub_rd(bi, b.err));
-        b_always_below &= (__fadd_ru(bi, b.err) < __fsub_rd(ai, a.err));
-    }
-    if (a_always_below) {
-        return a;
-    } else if (b_always_below) {
-        return b;
-    }
-    return Affine(min(ia, ib));
+__device__ inline Affine operator/(const float& a, const Affine& b) {
+    return Affine(a) * reciprocal(b);
 }
 
-__device__ inline Affine max(const Affine& a, const Affine& b) {
+__device__ inline Affine min(const Affine& a, const Affine& b, uint8_t& choice) {
     const Interval ia = a.as_interval();
     const Interval ib = b.as_interval();
-    if (ia.lower() >= ib.upper()) {
+    if (ia.upper() < ib.lower()) {
+        choice = 1;
         return a;
-    } else if (ib.lower() >= ia.upper()) {
+    } else if (ib.upper() < ia.lower()) {
+        choice = 2;
         return b;
     }
     // Do fancier checking!
     bool a_always_below = true;
     bool b_always_below = true;
-    for (unsigned i=0; i < 8 && (a_always_below || b_always_below); ++i) {
+    bool a_sometimes_below = false;
+    bool b_sometimes_below = false;
+    for (unsigned i=0; i < 8; ++i) {
         // These are values before uncorrelated error terms are applied
         const float ai = a.v0 + ((i & 1) ? a.d1 : (-a.d1)) +
                                 ((i & 2) ? a.d2 : (-a.d2)) +
@@ -298,15 +274,121 @@ __device__ inline Affine max(const Affine& a, const Affine& b) {
         const float bi = b.v0 + ((i & 1) ? b.d1 : (-b.d1)) +
                                 ((i & 2) ? b.d2 : (-b.d2)) +
                                 ((i & 4) ? b.d3 : (-b.d3));
-        a_always_below &= (__fadd_ru(ai, a.err) < __fsub_rd(bi, b.err));
-        b_always_below &= (__fadd_ru(bi, b.err) < __fsub_rd(ai, a.err));
+        const bool a_below = (__fadd_ru(ai, a.err) < __fsub_rd(bi, b.err));
+        const bool b_below = (__fadd_ru(bi, b.err) < __fsub_rd(ai, a.err));
+        a_always_below &= a_below;
+        a_sometimes_below |= a_below;
+        b_always_below &= b_below;
+        b_sometimes_below |= b_below;
     }
     if (a_always_below) {
-        return b;
-    } else if (b_always_below) {
+        choice = 1;
         return a;
+    } else if (b_always_below) {
+        choice = 2;
+        return b;
+        /*
+    } else if (!a_sometimes_below && b_sometimes_below) {
+        return b;
+    } else if (!b_sometimes_below && a_sometimes_below) {
+        return a;
+        */
     }
-    return Affine(max(ia, ib));
+    return Affine(min(ia, ib, choice));
+}
+
+__device__ inline Affine min(const Affine& a, const float& b, uint8_t& choice) {
+    const Interval ia = a.as_interval();
+    if (ia.upper() < b) {
+        choice = 1;
+        return a;
+    } else if (b < ia.lower()) {
+        choice = 2;
+        return Affine(b);
+    }
+    return Affine(ia);
+}
+
+__device__ inline Affine min(const float& a, const Affine& b, uint8_t& choice) {
+    const Interval ib = b.as_interval();
+    if (a < ib.lower()) {
+        choice = 1;
+        return Affine(a);
+    } else if (ib.upper() < a) {
+        choice = 2;
+        return b;
+    }
+    return Affine(ib);
+}
+
+__device__ inline Affine max(const Affine& a, const Affine& b, uint8_t& choice) {
+    const Interval ia = a.as_interval();
+    const Interval ib = b.as_interval();
+    if (ia.lower() > ib.upper()) {
+        choice = 1;
+        return a;
+    } else if (ib.lower() > ia.upper()) {
+        choice = 2;
+        return b;
+    }
+    // Do fancier checking!
+    bool a_always_above = true;
+    bool b_always_above = true;
+    bool a_sometimes_above = false;
+    bool b_sometimes_above = false;
+    for (unsigned i=0; i < 8; ++i) {
+        // These are values before uncorrelated error terms are applied
+        const float ai = a.v0 + ((i & 1) ? a.d1 : (-a.d1)) +
+                                ((i & 2) ? a.d2 : (-a.d2)) +
+                                ((i & 4) ? a.d3 : (-a.d3));
+        const float bi = b.v0 + ((i & 1) ? b.d1 : (-b.d1)) +
+                                ((i & 2) ? b.d2 : (-b.d2)) +
+                                ((i & 4) ? b.d3 : (-b.d3));
+        const bool a_above = __fsub_rd(ai, a.err) > __fadd_ru(bi, b.err);
+        const bool b_above = __fsub_rd(bi, b.err) > __fadd_ru(ai, a.err);
+        a_always_above &= a_above;
+        a_sometimes_above |= a_above;
+        b_always_above &= b_above;
+        b_sometimes_above |= b_above;
+    }
+    if (a_always_above) {
+        choice = 1;
+        return a;
+    } else if (b_always_above) {
+        choice = 2;
+        return b;
+        /*
+    } else if (!b_sometimes_above && a_sometimes_above) {
+        return a;
+    } else if (!a_sometimes_above && b_sometimes_above) {
+        return b;
+        */
+    }
+    return Affine(max(ia, ib, choice));
+}
+
+__device__ inline Affine max(const Affine& a, const float& b, uint8_t& choice) {
+    const Interval ia = a.as_interval();
+    if (ia.lower() > b) {
+        choice = 1;
+        return a;
+    } else if (b > ia.upper()) {
+        choice = 2;
+        return Affine(b);
+    }
+    return Affine(ia);
+}
+
+__device__ inline Affine max(const float& a, const Affine& b, uint8_t& choice) {
+    const Interval ib = b.as_interval();
+    if (a > ib.upper()) {
+        choice = 1;
+        return Affine(a);
+    } else if (ib.lower() > a) {
+        choice = 2;
+        return b;
+    }
+    return Affine(ib);
 }
 
 // TODO

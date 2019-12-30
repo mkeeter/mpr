@@ -4,7 +4,7 @@
 
 struct Interval {
     __device__ inline Interval() : v(make_float2(0.0f, 0.0f)) {}
-    __device__ inline Interval(float f) : v(make_float2(f, f)) {}
+    __device__ inline explicit Interval(float f) : v(make_float2(f, f)) {}
     __device__ inline Interval(float a, float b) : v(make_float2(a, b)) {}
     __device__ inline float upper() const { return v.y; }
     __device__ inline float lower() const { return v.x; }
@@ -186,33 +186,100 @@ __device__ inline Interval operator/(const Interval& x, const float& y) {
     }
 }
 
+__device__ inline Interval operator/(const float& x, const Interval& y) {
+    return Interval(x) / y;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Interval min(const Interval& x, const Interval& y) {
+__device__ inline Interval min(const Interval& x, const Interval& y, uint8_t& choice) {
+    if (x.upper() < y.lower()) {
+        choice = 1;
+        return x;
+    } else if (y.upper() < x.lower()) {
+        choice = 2;
+        return y;
+    }
     return {fminf(x.lower(), y.lower()), fminf(x.upper(), y.upper())};
 }
 
-__device__ inline Interval min(const Interval& x, const float& y) {
+__device__ inline Interval min(const Interval& x, const float& y, uint8_t& choice) {
+    if (x.upper() < y) {
+        choice = 1;
+        return x;
+    } else if (y < x.lower()) {
+        choice = 2;
+        return Interval(y);
+    }
     return {fminf(x.lower(), y), fminf(x.upper(), y)};
 }
 
-__device__ inline Interval min(const float& x, const Interval& y) {
-    return min(y, x);
+__device__ inline Interval min(const float& x, const Interval& y, uint8_t& choice) {
+    if (x < y.lower()) {
+        choice = 1;
+        return Interval(x);
+    } else if (y.upper() < x) {
+        choice = 2;
+        return y;
+    }
+    return {fminf(x, y.lower()), fminf(x, y.upper())};
+}
+
+__device__ inline Interval min(const float& x, const float& y, uint8_t& choice) {
+    if (x < y) {
+        choice = 1;
+        return Interval(x);
+    } else if (y < x) {
+        choice = 2;
+        return Interval(y);
+    }
+    return Interval(x);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Interval max(const Interval& x, const Interval& y) {
+__device__ inline Interval max(const Interval& x, const Interval& y, uint8_t& choice) {
+    if (x.lower() > y.upper()) {
+        choice = 1;
+        return x;
+    } else if (y.lower() > x.upper()) {
+        choice = 2;
+        return y;
+    }
     return {fmaxf(x.lower(), y.lower()), fmaxf(x.upper(), y.upper())};
 }
 
-__device__ inline Interval max(const Interval& x, const float& y) {
+__device__ inline Interval max(const Interval& x, const float& y, uint8_t& choice) {
+    if (x.lower() > y) {
+        choice = 1;
+        return x;
+    } else if (y > x.upper()) {
+        choice = 2;
+        return Interval(y);
+    }
     return {fmaxf(x.lower(), y), fmaxf(x.upper(), y)};
 }
 
-__device__ inline Interval max(const float& x, const Interval& y) {
-    return max(y, x);
+__device__ inline Interval max(const float& x, const Interval& y, uint8_t& choice) {
+    if (x > y.upper()) {
+        choice = 1;
+        return Interval(x);
+    } else if (y.lower() > x) {
+        choice = 2;
+        return y;
+    }
+    return {fmaxf(x, y.lower()), fmaxf(x, y.upper())};
+}
+
+__device__ inline Interval max(const float& x, const float& y, uint8_t& choice) {
+    if (x > y) {
+        choice = 1;
+        return Interval(x);
+    } else if (y > x) {
+        choice = 2;
+        return Interval(y);
+    }
+    return Interval(x);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
