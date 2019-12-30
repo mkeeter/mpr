@@ -30,16 +30,18 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    for (auto size: {256, 512, 1024, 2048, 3074, 4096}) {
-        auto r = Renderable::build(t, size, 2);
+    for (auto size: {256, 512, 1024, 1536, 2048}) {
+        Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+        T(3,2) = 0.3f;
+        auto r = Renderable::build(t, size, 3);
         // Warm-up
         for (unsigned i=0; i < 20; ++i) {
-            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
+            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_NORMALS);
         }
         auto start_gpu = std::chrono::steady_clock::now();
         const auto count = 100;
         for (unsigned i=0; i < count; ++i) {
-            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
+            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_NORMALS);
         }
         auto end_gpu = std::chrono::steady_clock::now();
         std::cout << size << " " <<
@@ -48,4 +50,5 @@ int main(int argc, char **argv)
     }
     return 0;
 }
+
 
