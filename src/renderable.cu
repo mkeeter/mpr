@@ -34,9 +34,9 @@ __device__ void storeAxes(const uint32_t tile,
     const float3 lower = tiles.tileToLowerPos(tile);
     const float3 upper = tiles.tileToUpperPos(tile);
 
-    IntervalType X(Interval{lower.x, upper.x});
-    IntervalType Y(Interval{lower.y, upper.y});
-    IntervalType Z(Interval{lower.z, upper.z});
+    IntervalType X = IntervalType::X(Interval{lower.x, upper.x});
+    IntervalType Y = IntervalType::Y(Interval{lower.y, upper.y});
+    IntervalType Z = IntervalType::Z(Interval{lower.z, upper.z});
 
     IntervalType X_, Y_, Z_, W_;
     X_ = v.mat(0, 0) * X +

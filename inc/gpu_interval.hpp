@@ -9,6 +9,10 @@ struct Interval {
     __device__ inline float upper() const { return v.y; }
     __device__ inline float lower() const { return v.x; }
 
+    __device__ inline static Interval X(const Interval& x) { return x; }
+    __device__ inline static Interval Y(const Interval& y) { return y; }
+    __device__ inline static Interval Z(const Interval& z) { return z; }
+
 #ifdef __CUDACC__
     __device__ inline float mid() const {
         return __fdiv_ru(lower(), 2.0f) + __fdiv_rd(upper(), 2.0f);
