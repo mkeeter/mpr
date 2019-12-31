@@ -1,31 +1,35 @@
 #pragma once
 
-/*  All tile operations are done with this many blocks and threads,
- *  looping to consume all available tiles */
+/*  Initial rendering of top-level tiles is done with this many blocks
+ *  and threads.  This isn't particularly performance-sensitive; later
+ *  operations take much more of our computing time. */
 #define LIBFIVE_CUDA_TILE_BLOCKS 16
 #define LIBFIVE_CUDA_TILE_THREADS 256
 
-/*  Refining is done with this many blocks */
-#define LIBFIVE_CUDA_SUBTILE_BLOCKS 512
-/*  Number of tiles to refine simultaneously */
-#define LIBFIVE_CUDA_REFINE_TILES 4
+/*  Rendering normals is done with one thread per subtile in the target
+ *  tile, with a small number of tiles grouped together into each block
+ *  (to avoid running with a very small number of threads) */
+#define LIBFIVE_CUDA_REFINE_BLOCKS 512
+#define LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK 2
 
-/*  This is the number of subtapes allocated.  Each subtape has room for some
- *  number of clauses, defined in the Subtape struct */
-#define LIBFIVE_CUDA_NUM_SUBTAPES (800000*4)
-/*  This is the length of each subtape chunk */
-#define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 64
+/*  Rendering normals is done with one thread per pixel/voxel in the target
+ *  tile, with a small number of tiles grouped together into each block
+ *  (to avoid running with a very small number of threads) */
+#define LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS 512
+#define LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK 2
 
-/*  Rendering is done with this many blocks */
-#define LIBFIVE_CUDA_RENDER_BLOCKS 512
-/*  Number of subtiles per thread block when rendering */
-#define LIBFIVE_CUDA_RENDER_SUBTILES 16
+/*  Rendering normals is done with one thread per pixel in the target
+ *  tile, with a small number of tiles grouped together into each block
+ *  (to avoid running with a very small number of threads) */
+#define LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS 256
+#define LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK 4
 
 /*  Split the work among a bunch of streams to maximize utilization */
 #define LIBFIVE_CUDA_NUM_STREAMS 2
 
-/*  Generating normals is done with this many threads + blocks */
-#define LIBFIVE_CUDA_NORMAL_TILES 4
-#define LIBFIVE_CUDA_NORMAL_BLOCKS 256
+/*  This is the number of subtapes allocated, where each subtape is a
+ *  chunk with some number of clauses. */
+#define LIBFIVE_CUDA_NUM_SUBTAPES 3200000
+#define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 64
 
 //#define USE_AFFINE

@@ -28,7 +28,7 @@ __global__ void evalRawTape(Image* image, View v)
 template <typename R, unsigned T, unsigned D>
 __device__ void storeAxes(const uint32_t tile,
                           const View& v, const Tiles<T, D>& tiles, const Tape& tape,
-                          R* const __restrict__ regs)
+                          R* rx, R* ry, R* rz)
 {
    // Prepopulate axis values
     const float3 lower = tiles.tileToLowerPos(tile);
@@ -62,14 +62,14 @@ __device__ void storeAxes(const uint32_t tile,
     }
 
 
-    if (tape.axes.reg[0] != UINT16_MAX) {
-        regs[tape.axes.reg[0]] = X_;
+    if (rx) {
+        *rx = X_;
     }
-    if (tape.axes.reg[1] != UINT16_MAX) {
-        regs[tape.axes.reg[1]] = Y_;
+    if (ry) {
+        *ry = Y_;
     }
-    if (tape.axes.reg[2] != UINT16_MAX) {
-        regs[tape.axes.reg[2]] = Z_;
+    if (rz) {
+        *rz = Z_;
     }
 
 }
@@ -154,7 +154,10 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         const uint32_t tile, const View& v)
 {
     IntervalType regs[128];
-    storeAxes(tile, v, tiles, tape, regs);
+    storeAxes(tile, v, tiles, tape,
+        (tape.axes.reg[0] == UINT16_MAX) ? NULL : &regs[tape.axes.reg[0]],
+        (tape.axes.reg[1] == UINT16_MAX) ? NULL : &regs[tape.axes.reg[1]],
+        (tape.axes.reg[2] == UINT16_MAX) ? NULL : &regs[tape.axes.reg[2]]);
 
     // Unpack a 1D offset into the data arrays
     uint32_t choices[256];
@@ -367,8 +370,23 @@ __device__
 TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const uint32_t subtile, const uint32_t tile, const View& v)
 {
-    IntervalType regs[128];
-    storeAxes(subtile, v, subtiles, tape, regs);
+#define FAST_SLOT_COUNT 4
+    IntervalType slots_slow[128 - FAST_SLOT_COUNT];
+#if FAST_SLOT_COUNT > 0
+    // We'd like to use subtilesPerTile(), but CUDA doesn't allow for
+    // (even a constexpr) function to be used when sizing a __shared__ array
+    // Instead, we hard-code 64 with a static assertion to check for it.
+    static_assert(subtilesPerTile() == 64, "Incorect subdivision for __shared__ array");
+    __shared__ IntervalType slots_fast[FAST_SLOT_COUNT][64*LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK];
+#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] : slots_slow[i - FAST_SLOT_COUNT])
+#else
+#define SLOT(i) slots_slow[i];
+#endif
+
+    storeAxes(subtile, v, subtiles, tape,
+        (tape.axes.reg[0] == UINT16_MAX) ? NULL : &SLOT(tape.axes.reg[0]),
+        (tape.axes.reg[1] == UINT16_MAX) ? NULL : &SLOT(tape.axes.reg[1]),
+        (tape.axes.reg[2] == UINT16_MAX) ? NULL : &SLOT(tape.axes.reg[2]));
 
     uint32_t choices[256];
     memset(choices, 0, sizeof(choices));
@@ -392,7 +410,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                 s = subtapes.start[subtape_index];
                 tape = subtapes.data[subtape_index];
             } else {
-                result = regs[tape[s - 1].out];
+                result = SLOT(tape[s - 1].out);
                 break;
             }
         }
@@ -403,17 +421,17 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<IntervalType, IntervalType>(c.opcode,
-                        regs[c.lhs],
-                        regs[c.rhs], choice);
+                        SLOT(c.lhs),
+                        SLOT(c.rhs), choice);
                 break;
             case 1: // Constant op Interval
                 out = intervalOp<float, IntervalType>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs], choice);
+                        SLOT(c.rhs), choice);
                 break;
             case 2: // Interval op Constant
                 out = intervalOp<IntervalType, float>(c.opcode,
-                         regs[c.lhs],
+                         SLOT(c.lhs),
                          constant_ptr[c.rhs], choice);
                 break;
             case 3: // Constant op Constant
@@ -428,8 +446,10 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
             choice_index++;
         }
 
-        regs[c.out] = out;
+        SLOT(c.out) = out;
     }
+#undef SLOT
+#undef FAST_SLOT_COUNT
 
     ////////////////////////////////////////////////////////////////////////////
     // If this tile is unambiguously filled, then mark it at the end
@@ -455,7 +475,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     }
 
     // Pick a subset of the active array to use for this block
-    uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(regs);
+    uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(slots_slow);
     memset(active, 0, this->tape.num_regs);
 
     // At this point, subtape_index is pointing to the last chunk, so we'll
@@ -670,7 +690,15 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             (pixel / SUBTILE_SIZE_PX) % SUBTILE_SIZE_PX,
             (pixel / SUBTILE_SIZE_PX) / SUBTILE_SIZE_PX);
 
-    float regs[128];
+#define FAST_SLOT_COUNT 8
+    float slots_slow[128 - FAST_SLOT_COUNT];
+#if FAST_SLOT_COUNT > 0
+    static_assert(pixelsPerSubtile() == 64, "Invalid __shared__ slots size");
+    __shared__ float slots_fast[FAST_SLOT_COUNT][64*LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK];
+#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] : slots_slow[i - FAST_SLOT_COUNT])
+#else
+#define SLOT(i) slots_slow[i];
+#endif
 
     // Convert from tile position to pixels
     const uint3 q = subtiles.lowerCornerVoxel(subtile);
@@ -686,13 +714,13 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         const Eigen::Vector4f pos_(f.x, f.y, f.z, 1.0f);
         const Eigen::Vector3f pos = (v.mat * pos_).hnormalized();
         if (tape.axes.reg[0] != UINT16_MAX) {
-            regs[tape.axes.reg[0]] = pos.x();
+            SLOT(tape.axes.reg[0]) = pos.x();
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
-            regs[tape.axes.reg[1]] = pos.y();
+            SLOT(tape.axes.reg[1]) = pos.y();
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
-            regs[tape.axes.reg[2]] = (DIMENSION == 3)
+            SLOT(tape.axes.reg[2]) = (DIMENSION == 3)
                 ? pos.z()
                 : v.mat(2,3);
         }
@@ -714,7 +742,7 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
                 s = subtapes.start[subtape_index];
                 tape = subtapes.data[subtape_index];
             } else {
-                if (regs[tape[s - 1].out] < 0.0f) {
+                if (SLOT(tape[s - 1].out) < 0.0f) {
                     if (DIMENSION == 2) {
                         image(p.x, p.y) = 255;
                     } else {
@@ -732,14 +760,14 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
         if (c.banks & 1) {
             lhs = constant_ptr[c.lhs];
         } else {
-            lhs = regs[c.lhs];
+            lhs = SLOT(c.lhs);
         }
 
         float rhs;
         if (c.banks & 2) {
             rhs = constant_ptr[c.rhs];
         } else if (c.opcode >= OP_ADD) {
-            rhs = regs[c.rhs];
+            rhs = SLOT(c.rhs);
         }
 
         float out;
@@ -768,8 +796,10 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             // Skipping various hard functions here
             default: break;
         }
-        regs[c.out] = out;
+        SLOT(c.out) = out;
     }
+#undef SLOT
+#undef FAST_SLOT_COUNT
 }
 
 template <unsigned SUBTILE_SIZE_PX, unsigned DIMENSION>
@@ -1586,8 +1616,8 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     {   // Refine ambiguous tiles from their subtapes
-        const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                LIBFIVE_CUDA_REFINE_TILES;
+        const uint32_t stride = LIBFIVE_CUDA_REFINE_BLOCKS *
+                                LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
         auto queue_in  = &this->queue_ping;
         const uint32_t active = queue_in->count;
 
@@ -1602,9 +1632,9 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
 
         for (unsigned i=0; i < active; i += stride) {
             SubtileRenderer_check<<<
-                LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                LIBFIVE_CUDA_REFINE_BLOCKS,
                 subtile_renderer->subtilesPerTile() *
-                    LIBFIVE_CUDA_REFINE_TILES,
+                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK,
                 0,
                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     subtile_renderer,
@@ -1617,8 +1647,8 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     {   // Refine ambiguous tiles from their subtapes
-        const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                LIBFIVE_CUDA_REFINE_TILES;
+        const uint32_t stride = LIBFIVE_CUDA_REFINE_BLOCKS *
+                                LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
 
         auto queue_in  = &this->queue_pong;
         const uint32_t active = queue_in->count;
@@ -1634,9 +1664,9 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
 
         for (unsigned i=0; i < active; i += stride) {
             SubtileRenderer_check<<<
-                LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                LIBFIVE_CUDA_REFINE_BLOCKS,
                 microtile_renderer->subtilesPerTile() *
-                    LIBFIVE_CUDA_REFINE_TILES,
+                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK,
                 0,
                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     microtile_renderer,
@@ -1649,8 +1679,8 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
     }
 
     {   // Do pixel-by-pixel rendering for active subtiles
-        const uint32_t stride = LIBFIVE_CUDA_RENDER_BLOCKS *
-                                LIBFIVE_CUDA_RENDER_SUBTILES;
+        const uint32_t stride = LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
+                                LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK;
 
         auto queue_in  = &this->queue_ping;
         const uint32_t active = queue_in->count;
@@ -1659,9 +1689,9 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
 
         for (unsigned i=0; i < active; i += stride) {
             PixelRenderer_draw<<<
-                LIBFIVE_CUDA_RENDER_BLOCKS,
+                LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
                 pixel_renderer->pixelsPerSubtile() *
-                    LIBFIVE_CUDA_RENDER_SUBTILES,
+                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK,
                 0,
                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     pixel_renderer, queue_in, filled_in, i, view);
@@ -1677,12 +1707,12 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
 
     if (mode >= MODE_NORMALS) {
         const uint32_t active = pow(image.size_px / 16, 2);
-        const uint32_t stride = LIBFIVE_CUDA_NORMAL_BLOCKS *
-                                LIBFIVE_CUDA_NORMAL_TILES;
+        const uint32_t stride = LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS *
+                                LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK;
         for (unsigned i=0; i < active; i += stride) {
             Renderable3D_drawNormals<<<
-                LIBFIVE_CUDA_NORMAL_BLOCKS,
-                pow(16, 2) * LIBFIVE_CUDA_NORMAL_TILES,
+                LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS,
+                pow(16, 2) * LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK,
                 0, streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     this, i, view);
             CUDA_CHECK(cudaGetLastError());
@@ -1759,8 +1789,8 @@ void Renderable2D::run(const View& view, Renderable::Mode mode)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     {   // Refine ambiguous tiles from their subtapes
-        const uint32_t stride = LIBFIVE_CUDA_SUBTILE_BLOCKS *
-                                LIBFIVE_CUDA_REFINE_TILES;
+        const uint32_t stride = LIBFIVE_CUDA_REFINE_BLOCKS *
+                                LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
 
         auto queue_in  = &this->queue_ping;
         const uint32_t active = queue_in->count;
@@ -1776,9 +1806,9 @@ void Renderable2D::run(const View& view, Renderable::Mode mode)
 
         for (unsigned i=0; i < active; i += stride) {
             SubtileRenderer_check<<<
-                LIBFIVE_CUDA_SUBTILE_BLOCKS,
+                LIBFIVE_CUDA_REFINE_BLOCKS,
                 subtile_renderer->subtilesPerTile() *
-                    LIBFIVE_CUDA_REFINE_TILES,
+                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK,
                 0,
                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     subtile_renderer,
@@ -1791,16 +1821,16 @@ void Renderable2D::run(const View& view, Renderable::Mode mode)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     {   // Do pixel-by-pixel rendering for active subtiles
-        const uint32_t stride = LIBFIVE_CUDA_RENDER_BLOCKS *
-                                LIBFIVE_CUDA_RENDER_SUBTILES;
+        const uint32_t stride = LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
+                                LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK;
         auto queue_in  = &this->queue_pong;
         auto filled_in = &this->filled_subtiles;
         const uint32_t active = queue_in->count;
         for (unsigned i=0; i < active; i += stride) {
             PixelRenderer_draw<<<
-                LIBFIVE_CUDA_RENDER_BLOCKS,
+                LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
                 pixel_renderer->pixelsPerSubtile() *
-                    LIBFIVE_CUDA_RENDER_SUBTILES,
+                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK,
                 0,
                 streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     pixel_renderer, queue_in, filled_in, i, view);

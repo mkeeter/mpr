@@ -119,6 +119,51 @@ Tape Tape::build(libfive::Tree tree) {
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
     }
 
+    std::vector<uint32_t> reg_use_count;
+    auto mark = [&reg_use_count](uint16_t reg) {
+        if (reg >= reg_use_count.size()) {
+            reg_use_count.resize(reg + 1, 0);
+        }
+        reg_use_count[reg]++;
+    };
+    for (auto& c : flat) {
+        if (!(c.banks & 1)) {
+            mark(c.lhs);
+        }
+        if (c.opcode >= libfive::Opcode::OP_ADD && !(c.banks & 2)) {
+            mark(c.rhs);
+        }
+        mark(c.out);
+    }
+    std::vector<uint16_t> sorted_regs;
+    for (unsigned i=0; i < reg_use_count.size(); ++i) {
+        sorted_regs.push_back(i);
+    }
+    std::sort(sorted_regs.begin(), sorted_regs.end(),
+            [&](const uint16_t& a, const uint16_t& b){
+                return reg_use_count[a] > reg_use_count[b];
+            });
+    std::vector<uint16_t> remapped_regs;
+    remapped_regs.resize(sorted_regs.size());
+    for (uint16_t i=0; i < sorted_regs.size(); ++i) {
+        remapped_regs[sorted_regs[i]] = i;
+    }
+
+    for (auto& c : flat) {
+        if (!(c.banks & 1)) {
+            c.lhs = remapped_regs[c.lhs];
+        }
+        if (c.opcode >= libfive::Opcode::OP_ADD && !(c.banks & 2)) {
+            c.rhs = remapped_regs[c.rhs];
+        }
+        c.out = remapped_regs[c.out];
+    }
+
+    for (unsigned i=0; i < 3; ++i) {
+        axes.reg[i] = has_axis[i] ? remapped_regs[axes.reg[i]]
+                                  : UINT16_MAX;
+    }
+
     auto data = CUDA_MALLOC(char, sizeof(Clause) * flat.size() +
                                   sizeof(float) * std::max(1UL, constant_data.size()));
     CUDA_CHECK(cudaDeviceSynchronize());
