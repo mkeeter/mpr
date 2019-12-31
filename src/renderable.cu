@@ -940,19 +940,26 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
                                          uint32_t subtape_index,
                                          const View& v)
 {
-    Deriv regs[128];
+#define FAST_SLOT_COUNT 4
+    Deriv slots_slow[128 - FAST_SLOT_COUNT];
+#if FAST_SLOT_COUNT > 0
+    __shared__ Deriv slots_fast[FAST_SLOT_COUNT][64*LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK];
+#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] : slots_slow[i - FAST_SLOT_COUNT])
+#else
+#define SLOT(i) slots_slow[i]
+#endif
 
     {   // Prepopulate axis values
         const Eigen::Vector4f pos_(f.x, f.y, f.z, 1.0f);
         const Eigen::Vector3f pos = (v.mat * pos_).hnormalized();
         if (tape.axes.reg[0] != UINT16_MAX) {
-            regs[tape.axes.reg[0]] = Deriv(pos.x(), v.mat(0, 0), v.mat(0, 1), v.mat(0, 2));
+            SLOT(tape.axes.reg[0]) = Deriv(pos.x(), v.mat(0, 0), v.mat(0, 1), v.mat(0, 2));
         }
         if (tape.axes.reg[1] != UINT16_MAX) {
-            regs[tape.axes.reg[1]] = Deriv(pos.y(), v.mat(1, 0), v.mat(1, 1), v.mat(1, 2));
+            SLOT(tape.axes.reg[1]) = Deriv(pos.y(), v.mat(1, 0), v.mat(1, 1), v.mat(1, 2));
         }
         if (tape.axes.reg[2] != UINT16_MAX) {
-            regs[tape.axes.reg[2]] = Deriv(pos.z(), v.mat(2, 0), v.mat(2, 1), v.mat(2, 2));
+            SLOT(tape.axes.reg[2]) = Deriv(pos.z(), v.mat(2, 0), v.mat(2, 1), v.mat(2, 2));
         }
     }
 
@@ -980,17 +987,17 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
         switch (c.banks) {
             case 0: // Deriv op Deriv
                 out = derivOp<Deriv, Deriv>(c.opcode,
-                        regs[c.lhs],
-                        regs[c.rhs]);
+                        SLOT(c.lhs),
+                        SLOT(c.rhs));
                 break;
             case 1: // Constant op Deriv
                 out = derivOp<float, Deriv>(c.opcode,
                         constant_ptr[c.lhs],
-                        regs[c.rhs]);
+                        SLOT(c.rhs));
                 break;
             case 2: // Deriv op Constant
                 out = derivOp<Deriv, float>(c.opcode,
-                        regs[c.lhs],
+                        SLOT(c.lhs),
                         constant_ptr[c.rhs]);
                 break;
             case 3: // Constant op Constant
@@ -999,10 +1006,10 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
                         constant_ptr[c.rhs]);
                 break;
         }
-        regs[c.out] = out;
+        SLOT(c.out) = out;
     }
 
-    const Deriv result = regs[tape[s - 1].out];
+    const Deriv result = SLOT(tape[s - 1].out);
     float norm = sqrtf(powf(result.dx(), 2) +
                        powf(result.dy(), 2) +
                        powf(result.dz(), 2));
@@ -1020,14 +1027,14 @@ __global__ void Renderable3D_drawNormals(
     assert(gridDim.y == 1);
     assert(gridDim.z == 1);
 
-    const uint32_t pixel = threadIdx.x % (16 * 16);
+    const uint32_t pixel = threadIdx.x % 64;
 
     const uint32_t i = offset + (threadIdx.x + blockIdx.x * blockDim.x) /
-                                (16 * 16);
-    const uint32_t px = (i % (r->norm.size_px / 16)) * 16 +
-                        (pixel % 16);
-    const uint32_t py = (i / (r->norm.size_px / 16)) * 16 +
-                        (pixel / 16);
+                                64;
+    const uint32_t px = (i % (r->norm.size_px / 8)) * 8 +
+                        (pixel % 8);
+    const uint32_t py = (i / (r->norm.size_px / 8)) * 8 +
+                        (pixel / 8);
     if (px < r->norm.size_px && py < r->norm.size_px) {
         const uint32_t pz = min(r->image(px, py) + 1, r->image.size_px - 1);
         if (pz) {
@@ -1706,13 +1713,13 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     if (mode >= MODE_NORMALS) {
-        const uint32_t active = pow(image.size_px / 16, 2);
+        const uint32_t active = pow(image.size_px / 8, 2);
         const uint32_t stride = LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS *
                                 LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK;
         for (unsigned i=0; i < active; i += stride) {
             Renderable3D_drawNormals<<<
                 LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS,
-                pow(16, 2) * LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK,
+                pow(8, 2) * LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK,
                 0, streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     this, i, view);
             CUDA_CHECK(cudaGetLastError());

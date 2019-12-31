@@ -21,8 +21,8 @@
 /*  Rendering normals is done with one thread per pixel in the target
  *  tile, with a small number of tiles grouped together into each block
  *  (to avoid running with a very small number of threads) */
-#define LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS 256
-#define LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK 4
+#define LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS 512
+#define LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK 2
 
 /*  Split the work among a bunch of streams to maximize utilization */
 #define LIBFIVE_CUDA_NUM_STREAMS 2
