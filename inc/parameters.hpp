@@ -32,4 +32,9 @@
 #define LIBFIVE_CUDA_NUM_SUBTAPES 3200000
 #define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 64
 
+/*  Depending on compute capabilities, you'll have more or less
+ *  shared memory to work with (either 48K or 96K per SM / block).
+ *  Set this to apply a global scale to the size of shared caches. */
+#define LIBFIVE_CUDA_SM_SCALE 1
+
 //#define USE_AFFINE

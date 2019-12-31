@@ -370,17 +370,19 @@ __device__
 TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const uint32_t subtile, const uint32_t tile, const View& v)
 {
-#define FAST_SLOT_COUNT 4
+#define FAST_SLOT_COUNT (4 * LIBFIVE_CUDA_SM_SCALE)
     IntervalType slots_slow[128 - FAST_SLOT_COUNT];
 #if FAST_SLOT_COUNT > 0
     // We'd like to use subtilesPerTile(), but CUDA doesn't allow for
     // (even a constexpr) function to be used when sizing a __shared__ array
     // Instead, we hard-code 64 with a static assertion to check for it.
     static_assert(subtilesPerTile() == 64, "Incorect subdivision for __shared__ array");
-    __shared__ IntervalType slots_fast[FAST_SLOT_COUNT][64*LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK];
-#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] : slots_slow[i - FAST_SLOT_COUNT])
+    __shared__ IntervalType slots_fast[FAST_SLOT_COUNT]
+                                      [64*LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK];
+#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] \
+                                       : slots_slow[i - FAST_SLOT_COUNT])
 #else
-#define SLOT(i) slots_slow[i];
+#define SLOT(i) slots_slow[i]
 #endif
 
     storeAxes(subtile, v, subtiles, tape,
@@ -690,14 +692,16 @@ __device__ void PixelRenderer<SUBTILE_SIZE_PX, DIMENSION>::draw(
             (pixel / SUBTILE_SIZE_PX) % SUBTILE_SIZE_PX,
             (pixel / SUBTILE_SIZE_PX) / SUBTILE_SIZE_PX);
 
-#define FAST_SLOT_COUNT 8
+#define FAST_SLOT_COUNT (8 * LIBFIVE_CUDA_SM_SCALE)
     float slots_slow[128 - FAST_SLOT_COUNT];
 #if FAST_SLOT_COUNT > 0
     static_assert(pixelsPerSubtile() == 64, "Invalid __shared__ slots size");
-    __shared__ float slots_fast[FAST_SLOT_COUNT][64*LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK];
-#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] : slots_slow[i - FAST_SLOT_COUNT])
+    __shared__ float slots_fast[FAST_SLOT_COUNT]
+                               [64*LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK];
+#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] \
+                                       : slots_slow[i - FAST_SLOT_COUNT])
 #else
-#define SLOT(i) slots_slow[i];
+#define SLOT(i) slots_slow[i]
 #endif
 
     // Convert from tile position to pixels
@@ -940,11 +944,13 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
                                          uint32_t subtape_index,
                                          const View& v)
 {
-#define FAST_SLOT_COUNT 4
+#define FAST_SLOT_COUNT (4 * LIBFIVE_CUDA_SM_SCALE)
     Deriv slots_slow[128 - FAST_SLOT_COUNT];
 #if FAST_SLOT_COUNT > 0
-    __shared__ Deriv slots_fast[FAST_SLOT_COUNT][64*LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK];
-#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] : slots_slow[i - FAST_SLOT_COUNT])
+    __shared__ Deriv slots_fast[FAST_SLOT_COUNT]
+                               [64*LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK];
+#define SLOT(i) ((i < FAST_SLOT_COUNT) ? slots_fast[i][threadIdx.x] \
+                                       : slots_slow[i - FAST_SLOT_COUNT])
 #else
 #define SLOT(i) slots_slow[i]
 #endif
@@ -1017,6 +1023,8 @@ __device__ uint32_t NormalRenderer::draw(const float3 f,
     uint8_t dy = (result.dy() / norm) * 127 + 128;
     uint8_t dz = (result.dz() / norm) * 127 + 128;
     return (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
+#undef SLOT
+#undef FAST_SLOT_COUNT
 }
 
 __global__ void Renderable3D_drawNormals(
