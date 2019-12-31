@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "tape.hpp"
 #include "check.hpp"
 #include "parameters.hpp"
