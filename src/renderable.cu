@@ -477,8 +477,19 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     }
 
     // Pick a subset of the active array to use for this block
-    uint8_t* __restrict__ active = reinterpret_cast<uint8_t*>(slots_slow);
-    memset(active, 0, this->tape.num_regs);
+    uint8_t* __restrict__ active_slow = reinterpret_cast<uint8_t*>(slots_slow);
+#if FAST_SLOT_COUNT > 0
+    auto* __restrict__ active_fast =
+        (uint8_t(*)[64*LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK])(slots_fast);
+#define ACTIVE(i) ((i < (FAST_SLOT_COUNT * 8)) \
+        ? active_fast[i][threadIdx.x] \
+        : active_slow[i - (FAST_SLOT_COUNT * 8)])
+#else
+#define ACTIVE(i) active_slow[i]
+#endif
+    for (unsigned i=0; i < this->tape.num_regs; ++i) {
+        ACTIVE(i) = false;
+    }
 
     // At this point, subtape_index is pointing to the last chunk, so we'll
     // use the prev pointers to walk backwards (where "backwards" means
@@ -489,7 +500,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
     const Clause* __restrict__ in_tape = subtapes.data[in_subtape_index];
 
     // Mark the head of the tape as active
-    active[in_tape[in_s - 1].out] = true;
+    ACTIVE(in_tape[in_s - 1].out) = true;
 
     // Claim a subtape to populate
     uint32_t out_subtape_index = subtapes.claim();
@@ -526,12 +537,12 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
             choice = (choices[choice_index / 16] >> ((choice_index % 16) * 2)) & 3;
         }
 
-        if (active[c.out]) {
-            active[c.out] = false;
+        if (ACTIVE(c.out)) {
+            ACTIVE(c.out) = false;
             if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
                 if (choice == 1) {
                     if (!(c.banks & 1)) {
-                        active[c.lhs] = true;
+                        ACTIVE(c.lhs) = true;
                         if (c.lhs == c.out) {
                             continue;
                         }
@@ -543,7 +554,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                     }
                 } else if (choice == 2) {
                     if (!(c.banks & 2)) {
-                        active[c.rhs] = true;
+                        ACTIVE(c.rhs) = true;
                         if (c.rhs == c.out) {
                             continue;
                         }
@@ -554,15 +565,15 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                         c.banks = 3;
                     }
                 } else if (choice == 0) {
-                    active[c.lhs] |= (!(c.banks & 1));
-                    active[c.rhs] |= (!(c.banks & 2));
+                    ACTIVE(c.lhs) |= (!(c.banks & 1));
+                    ACTIVE(c.rhs) |= (!(c.banks & 2));
                 } else {
                     assert(false);
                 }
             } else {
                 terminal = false;
-                active[c.lhs] |= (!(c.banks & 1));
-                active[c.rhs] |= (c.opcode >= OP_ADD && !(c.banks & 2));
+                ACTIVE(c.lhs) |= (!(c.banks & 1));
+                ACTIVE(c.rhs) |= (c.opcode >= OP_ADD && !(c.banks & 2));
             }
 
             // If we've reached the end of the output tape, then
