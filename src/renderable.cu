@@ -61,7 +61,6 @@ __device__ void storeAxes(const uint32_t tile,
         Z_ = IntervalType(Interval(v.mat(2,3), v.mat(2,3)));
     }
 
-
     if (rx) {
         *rx = X_;
     }
