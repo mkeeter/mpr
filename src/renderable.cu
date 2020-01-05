@@ -288,7 +288,9 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
                         c.banks = 3;
                     }
                 } else if (choice == 0) {
-                    terminal = false;
+                    if (c.banks == 1 || c.banks == 2 || c.lhs != c.rhs) {
+                        terminal = false;
+                    }
                     active[c.lhs] |= !(c.banks & 1);
                     active[c.rhs] |= !(c.banks & 2);
                 } else {
@@ -564,13 +566,15 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
                         c.banks = 3;
                     }
                 } else if (choice == 0) {
+                    if (c.banks == 1 || c.banks == 2 || c.lhs != c.rhs) {
+                        terminal = false;
+                    }
                     ACTIVE(c.lhs) |= (!(c.banks & 1));
                     ACTIVE(c.rhs) |= (!(c.banks & 2));
                 } else {
                     assert(false);
                 }
             } else {
-                terminal = false;
                 ACTIVE(c.lhs) |= (!(c.banks & 1));
                 ACTIVE(c.rhs) |= (c.opcode >= OP_ADD && !(c.banks & 2));
             }
