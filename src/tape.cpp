@@ -71,44 +71,50 @@ Tape Tape::build(libfive::Tree tree) {
     }
 
     std::vector<Clause> flat;
+    flat.reserve(ordered.size());
+
+    uint8_t banks = 0;
+    auto f = [&](const std::shared_ptr<libfive::Tree::Tree_>& tree,
+                 uint8_t mask)
+    {
+        if (tree == nullptr) {
+            return static_cast<uint16_t>(0);
+        }
+        if (tree->op == libfive::Opcode::CONSTANT) {   // Check whether this is a constant
+            auto itr = constants.find(tree.get());
+            if (itr != constants.end()) {
+                banks |= mask;
+                return itr->second;
+            } else {
+                fprintf(stderr, "Could not find constant");
+                return static_cast<uint16_t>(0);
+            }
+        }
+        {   // Otherwise, it must be a bound register
+            auto itr = bound_registers.find(tree.get());
+            if (itr != bound_registers.end()) {
+                return itr->second;
+            } else {
+                fprintf(stderr, "Could not find bound register");
+                return static_cast<uint16_t>(0);
+            }
+        }
+    };
     for (auto& c : ordered) {
         // Constants are not inserted into the tape, because they
         // live in a separate data array addressed with flags in
         // the 'banks' argument of a Clause.
-        if (constants.find(c.id()) != constants.end()) {
-            continue;
-        } else if (c->op == libfive::Opcode::VAR_X ||
-                   c->op == libfive::Opcode::VAR_Y ||
-                   c->op == libfive::Opcode::VAR_Z)
+        if (c->op == libfive::Opcode::CONSTANT ||
+            c->op == libfive::Opcode::VAR_X ||
+            c->op == libfive::Opcode::VAR_Y ||
+            c->op == libfive::Opcode::VAR_Z)
         {
             continue;
         }
 
-        uint8_t banks = 0;
-        auto f = [&](libfive::Tree::Id id, uint8_t mask) {
-            if (id == nullptr) {
-                return static_cast<uint16_t>(0);
-            }
-            {   // Check whether this is a constant
-                auto itr = constants.find(id);
-                if (itr != constants.end()) {
-                    banks |= mask;
-                    return itr->second;
-                }
-            }
-            {   // Otherwise, it must be a bound register
-                auto itr = bound_registers.find(id);
-                if (itr != bound_registers.end()) {
-                    return itr->second;
-                } else {
-                    fprintf(stderr, "Could not find bound register");
-                    return static_cast<uint16_t>(0);
-                }
-            }
-        };
-
-        const uint16_t lhs = f(c.lhs().id(), 1);
-        const uint16_t rhs = f(c.rhs().id(), 2);
+        banks = 0;
+        const uint16_t lhs = f(c->lhs, 1);
+        const uint16_t rhs = f(c->rhs, 2);
 
         // Release registers if this was their last use.  We do this now so
         // that one of them can be reused for the output register below.
@@ -126,23 +132,22 @@ Tape Tape::build(libfive::Tree tree) {
         flat.push_back({static_cast<uint8_t>(c->op), banks, out, lhs, rhs});
     }
 
+    // Count up how many times each slot is used
     std::vector<uint32_t> reg_use_count;
-    auto mark = [&reg_use_count](uint16_t reg) {
-        if (reg >= reg_use_count.size()) {
-            reg_use_count.resize(reg + 1, 0);
-        }
-        reg_use_count[reg]++;
-    };
+    reg_use_count.resize(num_registers, 0);
     for (auto& c : flat) {
         if (!(c.banks & 1)) {
-            mark(c.lhs);
+            reg_use_count[c.lhs]++;
         }
         if (c.opcode >= libfive::Opcode::OP_ADD && !(c.banks & 2)) {
-            mark(c.rhs);
+            reg_use_count[c.rhs]++;
         }
-        mark(c.out);
+        reg_use_count[c.out]++;
     }
+
+    // Prepare to sort by register use
     std::vector<uint16_t> sorted_regs;
+    sorted_regs.reserve(num_registers);
     for (unsigned i=0; i < reg_use_count.size(); ++i) {
         sorted_regs.push_back(i);
     }
@@ -150,12 +155,15 @@ Tape Tape::build(libfive::Tree tree) {
             [&](const uint16_t& a, const uint16_t& b){
                 return reg_use_count[a] > reg_use_count[b];
             });
+
+    // Plan to remap registers based on frequency
     std::vector<uint16_t> remapped_regs;
     remapped_regs.resize(sorted_regs.size());
     for (uint16_t i=0; i < sorted_regs.size(); ++i) {
         remapped_regs[sorted_regs[i]] = i;
     }
 
+    // Apply remap to clauses in the tape
     for (auto& c : flat) {
         if (!(c.banks & 1)) {
             c.lhs = remapped_regs[c.lhs];
@@ -166,6 +174,7 @@ Tape Tape::build(libfive::Tree tree) {
         c.out = remapped_regs[c.out];
     }
 
+    // Also apply remap to the original axes
     for (unsigned i=0; i < 3; ++i) {
         axes.reg[i] = has_axis[i] ? remapped_regs[axes.reg[i]]
                                   : UINT16_MAX;
