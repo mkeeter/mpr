@@ -11,6 +11,11 @@ struct Filled
         reset();
     }
 
+    ~Filled()
+    {
+        CUDA_CHECK(cudaFree(data));
+    }
+
     void reset() {
         memset(data, 0, total * sizeof(*data));
     }
