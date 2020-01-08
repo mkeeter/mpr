@@ -1,10 +1,15 @@
 #include <algorithm>
 
+#include "libfive/tree/cache.hpp"
+
 #include "tape.hpp"
 #include "check.hpp"
 #include "parameters.hpp"
 
 Tape Tape::build(libfive::Tree tree) {
+    // Hold a single cache lock to avoid needing mutex locks everywhere
+    auto lock = libfive::Cache::instance();
+
     auto ordered = tree.orderedDfs();
 
     std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
@@ -35,7 +40,7 @@ Tape Tape::build(libfive::Tree tree) {
         has_axis[2] |= (c->op == libfive::Opcode::VAR_Z);
     }
 
-    std::list<uint16_t> free_registers;
+    std::vector<uint16_t> free_registers;
     std::map<libfive::Tree::Id, uint16_t> bound_registers;
     uint16_t num_registers = 0;
 
