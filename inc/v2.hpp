@@ -32,8 +32,9 @@ struct out_tile_t {
 struct stage_t {
     in_tile_t* input;
     out_tile_t* output;
-    uint32_t* index;
-    uint32_t array_size;
+    uint32_t* index; // single value
+    uint32_t input_array_size;
+    uint32_t output_array_size;
 };
 
 struct v2_blob_t {
