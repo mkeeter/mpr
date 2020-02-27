@@ -195,17 +195,6 @@ UNARY_OP_F(log)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct in_tile_t {
-    uint32_t position;
-    uint32_t tape;
-    Interval X, Y, Z;
-};
-
-struct out_tile_t {
-    uint32_t position;
-    uint32_t tape;
-};
-
 __global__
 void v2_load_i(uint32_t tile_offset,
                uint32_t tile_size, uint32_t image_size,
@@ -325,7 +314,6 @@ void v2_load_s(const out_tile_t* __restrict__ in_tiles,
         tz * subtiles_per_side * subtiles_per_side;
     out_tiles[thread_index].tape = in_tiles[tile_index].tape;
 }
-
 
 __global__
 void v2_exec_universal(uint64_t* const __restrict__ tape_data,

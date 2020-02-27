@@ -1,6 +1,8 @@
 #pragma once
 #include <Eigen/Eigen>
-#include "tape.hpp"
+
+#include "libfive/tree/tree.hpp"
+#include "gpu_interval.hpp"
 
 /* The clause is implemented as a struct
  * packed into a single 64-bit value
@@ -16,6 +18,24 @@
     };
 */
 
+struct in_tile_t {
+    uint32_t position;
+    uint32_t tape;
+    Interval X, Y, Z;
+};
+
+struct out_tile_t {
+    uint32_t position;
+    uint32_t tape;
+};
+
+struct stage_t {
+    in_tile_t* input;
+    out_tile_t* output;
+    uint32_t* index;
+    uint32_t array_size;
+};
+
 struct v2_blob_t {
     uint32_t* filled_tiles;
     uint32_t* filled_subtiles;
@@ -24,25 +44,15 @@ struct v2_blob_t {
     uint32_t image_size_px;
     uint32_t* image;
 
-    uint64_t* tape; // original tape
+    uint64_t* tape_data; // original tape is at index 0
+    uint32_t* tape_index; // single value
 
-    uint64_t* subtapes; // big array of subtapes
-    uint32_t* subtape_index; // single value
+    stage_t tiles;
+    stage_t subtiles;
+    stage_t microtiles;
 
-    uint32_t* ping_index; // single value
-    uint32_t* ping_queue; // array
-    uint32_t  ping_queue_len; // size of allocated array
-
-    uint32_t* pong_index; // single value
-    uint32_t* pong_queue; // array
-    uint32_t  pong_queue_len; // size of allocated array
-
-    void* values; // buffer used when assigning values
+    float* values; // buffer used when assigning values for float evaluation
 };
 
-v2_blob_t build_v2_blob(const Tape& tape, const uint32_t image_size_px);
-
-uint64_t* build_v2_tape(const Tape& tape, const uint32_t size);
-void eval_v2_tape(const uint64_t* data, uint32_t* image, uint32_t size);
-
+v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);
 void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat);
