@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
+#include "libfive/tree/cache.hpp"
+
 #include "v2.hpp"
 #include "check.hpp"
 #include "gpu_interval.hpp"
@@ -197,7 +199,9 @@ UNARY_OP_F(log)
 
 __global__
 void v2_load_i(uint32_t tile_offset,
-               uint32_t tile_size, uint32_t image_size,
+               uint32_t tile_count,
+               uint32_t tile_size,
+               uint32_t image_size,
                const Eigen::Matrix4f mat,
                in_tile_t* __restrict__ out)
 {
@@ -206,7 +210,7 @@ void v2_load_i(uint32_t tile_offset,
     const uint32_t tile = thread_index + tile_offset;
     const uint32_t tiles_per_side = image_size / tile_size;
 
-    if (tile >= tiles_per_side * tiles_per_side * tiles_per_side) {
+    if (tile >= tile_count) {
         return;
     }
 
@@ -253,7 +257,8 @@ __global__
 void v2_load_s(const out_tile_t* __restrict__ in_tiles,
                const uint32_t num_in_tiles,
                const uint32_t in_thread_offset,
-               const uint32_t tile_size, const uint32_t image_size,
+               const uint32_t tile_size,
+               const uint32_t image_size,
                const Eigen::Matrix4f mat,
                in_tile_t* __restrict__ out_tiles)
 {
@@ -343,16 +348,15 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     // Load the axis values (precomputed by v2_load_*)
     // If the axis isn't assigned to a slot, then it writes to slot 0,
     // which is otherwise unused.
-    slots[((const uint8_t*)data)[1]] = in_tiles[tile_index].X;
-    slots[((const uint8_t*)data)[2]] = in_tiles[tile_index].Y;
-    slots[((const uint8_t*)data)[3]] = in_tiles[tile_index].Z;
-    data++;
+    slots[((const uint8_t*)data)[1]] = in_tiles[thread_index].X;
+    slots[((const uint8_t*)data)[2]] = in_tiles[thread_index].Y;
+    slots[((const uint8_t*)data)[3]] = in_tiles[thread_index].Z;
 
     uint32_t choices[256] = {0};
     unsigned choice_index = 0;
     bool has_any_choice = false;
 
-    while (OP(data)) {
+    while (OP(++data)) {
         switch (OP(data)) {
             case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
 
@@ -397,7 +401,6 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             choice_index++;
             has_any_choice |= (choice != 0);
         }
-        data++;
     }
 
     // Check the result
@@ -439,8 +442,7 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     OP(&tape_data[out_index + out_offset]) = 0;
     I_OUT(&tape_data[out_index + out_offset]) = i_out;
 
-    data--;
-    while (OP(data)) {
+    while (OP(--data)) {
         const uint8_t op = OP(data);
         if (op == GPU_OP_JUMP) {
             data += JUMP_TARGET(data);
@@ -455,51 +457,53 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         }
 
         const uint8_t i_out = I_OUT(data);
-        if (active[i_out]) {
-            // If we're about to write a new piece of data to the tape,
-            // (and are done with the current chunk), then we need to
-            // add another link to the linked list.
-            if (out_offset == 1) {
-                const uint64_t prev_index = out_index;
-                out_index = atomicAdd(tape_index, 64);
-                out_offset = 64;
-                assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES * 64);
+        if (!active[i_out]) {
+            continue;
+        }
 
-                // Forward-pointing link
-                out_offset--;
-                OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
-                const int32_t delta = (int32_t)prev_index -
-                                      (int32_t)out_index + 1;
-                JUMP_TARGET(&tape_data[out_index + out_offset]) = delta;
+        // If we're about to write a new piece of data to the tape,
+        // (and are done with the current chunk), then we need to
+        // add another link to the linked list.
+        if (out_offset == 1) {
+            const int32_t prev_index = out_index;
+            out_index = atomicAdd(tape_index, 64);
+            out_offset = 64;
+            assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES * 64);
 
-                // Backward-pointing link
-                OP(&tape_data[prev_index]) = GPU_OP_JUMP;
-                JUMP_TARGET(&tape_data[prev_index]) = -delta;
-            }
+            // Forward-pointing link
             out_offset--;
-            active[i_out] = false;
-            tape_data[out_index + out_offset] = *data;
-            if (choice == 0) {
-                const uint8_t i_lhs = I_LHS(data);
-                active[i_lhs] = true;
-                const uint8_t i_rhs = I_RHS(data);
-                active[i_rhs] = true;
-            } else if (choice == 1 /* LHS */) {
-                // The non-immediate is always the LHS in commutative ops,
-                // and min/max are commutative
-                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
-                const uint8_t i_lhs = I_LHS(data);
-                active[i_lhs] = true;
-            } else if (choice == 2 /* RHS */) {
-                const uint8_t i_rhs = I_RHS(data);
-                if (i_rhs) {
-                    OP(tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
-                } else {
-                    OP(tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
-                }
+            OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
+            const int32_t delta = (int32_t)prev_index -
+                                  (int32_t)out_index;
+            JUMP_TARGET(&tape_data[out_index + out_offset]) = delta;
+
+            // Backward-pointing link
+            OP(&tape_data[prev_index]) = GPU_OP_JUMP;
+            JUMP_TARGET(&tape_data[prev_index]) = -delta;
+        }
+
+        out_offset--;
+        active[i_out] = false;
+        tape_data[out_index + out_offset] = *data;
+        if (choice == 0) {
+            const uint8_t i_lhs = I_LHS(data);
+            active[i_lhs] = true;
+            const uint8_t i_rhs = I_RHS(data);
+            active[i_rhs] = true;
+        } else if (choice == 1 /* LHS */) {
+            // The non-immediate is always the LHS in commutative ops,
+            // and min/max are commutative
+            OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
+            const uint8_t i_lhs = I_LHS(data);
+            active[i_lhs] = true;
+        } else if (choice == 2 /* RHS */) {
+            const uint8_t i_rhs = I_RHS(data);
+            if (i_rhs) {
+                OP(tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+            } else {
+                OP(tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
             }
         }
-        data--;
     }
 
     // Write the beginning of the tape
@@ -516,7 +520,6 @@ __global__
 void v2_load_f(const out_tile_t* __restrict__ in_tiles,
                const uint32_t num_in_tiles,
                const uint32_t in_thread_offset,
-               const uint32_t tile_size,
                const uint32_t image_size,
                const Eigen::Matrix4f mat,
                float* __restrict__ out)
@@ -527,22 +530,21 @@ void v2_load_f(const out_tile_t* __restrict__ in_tiles,
         return;
     }
 
-    const uint32_t tiles_per_side = image_size / tile_size;
     const uint32_t in_parent_tile = in_tiles[tile_index].position;
-    uint32_t tx = (in_parent_tile % tiles_per_side);
-    uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-    uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+    uint32_t px = (in_parent_tile % image_size);
+    uint32_t py = ((in_parent_tile / image_size) % image_size);
+    uint32_t pz = ((in_parent_tile / image_size) / image_size);
 
     // We subdivide at a constant rate of 4x
     const uint32_t subtile_offset = thread_index % 64;
-    tx = tx * 4 + subtile_offset % 4;
-    ty = ty * 4 + (subtile_offset / 4) % 4;
-    tz = tz * 4 + (subtile_offset / 4) / 4;
+    px = px * 4 + subtile_offset % 4;
+    py = py * 4 + (subtile_offset / 4) % 4;
+    pz = pz * 4 + (subtile_offset / 4) / 4;
 
     const float size_recip = 1.0f / image_size;
-    const float fx = ((tx + 0.5f) * size_recip - 0.5f) * 2.0f;
-    const float fy = ((ty + 0.5f) * size_recip - 0.5f) * 2.0f;
-    const float fz = ((tz + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
 
     float fx_, fy_, fz_, fw_;
     fx_ = mat(0, 0) * fx +
@@ -577,7 +579,7 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
                const uint32_t in_thread_offset,
 
                const float* __restrict__ values,
-               const uint32_t tiles_per_side)
+               const uint32_t image_size)
 {
     float slots[128];
 
@@ -594,9 +596,8 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     slots[((const uint8_t*)data)[1]] = values[thread_index * 3];
     slots[((const uint8_t*)data)[2]] = values[thread_index * 3 + 1];
     slots[((const uint8_t*)data)[3]] = values[thread_index * 3 + 2];
-    data++;
 
-    while (OP(data)) {
+    while (OP(++data)) {
         switch (OP(data)) {
             case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
 
@@ -640,12 +641,12 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     const uint8_t i_out = data[1];
     if (slots[i_out] < 0.0f) {
         const uint32_t in_parent_tile = in_tiles[tile_index].position;
-        uint32_t px = (in_parent_tile % tiles_per_side);
-        uint32_t py = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-        uint32_t pz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+        uint32_t px = (in_parent_tile % image_size);
+        uint32_t py = ((in_parent_tile / image_size) % image_size);
+        uint32_t pz = ((in_parent_tile / image_size) / image_size);
 
         // We subdivide at a constant rate of 4x
-        const uint32_t pixels_per_side = tiles_per_side * 4;
+        const uint32_t pixels_per_side = image_size * 4;
         const uint32_t subtile_offset = thread_index % 64;
         px = px * 4 + subtile_offset % 4;
         py = py * 4 + (subtile_offset / 4) % 4;
@@ -680,350 +681,371 @@ void v2_build_image(uint32_t* __restrict__ image,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-#if 0
-// Brute-force evaluator for the 2D case
-__global__
-void v2_exec_2d(const uint64_t* __restrict__ data,
-                uint32_t* __restrict__ image,
-                uint32_t size, float size_recip)
-{
-    float slots[128];
 
-    const uint32_t x = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t y = threadIdx.y + blockIdx.y * blockDim.y;
-
-    // Load the axis values
-    uint16_t i_out = *((const uint16_t*)&data[1]);
-    if (i_out != UINT16_MAX) {
-        slots[i_out & 0x3FFF] = ((x * size_recip) - 0.5f) * 2.0f;
-    }
-    i_out = *((const uint16_t*)&data[1] + 1);
-    if (i_out != UINT16_MAX) {
-        slots[i_out & 0x3FFF] = ((y * size_recip) - 0.5f) * 2.0f;
-    }
-    i_out = *((const uint16_t*)&data[1] + 2);
-    if (i_out != UINT16_MAX) {
-        slots[i_out & 0x3FFF] = 0.0f;
-    }
-    data += 2;
-
-    while (data[0]) {
-        // Check for jumps (not yet implemented in the tape)
-        if (data[0] & FLAG_JUMPS) {
-            data = (const uint64_t*)(data[1]);
-        } else {
-            (OperationFunc(data[0] & ~7))(data[1], slots);
-            data += 2;
-        }
-    }
-
-    // Check the result
-    i_out = data[1];
-    if (x < size && y < size && slots[i_out] < 0.0f) {
-        image[size * y + x] = 1;
-    } else {
-        image[size * y + x] = 0;
-    }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
-__global__
-void v2_translate(const Tape* __restrict__ tape,
-                  uint64_t* const __restrict__ out)
-{
-    // Only write clauses within the tape
-    const uint32_t index = threadIdx.x + blockIdx.x * blockDim.x;
-    uint64_t* const __restrict__ data = out + index * 2 + 1;
-
-    // We reserve the 0 slot for choices, so add 1 to all registers here
-    if (index == 0) {
-        // Null termination of the tape beginning, plus axis registers
-        out[index * 2] = 0;
-        *((uint16_t*)data) = (*tape).axes.reg[0] + 1;
-        *((uint16_t*)data + 1) = (*tape).axes.reg[1] + 1;
-        *((uint16_t*)data + 2) = (*tape).axes.reg[2] + 1;
-    } else if (index == tape->num_clauses + 1) {
-        // Null termination of the tape, plus the output position
-        out[index * 2] = 0;
-        *data = (*tape)[tape->num_clauses - 1].out + 1;
-    } else if (index < tape->num_clauses + 1) {
-        const Clause c = (*tape)[index - 1];
-        using namespace libfive::Opcode;
-#define CASE_COMMUTATIVE_(opcode, name, f) \
-        case opcode: {                                                      \
-            if (c.banks == 0) {                                             \
-                out[index * 2] = (uint64_t)&name##_arg_arg | f;             \
-                *(uint16_t*)data = c.lhs + 1;                               \
-                *((uint16_t*)data + 2) = c.rhs + 1;                         \
-                *((uint16_t*)data + 3) = c.out + 1;                         \
-            } else if (c.banks == 1) {                                      \
-                out[index * 2] = (uint64_t)&name##_imm_arg | f | FLAG_IMM;  \
-                *(float*)data = (*tape).constant(c.lhs);                    \
-                *((uint16_t*)data + 2) = c.rhs + 1;                         \
-                *((uint16_t*)data + 3) = c.out + 1;                         \
-            } else if (c.banks == 2) {                                      \
-                out[index * 2] = (uint64_t)&name##_imm_arg | f | FLAG_IMM; \
-                *(float*)data = (*tape).constant(c.rhs);                    \
-                *((uint16_t*)data + 2) = c.lhs + 1;                         \
-                *((uint16_t*)data + 3) = c.out + 1;                         \
-            } else {                                                        \
-                assert(false);                                              \
-            }                                                               \
-            break;                                                          \
-        }
-#define CASE_COMMUTATIVE(opcode, name) CASE_COMMUTATIVE_(opcode, name, 0)
-#define CASE_COMMUTATIVE_CHOICE(opcode, name) CASE_COMMUTATIVE_(opcode, name, FLAG_CHOICE)
-
-#define CASE_NONCOMMUTATIVE(opcode, name) \
-        case opcode: {                                                      \
-            if (c.banks == 0) {                                             \
-                out[index * 2] = (uint64_t)&name##_arg_arg;                 \
-                *(uint16_t*)data = c.lhs + 1;                               \
-                *((uint16_t*)data + 2) = c.rhs + 1;                         \
-                *((uint16_t*)data + 3) = c.out + 1;                         \
-            } else if (c.banks == 1) {                                      \
-                out[index * 2] = (uint64_t)&name##_imm_arg | FLAG_IMM;      \
-                *(float*)data = (*tape).constant(c.lhs);                    \
-                *((uint16_t*)data + 2) = c.rhs + 1;                         \
-                *((uint16_t*)data + 3) = c.out + 1;                         \
-            } else if (c.banks == 2) {                                      \
-                out[index * 2] = (uint64_t)&name##_arg_imm | FLAG_IMM;      \
-                *(float*)data = (*tape).constant(c.rhs);                    \
-                *((uint16_t*)data + 2) = c.lhs + 1;                         \
-                *((uint16_t*)data + 3) = c.out + 1;                         \
-            } else {                                                        \
-                assert(false);                                              \
-            }                                                               \
-            break;                                                          \
-        }
-
-#define CASE_UNARY(opcode, name) \
-        case opcode: {                                      \
-            if (c.banks == 0) {                             \
-                out[index * 2] = (uint64_t)&name##_arg;     \
-                *(uint16_t*)data = c.lhs + 1;               \
-                *((uint16_t*)data + 2) = c.lhs + 1;         \
-                *((uint16_t*)data + 3) = c.out + 1;         \
-            } else {                                        \
-                assert(false);                              \
-            }                                               \
-            break;                                          \
-        }
-
-        switch (c.opcode) {
-            CASE_COMMUTATIVE(OP_ADD, add);
-            CASE_COMMUTATIVE(OP_MUL, mul);
-            CASE_COMMUTATIVE_CHOICE(OP_MIN, min);
-            CASE_COMMUTATIVE_CHOICE(OP_MAX, max);
-            CASE_NONCOMMUTATIVE(OP_SUB, sub);
-            CASE_NONCOMMUTATIVE(OP_DIV, div);
-
-
-            CASE_UNARY(OP_SQUARE, square);
-            CASE_UNARY(OP_SQRT, sqrt);
-            CASE_UNARY(OP_NEG, neg);
-            CASE_UNARY(OP_ABS, abs);
-
-            CASE_UNARY(OP_ASIN, asin);
-            CASE_UNARY(OP_ACOS, acos);
-            CASE_UNARY(OP_ATAN, atan);
-            CASE_UNARY(OP_EXP, exp);
-            CASE_UNARY(OP_SIN, sin);
-            CASE_UNARY(OP_COS, cos);
-            CASE_UNARY(OP_LOG, log);
-            default: assert(false);
-        }
-    }
-}
-
-uint64_t* build_v2_tape(const Tape& tape, const uint32_t size) {
-    const uint32_t u = (tape.num_clauses + 31) / 32;
-    uint64_t* data = CUDA_MALLOC(uint64_t, (tape.num_clauses + 2) * 2);
-    v2_translate<<<u, 32>>>(&tape, data);
-    cudaDeviceSynchronize();
-    return data;
-}
-
-void eval_v2_tape(const uint64_t* data, uint32_t* image, uint32_t size) {
-    const uint32_t u = (size + 15) / 16;
-    v2_exec_2d<<<dim3(u, u), dim3(16, 16)>>>(data, image, size, 1.0f / size);
-    cudaDeviceSynchronize();
-}
-
-
-v2_blob_t build_v2_blob(const Tape& tape, const uint32_t image_size_px) {
+v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
     v2_blob_t out = {0};
 
-    out.filled_tiles      = CUDA_MALLOC(uint32_t, pow(image_size_px / 64, 2));
-    out.filled_subtiles   = CUDA_MALLOC(uint32_t, pow(image_size_px / 16, 2));
-    out.filled_microtiles = CUDA_MALLOC(uint32_t, pow(image_size_px / 4,  2));
+    out.tiles.filled      = CUDA_MALLOC(uint32_t, pow(image_size_px / 64, 2));
+    out.subtiles.filled   = CUDA_MALLOC(uint32_t, pow(image_size_px / 16, 2));
+    out.microtiles.filled = CUDA_MALLOC(uint32_t, pow(image_size_px / 4,  2));
 
     out.image_size_px = image_size_px;
-    out.image = CUDA_MALLOC(uint32_t, pow(image_size_px,  2));
+    out.image = CUDA_MALLOC(uint32_t, pow(image_size_px, 2));
 
-    {   // Convert the tape to a tape with pointers, etc
-        const uint32_t u = (tape.num_clauses + 31) / 32;
-        out.tape = CUDA_MALLOC(uint64_t, (tape.num_clauses + 2) * 2);
-        v2_translate<<<u, 32>>>(&tape, out.tape);
+    out.tape_data = CUDA_MALLOC(uint64_t, LIBFIVE_CUDA_NUM_SUBTAPES * 64);
+    out.tape_index = CUDA_MALLOC(uint32_t, 1);
+    *out.tape_index = 0;
+
+    for (stage_t* t : {&out.tiles, &out.subtiles, &out.microtiles}) {
+        t->output_index = CUDA_MALLOC(uint32_t, 1);
+        *(t->output_index) = 0;
     }
 
-    // Allocate these three indexes in a single chunk
-    out.subtape_index = CUDA_MALLOC(uint32_t, 3);
-    out.ping_index = out.subtape_index + 1;
-    out.pong_index = out.subtape_index + 2;
+    // The first array of tiles must have enough space to hold all of the
+    // 64^3 tiles in the volume, which shouldn't be too much.
+    out.tiles.resize_to_fit(pow(out.image_size_px / 64, 3));
 
-    out.subtapes = CUDA_MALLOC(uint64_t, LIBFIVE_CUDA_NUM_SUBTAPES * 64);
+    // We leave the other stage_t's input/output arrays unallocated for now,
+    // since they're initialized to all zeros and will be resized to fit later.
 
-    cudaDeviceSynchronize();
-    *out.subtape_index = 0;
+    // Allocate room for the floating-point values, used in load/exec_f
+    out.values = CUDA_MALLOC(float,
+                    LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
+                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64 * 3);
 
-    *out.ping_index = 0;
-    out.ping_queue = NULL;
-    out.ping_queue_len = 0;
+    // TAPE PLANNING TIME!
+    // Hold a single cache lock to avoid needing mutex locks everywhere
+    auto lock = libfive::Cache::instance();
 
-    *out.pong_index = 0;
-    out.pong_queue = NULL;
-    out.pong_queue_len = 0;
+    auto ordered = tree.orderedDfs();
 
-    out.values = CUDA_MALLOC(float, 3 * 2 * LIBFIVE_CUDA_REFINE_BLOCKS * LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64);
+    std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
+    for (auto& c : ordered) {
+        if (c->op != libfive::Opcode::CONSTANT) {
+            // Very simple tracking of active spans, without clause reordering
+            // or any other cleverness.
+            last_used[c.lhs().id()] = c.id();
+            last_used[c.rhs().id()] = c.id();
+        }
+    }
+
+    std::vector<uint8_t> free_slots;
+    std::map<libfive::Tree::Id, uint8_t> bound_slots;
+    uint8_t num_slots = 1;
+
+    auto getSlot = [&](libfive::Tree::Id id) {
+        // Pick a slot for the output of this opcode
+        uint8_t out;
+        if (free_slots.size()) {
+            out = free_slots.back();
+            free_slots.pop_back();
+        } else {
+            out = num_slots++;
+            if (num_slots == UINT8_MAX) {
+                fprintf(stderr, "Ran out of slots!\n");
+            }
+        }
+        bound_slots[id] = out;
+        return out;
+    };
+
+    // Bind the axes to known slots, so that we can store their values
+    // before beginning an evaluation.
+    const libfive::Tree axis_trees[3] = {
+        libfive::Tree::X(),
+        libfive::Tree::Y(),
+        libfive::Tree::Z()};
+    uint64_t start = 0;
+    for (unsigned i=0; i < 3; ++i) {
+        if (last_used.find(axis_trees[i].id()) != last_used.end()) {
+            ((uint8_t*)&start)[i + 1] = getSlot(axis_trees[i].id());
+        }
+    }
+    std::vector<uint64_t> flat;
+    flat.reserve(ordered.size());
+    flat.push_back(start);
+
+    auto get_reg = [&](const std::shared_ptr<libfive::Tree::Tree_>& tree) {
+        auto itr = bound_slots.find(tree.get());
+        if (itr != bound_slots.end()) {
+            return itr->second;
+        } else {
+            fprintf(stderr, "Could not find bound slots");
+            return static_cast<uint8_t>(0);
+        }
+    };
+
+    for (auto& c : ordered) {
+        uint64_t clause = 0;
+        switch (c->op) {
+            using namespace libfive::Opcode;
+
+            case CONSTANT:
+            case VAR_X:
+            case VAR_Y:
+            case VAR_Z:
+                continue;
+
+#define OP_UNARY(p) \
+            case OP_##p: { \
+                OP(clause) = GPU_OP_##p##_LHS;      \
+                I_LHS(clause) = get_reg(c->lhs);    \
+            }
+            OP_UNARY(SQUARE)
+            OP_UNARY(SQRT);
+            OP_UNARY(NEG);
+            OP_UNARY(SIN);
+            OP_UNARY(COS);
+            OP_UNARY(ASIN);
+            OP_UNARY(ACOS);
+            OP_UNARY(ATAN);
+            OP_UNARY(EXP);
+            OP_UNARY(ABS);
+            OP_UNARY(LOG);
+
+#define OP_COMMUTATIVE(p) \
+            case OP_##p: { \
+                if (c->lhs->op == CONSTANT) {                   \
+                    OP(clause) = GPU_OP_##p##_LHS_IMM;          \
+                    I_LHS(clause) = get_reg(c->rhs);            \
+                    IMM(clause) = c->lhs->value;                \
+                } else if (c->rhs->op == CONSTANT) {            \
+                    OP(clause) = GPU_OP_##p##_LHS_IMM;          \
+                    I_LHS(clause) = get_reg(c->lhs);            \
+                    IMM(clause) = c->rhs->value;                \
+                } else {                                        \
+                    OP(clause) = GPU_OP_##p##_LHS_RHS;          \
+                    I_LHS(clause) = get_reg(c->lhs);            \
+                    I_RHS(clause) = get_reg(c->rhs);            \
+                }                                               \
+            }
+            OP_COMMUTATIVE(ADD)
+            OP_COMMUTATIVE(MUL)
+            OP_COMMUTATIVE(MIN)
+            OP_COMMUTATIVE(MAX)
+
+#define OP_NONCOMMUTATIVE(p) \
+            case OP_##p: { \
+                if (c->lhs->op == CONSTANT) {                   \
+                    OP(clause) = GPU_OP_##p##_IMM_RHS;          \
+                    I_RHS(clause) = get_reg(c->rhs);            \
+                    IMM(clause) = c->lhs->value;                \
+                } else if (c->rhs->op == CONSTANT) {            \
+                    OP(clause) = GPU_OP_##p##_LHS_IMM;          \
+                    I_LHS(clause) = get_reg(c->lhs);            \
+                    IMM(clause) = c->rhs->value;                \
+                } else {                                        \
+                    OP(clause) = GPU_OP_##p##_LHS_RHS;          \
+                    I_LHS(clause) = get_reg(c->lhs);            \
+                    I_RHS(clause) = get_reg(c->rhs);            \
+                }                                               \
+            }
+            OP_COMMUTATIVE(SUB)
+            OP_COMMUTATIVE(DIV)
+
+            case INVALID:
+            case OP_TAN:
+            case OP_RECIP:
+            case OP_ATAN2:
+            case OP_POW:
+            case OP_NTH_ROOT:
+            case OP_MOD:
+            case OP_NANFILL:
+            case OP_COMPARE:
+            case VAR_FREE:
+            case CONST_VAR:
+            case ORACLE:
+            case LAST_OP:
+                fprintf(stderr, "Unimplemented opcode");
+                break;
+        }
+
+        // Release slots if this was their last use.  We do this now so
+        // that one of them can be reused for the output slots below.
+        for (auto& h : {c.lhs().id(), c.rhs().id()}) {
+            if (h != nullptr &&
+                h->op != libfive::Opcode::CONSTANT &&
+                last_used[h] == c.id())
+            {
+                auto itr = bound_slots.find(h);
+                free_slots.push_back(itr->second);
+                bound_slots.erase(itr);
+            }
+        }
+
+        I_OUT(clause) = getSlot(c.id());
+        flat.push_back(clause);
+    }
+    {   // Push the end of the tape, which points to the final clauses's
+        // output slot so that we know where to read the result.
+        uint64_t end = 0;
+        I_OUT(end) = get_reg(ordered.back().operator->());
+        flat.push_back(end);
+    }
+
+    CUDA_CHECK(cudaMemcpy(out.tape_data, flat.data(),
+                          sizeof(uint64_t) * flat.size(),
+                          cudaMemcpyHostToDevice));
+    out.tape_length = flat.size();
+
     return out;
 }
 
 void free_v2_blob(v2_blob_t blob) {
-    cudaFree(blob.filled_tiles);
-    cudaFree(blob.filled_subtiles);
-    cudaFree(blob.filled_microtiles);
+    cudaFree(blob.image);
+    cudaFree(blob.tape_data);
+    cudaFree(blob.tape_index);
+    cudaFree(blob.values);
 
-    cudaFree(blob.tape);
-    cudaFree(blob.subtape_index);
+    for (auto& t: {blob.tiles, blob.subtiles, blob.microtiles}) {
+        cudaFree(t.filled);
+        cudaFree(t.input);
+        cudaFree(t.output);
+        cudaFree(t.output_index);
+    }
 }
 
+
 void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
+    // Reset the tape index
+    *blob.tape_index = blob.tape_length;
+
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 64x64x64 tiles
     ////////////////////////////////////////////////////////////////////////////
-    const uint32_t max_tiles = pow(blob.image_size_px / 64, 3);
-    if (blob.ping_queue_len < max_tiles * 2) {
-        cudaFree(blob.ping_queue);
-        blob.ping_queue = CUDA_MALLOC(uint32_t, max_tiles * 2);
-        blob.ping_queue_len = max_tiles * 2;
-        *blob.ping_index = 0;
-    }
-    CUDA_CHECK(cudaMemset(blob.filled_tiles, 0,
-                          pow(blob.image_size_px / 64, 2) * sizeof(uint32_t)));
 
-    *blob.subtape_index = 0;
+    // Reset all of the data arrays
+    CUDA_CHECK(cudaMemset(blob.tiles.filled, 0, sizeof(uint32_t) *
+                          pow(blob.image_size_px / 64, 2)));
+    CUDA_CHECK(cudaMemset(blob.subtiles.filled, 0, sizeof(uint32_t) *
+                          pow(blob.image_size_px / 16, 2)));
+    CUDA_CHECK(cudaMemset(blob.microtiles.filled, 0, sizeof(uint32_t) *
+                          pow(blob.image_size_px / 4, 2)));
+    CUDA_CHECK(cudaMemset(blob.image, 0, sizeof(uint32_t) *
+                          pow(blob.image_size_px, 2)));
+    *blob.tiles.output_index = 0;
+    *blob.subtiles.output_index = 0;
+    *blob.microtiles.output_index = 0;
 
     uint32_t stride, count;
-
     stride = LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS;
     count = pow(blob.image_size_px / 64, 3);
     for (unsigned offset=0; offset < count; offset += stride) {
         // First stage of interval evaluation on every interval
-        v2_load_i<<<LIBFIVE_CUDA_TILE_BLOCKS, LIBFIVE_CUDA_TILE_THREADS>>>(
-                offset, 64, blob.image_size_px,
-                mat, (Interval*)blob.values);
-        v2_exec_i<<<LIBFIVE_CUDA_TILE_BLOCKS, LIBFIVE_CUDA_TILE_THREADS>>>(
-                blob.tape,
-                blob.filled_tiles,
-                blob.subtapes, blob.subtape_index,
-                blob.ping_queue, blob.ping_index,
+        v2_load_i<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                    LIBFIVE_CUDA_TILE_THREADS>>>(
                 offset,
-                (const Interval*)blob.values,
-                blob.image_size_px / 64);
-    }
+                count,
+                64,
+                blob.image_size_px,
+                mat,
+                blob.tiles.input);
+        v2_exec_universal<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                            LIBFIVE_CUDA_TILE_THREADS>>>(
+                blob.tape_data,
+                blob.tape_index,
 
+                blob.tiles.filled,
+                blob.image_size_px / 64,
+
+                blob.tiles.input,
+                count,
+                offset,
+
+                blob.tiles.output,
+                blob.tiles.output_index);
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 16x16x16 subtiles
     ////////////////////////////////////////////////////////////////////////////
-
-    // Resize pong queue to fit subtiles
-    const uint32_t ambiguous_tile_count = *blob.ping_index / 2;
-    if (blob.pong_queue_len < ambiguous_tile_count * 2 * 64) {
-        cudaFree(blob.pong_queue);
-        blob.pong_queue = CUDA_MALLOC(uint32_t, ambiguous_tile_count * 2 * 64);
-        blob.pong_queue_len = ambiguous_tile_count * 2 * 64;
-        *blob.pong_index = 0;
-    }
-    CUDA_CHECK(cudaMemset(blob.filled_subtiles, 0,
-                          pow(blob.image_size_px / 16, 2) * sizeof(uint32_t)));
-    stride = LIBFIVE_CUDA_REFINE_BLOCKS * LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
-    count = ambiguous_tile_count;
+    count = *blob.tiles.output_index;
+    stride = LIBFIVE_CUDA_REFINE_BLOCKS *
+             LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
+    blob.subtiles.resize_to_fit(count);
     for (unsigned offset=0; offset < count; offset += stride) {
         v2_load_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                     LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
-                blob.ping_queue, ambiguous_tile_count,
-                offset * 64, 64, blob.image_size_px,
-                mat, (Interval*)blob.values);
-        v2_exec_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
-                blob.subtapes, blob.subtape_index,
-                blob.filled_subtiles,
-                blob.pong_queue, blob.pong_index,
-                blob.ping_queue, ambiguous_tile_count, offset * 64,
-                (Interval*)blob.values,
-                blob.image_size_px / 64);
+                blob.tiles.output,
+                count * 64,
+                offset * 64,
+                16,
+                blob.image_size_px,
+                mat,
+                blob.subtiles.input);
+        v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                blob.tape_data,
+                blob.tape_index,
+
+                blob.subtiles.filled,
+                blob.image_size_px / 16,
+
+                blob.subtiles.input,
+                count * 64,
+                offset * 64,
+
+                blob.subtiles.output,
+                blob.subtiles.output_index);
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
-    // Evaluation of 4x4x4 microtiles
+    // Evaluation of 4x4x4 subtiles
     ////////////////////////////////////////////////////////////////////////////
-
-    // Resize ping queue to fit microtiles
-    const uint32_t ambiguous_subtile_count = *blob.pong_index / 2;
-    if (blob.ping_queue_len < ambiguous_subtile_count * 2 * 64) {
-        cudaFree(blob.ping_queue);
-        blob.ping_queue = CUDA_MALLOC(uint32_t, ambiguous_subtile_count * 2 * 64);
-        blob.ping_queue_len = ambiguous_subtile_count * 2 * 64;
-        *blob.ping_index = 0;
-    }
-    CUDA_CHECK(cudaMemset(blob.filled_microtiles, 0,
-                          pow(blob.image_size_px / 4, 2) * sizeof(uint32_t)));
-    stride = LIBFIVE_CUDA_REFINE_BLOCKS * LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
-    count = ambiguous_subtile_count;
+    count = *blob.subtiles.output_index;
+    // stride is unchanged
+    blob.microtiles.resize_to_fit(count);
     for (unsigned offset=0; offset < count; offset += stride) {
         v2_load_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                     LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
-                blob.pong_queue, ambiguous_subtile_count,
-                offset * 64, 16, blob.image_size_px,
-                mat, (Interval*)blob.values);
-        v2_exec_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
-                blob.subtapes, blob.subtape_index,
-                blob.filled_microtiles,
-                blob.ping_queue, blob.ping_index,
-                blob.pong_queue, ambiguous_subtile_count, offset * 64,
-                (Interval*)blob.values,
-                blob.image_size_px / 16);
+                blob.subtiles.output,
+                count * 64,
+                offset * 64,
+                16,
+                blob.image_size_px,
+                mat,
+                blob.microtiles.input);
+        v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                blob.tape_data,
+                blob.tape_index,
+
+                blob.microtiles.filled,
+                blob.image_size_px / 4,
+
+                blob.microtiles.input,
+                count * 64,
+                offset * 64,
+
+                blob.microtiles.output,
+                blob.microtiles.output_index);
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of individual voxels
     ////////////////////////////////////////////////////////////////////////////
-    CUDA_CHECK(cudaMemset(blob.image, 0,
-                          pow(blob.image_size_px, 2) * sizeof(uint32_t)));
-
-    const uint32_t ambiguous_microtile_count = *blob.ping_index / 2;
-    stride = LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS * LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK;
-    count = ambiguous_microtile_count;
+    count = *blob.microtiles.output_index;
+    stride = LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
+             LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK;
     for (unsigned offset=0; offset < count; offset += stride) {
         v2_load_f<<<LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
                     LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
-                blob.ping_queue, ambiguous_microtile_count,
-                offset * 64, 4, blob.image_size_px,
-                mat, (float*)blob.values);
+            blob.microtiles.output,
+            count * 64,
+            offset * 64,
+            blob.image_size_px,
+            mat,
+            blob.values);
         v2_exec_f<<<LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
                     LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
-                blob.subtapes,
-                blob.image,
-                blob.ping_queue, ambiguous_microtile_count, offset * 64,
-                (float*)blob.values,
-                blob.image_size_px / 4);
+            blob.tape_data,
+            blob.image,
+            blob.microtiles.output,
+            count,
+            offset,
+            blob.values,
+            blob.image_size_px);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -1032,10 +1054,24 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
         v2_build_image<<<dim3(u, u), dim3(32, 32)>>>(
                 blob.image,
                 blob.image_size_px,
-                blob.filled_tiles,
-                blob.filled_subtiles,
-                blob.filled_microtiles);
+                blob.tiles.filled,
+                blob.subtiles.filled,
+                blob.microtiles.filled);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }
-#endif
+
+////////////////////////////////////////////////////////////////////////////////
+
+void stage_t::resize_to_fit(size_t count) {
+    if (input_array_size < count) {
+        cudaFree(input);
+        cudaFree(output);
+
+        input = CUDA_MALLOC(in_tile_t, count);
+        input_array_size = count;
+
+        output = CUDA_MALLOC(out_tile_t, count);
+        *output_index = 0;
+    }
+}
