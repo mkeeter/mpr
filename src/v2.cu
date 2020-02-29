@@ -461,9 +461,10 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     active[i_out] = true;
 
     // Claim a chunk of tape
-    uint64_t out_index = atomicAdd(tape_index, 64);
-    uint64_t out_offset = 64;
-    assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES * 64);
+    uint64_t out_index = atomicAdd(tape_index, LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+    uint64_t out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+    assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES *
+                                    LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
 
     // Write out the end of the tape, which is the same as the ending
     // of the previous tape (0 opcode, with i_out as the last slot)
@@ -495,9 +496,10 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         --out_offset;
         if (out_offset == 0) {
             const int32_t prev_index = out_index;
-            out_index = atomicAdd(tape_index, 64);
-            out_offset = 64;
-            assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES * 64);
+            out_index = atomicAdd(tape_index, LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+            out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+            assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES *
+                                            LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
 
             // Forward-pointing link
             OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
@@ -729,7 +731,8 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
     out.image_size_px = image_size_px;
     out.image = CUDA_MALLOC(uint32_t, pow(image_size_px, 2));
 
-    out.tape_data = CUDA_MALLOC(uint64_t, LIBFIVE_CUDA_NUM_SUBTAPES * 64);
+    out.tape_data = CUDA_MALLOC(uint64_t, LIBFIVE_CUDA_NUM_SUBTAPES *
+                                          LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
     out.tape_index = CUDA_MALLOC(uint32_t, 1);
     *out.tape_index = 0;
 
