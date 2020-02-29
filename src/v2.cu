@@ -670,7 +670,7 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     }
 
     // Check the result
-    const uint8_t i_out = data[1];
+    const uint8_t i_out = I_OUT(data);
     if (slots[i_out] < 0.0f) {
         const uint32_t tile = in_tiles[tile_index].position;
         const uint32_t tx = tile % tiles_per_side;
