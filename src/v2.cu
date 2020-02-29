@@ -286,25 +286,25 @@ void v2_load_s(const out_tile_t* __restrict__ in_tiles,
     const uint32_t tiles_per_side = image_size / tile_size;
 
     const uint32_t in_parent_tile = in_tiles[tile_index].position;
-    uint32_t tx = (in_parent_tile % tiles_per_side);
-    uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-    uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+    const uint32_t tx = (in_parent_tile % tiles_per_side);
+    const uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
+    const uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
 
     // We subdivide at a constant rate of 4x
     const uint32_t subtile_size = tile_size / 4;
     const uint32_t subtiles_per_side = tiles_per_side * 4;
     const uint32_t subtile_offset = thread_index % 64;
-    tx = tx * 4 + subtile_offset % 4;
-    ty = ty * 4 + (subtile_offset / 4) % 4;
-    tz = tz * 4 + (subtile_offset / 4) / 4;
+    const uint32_t sx = tx * 4 + subtile_offset % 4;
+    const uint32_t sy = ty * 4 + (subtile_offset / 4) % 4;
+    const uint32_t sz = tz * 4 + (subtile_offset / 4) / 4;
 
     const float size_recip = 1.0f / image_size;
-    const Interval ix = {(tx * subtile_size * size_recip - 0.5f) * 2.0f,
-                   ((tx + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
-    const Interval iy = {(ty * subtile_size * size_recip - 0.5f) * 2.0f,
-                   ((ty + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
-    const Interval iz = {(tz * subtile_size * size_recip - 0.5f) * 2.0f,
-                   ((tz + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
+    const Interval ix = {(sx * subtile_size * size_recip - 0.5f) * 2.0f,
+                   ((sx + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
+    const Interval iy = {(sy * subtile_size * size_recip - 0.5f) * 2.0f,
+                   ((sy + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
+    const Interval iz = {(sz * subtile_size * size_recip - 0.5f) * 2.0f,
+                   ((sz + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
 
     Interval ix_, iy_, iz_, iw_;
     ix_ = mat(0, 0) * ix +
@@ -330,9 +330,9 @@ void v2_load_s(const out_tile_t* __restrict__ in_tiles,
     out_tiles[subtile_index].Y = iy_;
     out_tiles[subtile_index].Z = iz_;
     out_tiles[subtile_index].position =
-        tx +
-        ty * subtiles_per_side +
-        tz * subtiles_per_side * subtiles_per_side;
+        sx +
+        sy * subtiles_per_side +
+        sz * subtiles_per_side * subtiles_per_side;
     out_tiles[subtile_index].tape = in_tiles[tile_index].tape;
 }
 
@@ -548,6 +548,7 @@ __global__
 void v2_load_f(const out_tile_t* __restrict__ in_tiles,
                const uint32_t num_in_tiles,
                const uint32_t in_thread_offset,
+               const uint32_t tile_size,
                const uint32_t image_size,
                const Eigen::Matrix4f mat,
                float* __restrict__ out)
@@ -558,16 +559,18 @@ void v2_load_f(const out_tile_t* __restrict__ in_tiles,
         return;
     }
 
+    const uint32_t tiles_per_side = image_size / tile_size;
+
     const uint32_t in_parent_tile = in_tiles[tile_index].position;
-    uint32_t px = (in_parent_tile % image_size);
-    uint32_t py = ((in_parent_tile / image_size) % image_size);
-    uint32_t pz = ((in_parent_tile / image_size) / image_size);
+    const uint32_t tx = (in_parent_tile % tiles_per_side);
+    const uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
+    const uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
 
     // We subdivide at a constant rate of 4x
     const uint32_t subtile_offset = thread_index % 64;
-    px = px * 4 + subtile_offset % 4;
-    py = py * 4 + (subtile_offset / 4) % 4;
-    pz = pz * 4 + (subtile_offset / 4) / 4;
+    const uint32_t px = tx * 4 + subtile_offset % 4;
+    const uint32_t py = ty * 4 + (subtile_offset / 4) % 4;
+    const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
 
     const float size_recip = 1.0f / image_size;
     const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
@@ -601,6 +604,7 @@ void v2_load_f(const out_tile_t* __restrict__ in_tiles,
 __global__
 void v2_exec_f(const uint64_t* const __restrict__ tapes,
                uint32_t* const __restrict__ image,
+               const uint32_t tiles_per_side,
 
                const out_tile_t* const __restrict__ in_tiles,
                const uint32_t num_in_tiles,
@@ -668,19 +672,18 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     // Check the result
     const uint8_t i_out = data[1];
     if (slots[i_out] < 0.0f) {
-        const uint32_t in_parent_tile = in_tiles[tile_index].position;
-        uint32_t px = (in_parent_tile % image_size);
-        uint32_t py = ((in_parent_tile / image_size) % image_size);
-        uint32_t pz = ((in_parent_tile / image_size) / image_size);
+        const uint32_t tile = in_tiles[tile_index].position;
+        const uint32_t tx = tile % tiles_per_side;
+        const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
+        const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
 
         // We subdivide at a constant rate of 4x
-        const uint32_t pixels_per_side = image_size * 4;
         const uint32_t subtile_offset = thread_index % 64;
-        px = px * 4 + subtile_offset % 4;
-        py = py * 4 + (subtile_offset / 4) % 4;
-        pz = pz * 4 + (subtile_offset / 4) / 4;
+        const uint32_t px = tx * 4 + subtile_offset % 4;
+        const uint32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
 
-        atomicMax(&image[px + py * pixels_per_side], pz);
+        atomicMax(&image[px + py * image_size], pz);
     }
 }
 
@@ -696,9 +699,15 @@ void v2_build_image(uint32_t* __restrict__ image,
     const uint32_t y = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (x < image_size_px && y < image_size_px) {
-        const uint32_t t = tiles[x / 64 + y / 64 * (image_size_px / 64)];
-        const uint32_t s = subtiles[x / 16 + y / 16 * (image_size_px / 16)];
-        const uint32_t u = microtiles[x / 4 + y / 4 * (image_size_px / 4)];
+        uint32_t t = tiles[x / 64 + y / 64 * (image_size_px / 64)];
+        if (t) { t = t * 64 + 63; }
+
+        uint32_t s = subtiles[x / 16 + y / 16 * (image_size_px / 16)];
+        if (s) { s = s * 16 + 15; }
+
+        uint32_t u = microtiles[x / 4 + y / 4 * (image_size_px / 4)];
+        if (u) { u = u * 4 + 3; }
+
         const uint32_t p = image[x + y * image_size_px];
 
         const uint32_t a = (t > s ? t : s);
@@ -1067,6 +1076,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
             blob.microtiles.output,
             count,
             offset * 64,
+            4,
             blob.image_size_px,
             mat,
             blob.values);
@@ -1074,6 +1084,8 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                     LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
             blob.tape_data,
             blob.image,
+            blob.image_size_px / 4,
+
             blob.microtiles.output,
             count,
             offset,
