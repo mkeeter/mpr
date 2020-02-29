@@ -492,14 +492,14 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         // If we're about to write a new piece of data to the tape,
         // (and are done with the current chunk), then we need to
         // add another link to the linked list.
-        if (out_offset == 1) {
+        --out_offset;
+        if (out_offset == 0) {
             const int32_t prev_index = out_index;
             out_index = atomicAdd(tape_index, 64);
             out_offset = 64;
             assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES * 64);
 
             // Forward-pointing link
-            out_offset--;
             OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
             const int32_t delta = (int32_t)prev_index -
                                   (int32_t)out_index;
@@ -510,7 +510,6 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             JUMP_TARGET(&tape_data[prev_index]) = -delta;
         }
 
-        out_offset--;
         active[i_out] = false;
         tape_data[out_index + out_offset] = *data;
         if (choice == 0) {
@@ -528,6 +527,7 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             const uint8_t i_rhs = I_RHS(data);
             if (i_rhs) {
                 OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+                active[i_rhs] = true;
             } else {
                 OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
             }
