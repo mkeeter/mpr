@@ -125,7 +125,7 @@ FUNCTION_PREAMBLE_LHS_IMM(min, float, f)
     slots[i_out] = fminf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_IMM(min, Interval, i)
-    uint8_t choice;
+    uint8_t choice = 0;
     slots[i_out] = min(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -133,7 +133,7 @@ FUNCTION_PREAMBLE_LHS_RHS(min, float, f)
     slots[i_out] = fminf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_RHS(min, Interval, i)
-    uint8_t choice;
+    uint8_t choice = 0;
     slots[i_out] = min(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -142,7 +142,7 @@ FUNCTION_PREAMBLE_LHS_IMM(max, float, f)
     slots[i_out] = fmaxf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_IMM(max, Interval, i)
-    uint8_t choice;
+    uint8_t choice = 0;
     slots[i_out] = max(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -150,7 +150,7 @@ FUNCTION_PREAMBLE_LHS_RHS(max, float, f)
     slots[i_out] = fmaxf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_RHS(max, Interval, i)
-    uint8_t choice;
+    uint8_t choice = 0;
     slots[i_out] = max(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
