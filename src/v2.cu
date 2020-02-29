@@ -465,10 +465,10 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     uint64_t out_offset = 64;
     assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES * 64);
 
-    // Write out the end of the tape, which is a 0 opcode and the i_out
+    // Write out the end of the tape, which is the same as the ending
+    // of the previous tape (0 opcode, with i_out as the last slot)
     out_offset--;
-    OP(&tape_data[out_index + out_offset]) = 0;
-    I_OUT(&tape_data[out_index + out_offset]) = i_out;
+    tape_data[out_index + out_offset] = *data;
 
     while (OP(--data)) {
         const uint8_t op = OP(data);
@@ -519,8 +519,8 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             const uint8_t i_rhs = I_RHS(data);
             active[i_rhs] = true;
         } else if (choice == 1 /* LHS */) {
-            // The non-immediate is always the LHS in commutative ops,
-            // and min/max are commutative
+            // The non-immediate is always the LHS in commutative ops, and
+            // min/max (the only clauses that produce a choice) are commutative
             OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
             const uint8_t i_lhs = I_LHS(data);
             active[i_lhs] = true;
