@@ -40,7 +40,6 @@ int main(int argc, char** argv)
         for (unsigned y=0; y < blob.image_size_px; ++y) {
             out.depth(y, x) = blob.image[i++];
         }
-        printf("\n");
     }
     out.savePNG("v2.png");
 

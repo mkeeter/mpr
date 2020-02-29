@@ -1162,7 +1162,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
 
             blob.microtiles.output,
             count,
-            offset,
+            offset * 64,
             blob.values,
             blob.image_size_px);
     }
