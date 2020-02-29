@@ -461,8 +461,8 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     active[i_out] = true;
 
     // Claim a chunk of tape
-    uint64_t out_index = atomicAdd(tape_index, LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
-    uint64_t out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+    int32_t out_index = atomicAdd(tape_index, LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+    int32_t out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
     assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES *
                                     LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
 
@@ -500,16 +500,20 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
             assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES *
                                             LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+            --out_offset;
 
             // Forward-pointing link
             OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
             const int32_t delta = (int32_t)prev_index -
-                                  (int32_t)out_index;
+                                  (int32_t)(out_index + out_offset);
             JUMP_TARGET(&tape_data[out_index + out_offset]) = delta;
 
             // Backward-pointing link
             OP(&tape_data[prev_index]) = GPU_OP_JUMP;
             JUMP_TARGET(&tape_data[prev_index]) = -delta;
+
+            // We've written the jump, so adjust the offset again
+            --out_offset;
         }
 
         active[i_out] = false;
