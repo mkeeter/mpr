@@ -2,7 +2,6 @@
 #include <Eigen/Eigen>
 
 #include "libfive/tree/tree.hpp"
-#include "gpu_interval.hpp"
 
 /* The clause is implemented as a struct
  * packed into a single 64-bit value
@@ -18,16 +17,9 @@
     };
 */
 
-struct in_tile_t {
-    uint32_t position;
-    uint32_t tape;
-    Interval X, Y, Z;
-};
-
-struct out_tile_t {
-    uint32_t position;
-    uint32_t tape;
-};
+// Forward declarations
+struct in_tile_t;
+struct out_tile_t;
 
 struct stage_t {
     void resize_to_fit(size_t count);
@@ -38,7 +30,11 @@ struct stage_t {
     uint32_t input_array_size;
 
     // The output array is the same size as the input array
-    // TODO: re-use the input array instead?
+    // TODO: re-use the input array instead?  Proposal:
+    //      To mark a tile as filled, leave its position and set tape = -1
+    //      To discard an empty tile, set its position to -1
+    //      Otherwise (needs recursion), leave its position unchanged
+    //          and update the tape value based on pushing
     out_tile_t* output;
     uint32_t* output_index;
 };
@@ -60,3 +56,4 @@ struct v2_blob_t {
 
 v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);
 void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat);
+void free_v2_blob(v2_blob_t blob);

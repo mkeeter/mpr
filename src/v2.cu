@@ -10,6 +10,21 @@
 #include "gpu_opcode.hpp"
 #include "parameters.hpp"
 
+////////////////////////////////////////////////////////////////////////////////
+
+struct in_tile_t {
+    uint32_t position;
+    uint32_t tape;
+    Interval X, Y, Z;
+};
+
+struct out_tile_t {
+    uint32_t position;
+    uint32_t tape;
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
 #define OP(d) (((uint8_t*)d)[0])
 #define I_OUT(d) (((uint8_t*)d)[1])
 #define I_LHS(d) (((uint8_t*)d)[2])
@@ -788,8 +803,9 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
 
 #define OP_UNARY(p) \
             case OP_##p: { \
-                OP(clause) = GPU_OP_##p##_LHS;      \
-                I_LHS(clause) = get_reg(c->lhs);    \
+                OP(&clause) = GPU_OP_##p##_LHS;      \
+                I_LHS(&clause) = get_reg(c->lhs);    \
+                break;                              \
             }
             OP_UNARY(SQUARE)
             OP_UNARY(SQRT);
@@ -806,18 +822,19 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
 #define OP_COMMUTATIVE(p) \
             case OP_##p: { \
                 if (c->lhs->op == CONSTANT) {                   \
-                    OP(clause) = GPU_OP_##p##_LHS_IMM;          \
-                    I_LHS(clause) = get_reg(c->rhs);            \
-                    IMM(clause) = c->lhs->value;                \
+                    OP(&clause) = GPU_OP_##p##_LHS_IMM;         \
+                    I_LHS(&clause) = get_reg(c->rhs);           \
+                    IMM(&clause) = c->lhs->value;               \
                 } else if (c->rhs->op == CONSTANT) {            \
-                    OP(clause) = GPU_OP_##p##_LHS_IMM;          \
-                    I_LHS(clause) = get_reg(c->lhs);            \
-                    IMM(clause) = c->rhs->value;                \
+                    OP(&clause) = GPU_OP_##p##_LHS_IMM;         \
+                    I_LHS(&clause) = get_reg(c->lhs);           \
+                    IMM(&clause) = c->rhs->value;               \
                 } else {                                        \
-                    OP(clause) = GPU_OP_##p##_LHS_RHS;          \
-                    I_LHS(clause) = get_reg(c->lhs);            \
-                    I_RHS(clause) = get_reg(c->rhs);            \
+                    OP(&clause) = GPU_OP_##p##_LHS_RHS;         \
+                    I_LHS(&clause) = get_reg(c->lhs);           \
+                    I_RHS(&clause) = get_reg(c->rhs);           \
                 }                                               \
+                break;                                          \
             }
             OP_COMMUTATIVE(ADD)
             OP_COMMUTATIVE(MUL)
@@ -827,18 +844,19 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
 #define OP_NONCOMMUTATIVE(p) \
             case OP_##p: { \
                 if (c->lhs->op == CONSTANT) {                   \
-                    OP(clause) = GPU_OP_##p##_IMM_RHS;          \
-                    I_RHS(clause) = get_reg(c->rhs);            \
-                    IMM(clause) = c->lhs->value;                \
+                    OP(&clause) = GPU_OP_##p##_IMM_RHS;         \
+                    I_RHS(&clause) = get_reg(c->rhs);           \
+                    IMM(&clause) = c->lhs->value;               \
                 } else if (c->rhs->op == CONSTANT) {            \
-                    OP(clause) = GPU_OP_##p##_LHS_IMM;          \
-                    I_LHS(clause) = get_reg(c->lhs);            \
-                    IMM(clause) = c->rhs->value;                \
+                    OP(&clause) = GPU_OP_##p##_LHS_IMM;         \
+                    I_LHS(&clause) = get_reg(c->lhs);           \
+                    IMM(&clause) = c->rhs->value;               \
                 } else {                                        \
-                    OP(clause) = GPU_OP_##p##_LHS_RHS;          \
-                    I_LHS(clause) = get_reg(c->lhs);            \
-                    I_RHS(clause) = get_reg(c->rhs);            \
+                    OP(&clause) = GPU_OP_##p##_LHS_RHS;         \
+                    I_LHS(&clause) = get_reg(c->lhs);           \
+                    I_RHS(&clause) = get_reg(c->rhs);           \
                 }                                               \
+                break;                                          \
             }
             OP_COMMUTATIVE(SUB)
             OP_COMMUTATIVE(DIV)
@@ -873,13 +891,13 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
             }
         }
 
-        I_OUT(clause) = getSlot(c.id());
+        I_OUT(&clause) = getSlot(c.id());
         flat.push_back(clause);
     }
     {   // Push the end of the tape, which points to the final clauses's
         // output slot so that we know where to read the result.
         uint64_t end = 0;
-        I_OUT(end) = get_reg(ordered.back().operator->());
+        I_OUT(&end) = get_reg(ordered.back().operator->());
         flat.push_back(end);
     }
 
