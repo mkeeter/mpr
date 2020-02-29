@@ -325,14 +325,15 @@ void v2_load_s(const out_tile_t* __restrict__ in_tiles,
     iy_ = iy_ / iw_;
     iz_ = iz_ / iw_;
 
-    out_tiles[thread_index].X = ix_;
-    out_tiles[thread_index].Y = iy_;
-    out_tiles[thread_index].Z = iz_;
-    out_tiles[thread_index].position =
+    const uint32_t subtile_index = tile_index * 64 + subtile_offset;
+    out_tiles[subtile_index].X = ix_;
+    out_tiles[subtile_index].Y = iy_;
+    out_tiles[subtile_index].Z = iz_;
+    out_tiles[subtile_index].position =
         tx +
         ty * subtiles_per_side +
         tz * subtiles_per_side * subtiles_per_side;
-    out_tiles[thread_index].tape = in_tiles[tile_index].tape;
+    out_tiles[subtile_index].tape = in_tiles[tile_index].tape;
 }
 
 __global__
@@ -363,9 +364,9 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     // Load the axis values (precomputed by v2_load_*)
     // If the axis isn't assigned to a slot, then it writes to slot 0,
     // which is otherwise unused.
-    slots[((const uint8_t*)data)[1]] = in_tiles[thread_index].X;
-    slots[((const uint8_t*)data)[2]] = in_tiles[thread_index].Y;
-    slots[((const uint8_t*)data)[3]] = in_tiles[thread_index].Z;
+    slots[((const uint8_t*)data)[1]] = in_tiles[tile_index].X;
+    slots[((const uint8_t*)data)[2]] = in_tiles[tile_index].Y;
+    slots[((const uint8_t*)data)[3]] = in_tiles[tile_index].Z;
 
     uint32_t choices[256] = {0};
     unsigned choice_index = 0;
@@ -420,6 +421,18 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
 
     // Check the result
     const uint8_t i_out = I_OUT(data);
+#if 0
+    printf("%u:%u => [%f %f] [%f %f] [%f %f] => [%f %f]\n",
+            threadIdx.x, blockIdx.x,
+            in_tiles[tile_index].X.lower(),
+            in_tiles[tile_index].X.upper(),
+            in_tiles[tile_index].Y.lower(),
+            in_tiles[tile_index].Y.upper(),
+            in_tiles[tile_index].Z.lower(),
+            in_tiles[tile_index].Z.upper(),
+            slots[i_out].lower(),
+            slots[i_out].upper());
+#endif
     if (slots[i_out].lower() > 0.0f) {
         return;
     } else if (slots[i_out].upper() < 0.0f) {
@@ -981,14 +994,14 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
     count = *blob.tiles.output_index;
     stride = LIBFIVE_CUDA_REFINE_BLOCKS *
              LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
-    blob.subtiles.resize_to_fit(count);
+    blob.subtiles.resize_to_fit(count * 64);
     for (unsigned offset=0; offset < count; offset += stride) {
         v2_load_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                     LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
                 blob.tiles.output,
-                count * 64,
+                count,
                 offset * 64,
-                16,
+                64,
                 blob.image_size_px,
                 mat,
                 blob.subtiles.input);
@@ -1007,18 +1020,19 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.subtiles.output,
                 blob.subtiles.output_index);
     }
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 4x4x4 subtiles
     ////////////////////////////////////////////////////////////////////////////
     count = *blob.subtiles.output_index;
     // stride is unchanged
-    blob.microtiles.resize_to_fit(count);
+    blob.microtiles.resize_to_fit(count * 64);
     for (unsigned offset=0; offset < count; offset += stride) {
         v2_load_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                     LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
                 blob.subtiles.output,
-                count * 64,
+                count,
                 offset * 64,
                 16,
                 blob.image_size_px,
@@ -1039,6 +1053,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.microtiles.output,
                 blob.microtiles.output_index);
     }
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of individual voxels
@@ -1050,7 +1065,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
         v2_load_f<<<LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
                     LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
             blob.microtiles.output,
-            count * 64,
+            count,
             offset * 64,
             blob.image_size_px,
             mat,

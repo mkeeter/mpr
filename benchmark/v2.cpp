@@ -9,9 +9,22 @@ int main(int, char**)
 {
     auto X = libfive::Tree::X();
     auto Y = libfive::Tree::Y();
-    auto t = sqrt((X + 1)*(X + 1) + (Y + 1)*(Y + 1)) - 1.8;
+    auto t = sqrt(X*X + Y*Y) - 0.5;
 
-    auto blob = build_v2_blob(t, 256);
+    auto blob = build_v2_blob(t, 64);
     render_v2_blob(blob, Eigen::Matrix4f::Identity());
+
+    // Save the image using libfive::Heightmap
+    libfive::Heightmap out(blob.image_size_px, blob.image_size_px);
+    uint32_t i = 0;
+    for (unsigned x=0; x < blob.image_size_px; ++x) {
+        for (unsigned y=0; y < blob.image_size_px; ++y) {
+            printf("%u ", blob.image[i]);
+            out.depth(y, x) = blob.image[i++];
+        }
+        printf("\n");
+    }
+    out.savePNG("v2.png");
+
     free_v2_blob(blob);
 }
