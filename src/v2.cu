@@ -527,9 +527,9 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         } else if (choice == 2 /* RHS */) {
             const uint8_t i_rhs = I_RHS(data);
             if (i_rhs) {
-                OP(tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
             } else {
-                OP(tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
+                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
             }
         }
     }
