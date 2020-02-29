@@ -9,7 +9,10 @@ int main(int, char**)
 {
     auto X = libfive::Tree::X();
     auto Y = libfive::Tree::Y();
-    auto t = sqrt(X*X + Y*Y) - 0.5;
+    auto Z = libfive::Tree::Z();
+    auto a = sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.2;
+    auto b = sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.2;
+    auto t = min(a, b);
 
     auto blob = build_v2_blob(t, 64);
     render_v2_blob(blob, Eigen::Matrix4f::Identity());
