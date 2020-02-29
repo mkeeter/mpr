@@ -364,6 +364,15 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     // Load the axis values (precomputed by v2_load_*)
     // If the axis isn't assigned to a slot, then it writes to slot 0,
     // which is otherwise unused.
+#if 0
+    if (threadIdx.x % 64 == 0) {
+        printf("%u:%u Initial slots: %u %u %u\n",
+                blockIdx.x, threadIdx.x,
+            (uint32_t)(((const uint8_t*)data)[1]),
+            (uint32_t)(((const uint8_t*)data)[2]),
+            (uint32_t)(((const uint8_t*)data)[3]));
+    }
+#endif
     slots[((const uint8_t*)data)[1]] = in_tiles[tile_index].X;
     slots[((const uint8_t*)data)[2]] = in_tiles[tile_index].Y;
     slots[((const uint8_t*)data)[3]] = in_tiles[tile_index].Z;
@@ -373,6 +382,15 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     bool has_any_choice = false;
 
     while (OP(++data)) {
+#if 0
+        if (threadIdx.x % 64 == 0) {
+            printf("%u:%u, %u: %s %u %u (%f) [%u] => %u\n",
+                    blockIdx.x, threadIdx.x,
+                    (uint32_t)(data - tape_data),
+                    v2_op_str(OP(data)), I_LHS(data), I_RHS(data),
+                    IMM(data), JUMP_TARGET(data), I_OUT(data));
+        }
+#endif
         switch (OP(data)) {
             case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
 
@@ -412,7 +430,7 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         }
         // If this opcode makes a choice, then append that choice to the list
         if (OP(data) >= GPU_OP_MIN_LHS_IMM && OP(data) <= GPU_OP_MAX_LHS_RHS) {
-            const uint8_t choice = slots[0].lower();
+            const uint8_t choice = slots[0].v.x;
             choices[choice_index / 16] |= (choice << ((choice_index % 16) * 2));
             choice_index++;
             has_any_choice |= (choice != 0);
@@ -1003,6 +1021,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.tiles.output_index);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
+    printf("Done rendering tiles\n");
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 16x16x16 subtiles
@@ -1037,6 +1056,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.subtiles.output_index);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
+    printf("Done rendering subtiles\n");
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 4x4x4 subtiles
@@ -1070,6 +1090,7 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.microtiles.output_index);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
+    printf("Done rendering microtiles\n");
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of individual voxels

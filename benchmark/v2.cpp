@@ -38,7 +38,6 @@ int main(int argc, char** argv)
     uint32_t i = 0;
     for (unsigned x=0; x < blob.image_size_px; ++x) {
         for (unsigned y=0; y < blob.image_size_px; ++y) {
-            printf("%u ", blob.image[i]);
             out.depth(y, x) = blob.image[i++];
         }
         printf("\n");
