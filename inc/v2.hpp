@@ -50,8 +50,6 @@ struct v2_blob_t {
     stage_t tiles;
     stage_t subtiles;
     stage_t microtiles;
-
-    float* values; // buffer used when assigning values for float evaluation
 };
 
 v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);

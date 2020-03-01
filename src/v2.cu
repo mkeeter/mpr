@@ -621,63 +621,6 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
-void v2_load_f(const out_tile_t* __restrict__ in_tiles,
-               const uint32_t num_in_tiles,
-               const uint32_t in_thread_offset,
-               const uint32_t tile_size,
-               const uint32_t image_size,
-               const Eigen::Matrix4f mat,
-               float* __restrict__ out)
-{
-    const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t tile_index = (thread_index + in_thread_offset) / 64;
-    if (tile_index >= num_in_tiles) {
-        return;
-    }
-
-    const uint32_t tiles_per_side = image_size / tile_size;
-
-    const uint32_t in_parent_tile = in_tiles[tile_index].position;
-    const uint32_t tx = (in_parent_tile % tiles_per_side);
-    const uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-    const uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
-
-    // We subdivide at a constant rate of 4x
-    const uint32_t subtile_offset = thread_index % 64;
-    const uint32_t px = tx * 4 + subtile_offset % 4;
-    const uint32_t py = ty * 4 + (subtile_offset / 4) % 4;
-    const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
-
-    const float size_recip = 1.0f / image_size;
-    const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
-    const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
-    const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
-
-    float fx_, fy_, fz_, fw_;
-    fx_ = mat(0, 0) * fx +
-          mat(0, 1) * fy +
-          mat(0, 2) * fz + mat(0, 3);
-    fy_ = mat(1, 0) * fx +
-          mat(1, 1) * fy +
-          mat(1, 2) * fz + mat(1, 3);
-    fz_ = mat(2, 0) * fx +
-          mat(2, 1) * fy +
-          mat(2, 2) * fz + mat(2, 3);
-    fw_ = mat(3, 0) * fx +
-          mat(3, 1) * fy +
-          mat(3, 2) * fz + mat(3, 3);
-
-    // Projection!
-    fx_ = fx_ / fw_;
-    fy_ = fy_ / fw_;
-    fz_ = fz_ / fw_;
-
-    out[thread_index * 3] = fx_;
-    out[thread_index * 3 + 1] = fy_;
-    out[thread_index * 3 + 2] = fz_;
-}
-
-__global__
 void v2_exec_f(const uint64_t* const __restrict__ tapes,
                uint32_t* const __restrict__ image,
                const uint32_t tiles_per_side,
@@ -686,8 +629,8 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
                const uint32_t num_in_tiles,
                const uint32_t in_thread_offset,
 
-               const float* __restrict__ values,
-               const uint32_t image_size)
+               const uint32_t image_size,
+               Eigen::Matrix4f mat)
 {
     float slots[128];
 
@@ -700,10 +643,35 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     // Pick out the tape based on the pointer stored in the tiles list
     const uint64_t* __restrict__ data = &tapes[in_tiles[tile_index].tape];
 
-    // Load the axis values (precomputed by v2_load_f)
-    slots[((const uint8_t*)data)[1]] = values[thread_index * 3];
-    slots[((const uint8_t*)data)[2]] = values[thread_index * 3 + 1];
-    slots[((const uint8_t*)data)[3]] = values[thread_index * 3 + 2];
+    {   // Load values into registers!
+        const uint32_t in_parent_tile = in_tiles[tile_index].position;
+
+        // We subdivide at a constant rate of 4x
+        const uint32_t subtile_offset = thread_index % 64;
+        const float size_recip = 1.0f / image_size;
+
+        const uint32_t tx = (in_parent_tile % tiles_per_side);
+        const uint32_t px = tx * 4 + subtile_offset % 4;
+        const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        const uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
+        const uint32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        const uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+        const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+        const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        const float fw_ = mat(3, 0) * fx +
+                          mat(3, 1) * fy +
+                          mat(3, 2) * fz + mat(3, 3);
+        for (unsigned i=0; i < 3; ++i) {
+            slots[((const uint8_t*)data)[i + 1]] =
+                (mat(i, 0) * fx +
+                 mat(i, 1) * fy +
+                 mat(i, 2) * fz + mat(0, 3)) / fw_;
+        }
+    }
 
     while (OP(++data)) {
         switch (OP(data)) {
@@ -821,11 +789,6 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
 
     // We leave the other stage_t's input/output arrays unallocated for now,
     // since they're initialized to all zeros and will be resized to fit later.
-
-    // Allocate room for the floating-point values, used in load/exec_f
-    out.values = CUDA_MALLOC(float,
-                    LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
-                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64 * 3);
 
     // TAPE PLANNING TIME!
     // Hold a single cache lock to avoid needing mutex locks everywhere
@@ -1016,7 +979,6 @@ void free_v2_blob(v2_blob_t& blob) {
     cudaFree(blob.image);
     cudaFree(blob.tape_data);
     cudaFree(blob.tape_index);
-    cudaFree(blob.values);
 
     for (auto& t: {blob.tiles, blob.subtiles, blob.microtiles}) {
         cudaFree(t.filled);
@@ -1152,15 +1114,6 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     stride = LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
              LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK;
     for (unsigned offset=0; offset < count; offset += stride) {
-        v2_load_f<<<LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
-                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
-            blob.microtiles.output,
-            count,
-            offset * 64,
-            4,
-            blob.image_size_px,
-            mat,
-            blob.values);
         v2_exec_f<<<LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
                     LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
             blob.tape_data,
@@ -1170,8 +1123,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
             blob.microtiles.output,
             count,
             offset * 64,
-            blob.values,
-            blob.image_size_px);
+            blob.image_size_px,
+            mat);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
