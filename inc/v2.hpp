@@ -54,6 +54,8 @@ struct v2_blob_t {
     stage_t microtiles;
 
     cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
+
+    void* values; // Used to pass data around
 };
 
 v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);

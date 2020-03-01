@@ -15,7 +15,6 @@
 struct in_tile_t {
     uint32_t position;
     uint32_t tape;
-    Interval X, Y, Z;
 };
 
 struct out_tile_t {
@@ -312,7 +311,8 @@ void v2_calculate_intervals(in_tile_t* __restrict__ in_tiles,
                             const uint32_t tiles_per_side,
                             const uint32_t tile_size,
                             float image_size_recip,
-                            Eigen::Matrix4f mat)
+                            Eigen::Matrix4f mat,
+                            Interval* __restrict__ values)
 {
     const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t tile_index = thread_index + in_thread_offset;
@@ -351,9 +351,9 @@ void v2_calculate_intervals(in_tile_t* __restrict__ in_tiles,
     iy_ = iy_ / iw_;
     iz_ = iz_ / iw_;
 
-    in_tiles[tile_index].X = ix_;
-    in_tiles[tile_index].Y = iy_;
-    in_tiles[tile_index].Z = iz_;
+    values[thread_index * 3] = ix_;
+    values[thread_index * 3 + 1] = iy_;
+    values[thread_index * 3 + 2] = iz_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -370,7 +370,9 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
                        const uint32_t in_thread_offset,
 
                        out_tile_t* __restrict__ out_tile,
-                       uint32_t* const __restrict__ out_tile_index)
+                       uint32_t* const __restrict__ out_tile_index,
+
+                       const Interval* __restrict__ values)
 {
     const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t tile_index = thread_index + in_thread_offset;
@@ -395,9 +397,9 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             (uint32_t)(((const uint8_t*)data)[3]));
     }
 #endif
-    slots[((const uint8_t*)data)[1]] = in_tiles[tile_index].X;
-    slots[((const uint8_t*)data)[2]] = in_tiles[tile_index].Y;
-    slots[((const uint8_t*)data)[3]] = in_tiles[tile_index].Z;
+    slots[((const uint8_t*)data)[1]] = values[thread_index * 3];
+    slots[((const uint8_t*)data)[2]] = values[thread_index * 3 + 1];
+    slots[((const uint8_t*)data)[3]] = values[thread_index * 3 + 2];
 
     uint32_t choices[256] = {0};
     unsigned choice_index = 0;
@@ -772,6 +774,11 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
         CUDA_CHECK(cudaStreamCreate(&out.streams[i]));
     }
 
+    // Allocate a bunch of scratch space for passing intervals around
+    out.values = CUDA_MALLOC(Interval,
+            LIBFIVE_CUDA_REFINE_BLOCKS *
+            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64 * 3);
+
     // The first array of tiles must have enough space to hold all of the
     // 64^3 tiles in the volume, which shouldn't be too much.
     out.tiles.resize_to_fit(pow(out.image_size_px / 64, 3));
@@ -968,6 +975,7 @@ void free_v2_blob(v2_blob_t& blob) {
     cudaFree(blob.image);
     cudaFree(blob.tape_data);
     cudaFree(blob.tape_index);
+    cudaFree(blob.values);
 
     for (auto& t: {blob.tiles, blob.subtiles, blob.microtiles}) {
         cudaFree(t.filled);
@@ -1024,7 +1032,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 blob.image_size_px / 64,
                 64,
                 1.0f / blob.image_size_px,
-                mat);
+                mat,
+                (Interval*)blob.values);
         v2_exec_universal<<<LIBFIVE_CUDA_TILE_BLOCKS,
                             LIBFIVE_CUDA_TILE_THREADS,
                             0, stream>>>(
@@ -1039,7 +1048,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 offset,
 
                 blob.tiles.output,
-                blob.tiles.output_index);
+                blob.tiles.output_index,
+                (Interval*)blob.values);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -1069,7 +1079,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 blob.image_size_px / 16,
                 16,
                 1.0f / blob.image_size_px,
-                mat);
+                mat,
+                (Interval*)blob.values);
         v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                             LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
                             0, stream>>>(
@@ -1084,7 +1095,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 offset * 64,
 
                 blob.subtiles.output,
-                blob.subtiles.output_index);
+                blob.subtiles.output_index,
+                (Interval*)blob.values);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -1113,7 +1125,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 blob.image_size_px / 4,
                 4,
                 1.0f / blob.image_size_px,
-                mat);
+                mat,
+                (Interval*)blob.values);
         v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                             LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
                             0, stream>>>(
@@ -1128,7 +1141,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 offset * 64,
 
                 blob.microtiles.output,
-                blob.microtiles.output_index);
+                blob.microtiles.output_index,
+                (Interval*)blob.values);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
