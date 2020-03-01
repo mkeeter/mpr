@@ -9,6 +9,7 @@
 #include <libfive/render/discrete/heightmap.hpp>
 
 #include "renderable.hpp"
+#include "v2.hpp"
 
 int main(int argc, char **argv)
 {
@@ -30,23 +31,61 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
+    std::cout << "Rendering with v2 architecture:" << std::endl;
     for (auto size: {256, 512, 1024, 1536, 2048}) {
         Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
         T(3,2) = 0.3f;
-        auto r = Renderable::build(t, size, 3);
+        auto r = build_v2_blob(t, size); 
         // Warm-up
         for (unsigned i=0; i < 20; ++i) {
-            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_NORMALS);
+	    render_v2_blob(r, Eigen::Matrix4f::Identity());
         }
         auto start_gpu = std::chrono::steady_clock::now();
         const auto count = 100;
         for (unsigned i=0; i < count; ++i) {
-            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_NORMALS);
+	    render_v2_blob(r, Eigen::Matrix4f::Identity());
         }
         auto end_gpu = std::chrono::steady_clock::now();
         std::cout << size << " " <<
             std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() / (float)count <<
             " ms\n";
+
+        libfive::Heightmap out(size, size);
+        uint32_t i = 0;
+        for (int x=0; x < size; ++x) {
+            for (int y=0; y < size; ++y) {
+                out.depth(y, x) = r.image[i++];
+            }
+        }
+        out.savePNG("out_gpu_depth_v2_" + std::to_string(size) + ".png");
+    }
+    std::cout << "Rendering with original architecture:" << std::endl;
+    for (auto size: {256, 512, 1024, 1536, 2048}) {
+        Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+        T(3,2) = 0.3f;
+	auto r = Renderable::build(t, size, 3);
+        // Warm-up
+        for (unsigned i=0; i < 20; ++i) {
+            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
+        }
+        auto start_gpu = std::chrono::steady_clock::now();
+        const auto count = 100;
+        for (unsigned i=0; i < count; ++i) {
+            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
+        }
+        auto end_gpu = std::chrono::steady_clock::now();
+        std::cout << size << " " <<
+            std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() / (float)count <<
+            " ms\n";
+
+        libfive::Heightmap out(size, size);
+        uint32_t i = 0;
+        for (int x=0; x < size; ++x) {
+            for (int y=0; y < size; ++y) {
+                out.depth(y, x) = r->heightAt(y, x);
+            }
+        }
+        out.savePNG("out_gpu_depth_orig_" + std::to_string(size) + ".png");
     }
     return 0;
 }
