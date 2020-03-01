@@ -303,11 +303,11 @@ void v2_load_i(uint32_t tile_offset,
     iy_ = iy_ / iw_;
     iz_ = iz_ / iw_;
 
-    out[thread_index].X = ix_;
-    out[thread_index].Y = iy_;
-    out[thread_index].Z = iz_;
-    out[thread_index].position = tile;
-    out[thread_index].tape = 0;
+    out[tile].X = ix_;
+    out[tile].Y = iy_;
+    out[tile].Z = iz_;
+    out[tile].position = tile;
+    out[tile].tape = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
