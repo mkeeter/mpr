@@ -499,12 +499,18 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
 #endif
     if (slots[i_out].lower() > 0.0f) {
         return;
-    } else if (slots[i_out].upper() < 0.0f) {
-        const uint32_t tile = in_tiles[tile_index].position;
-        const uint32_t tx = tile % tiles_per_side;
-        const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
-        const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
+    }
+
+    const uint32_t tile = in_tiles[tile_index].position;
+    const uint32_t tx = tile % tiles_per_side;
+    const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
+    const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
+    // Filled
+    if (slots[i_out].upper() < 0.0f) {
         atomicMax(&image[tx + ty * tiles_per_side], tz);
+        return;
+    } else if (image[tx + ty * tiles_per_side] >= tz) {
+        // Ambiguous, but blocked by a higher tile
         return;
     }
 
