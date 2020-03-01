@@ -257,69 +257,27 @@ const char* v2_op_str(uint8_t op) {
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
-void v2_load_i(uint32_t tile_offset,
-               uint32_t tile_count,
-               uint32_t tile_size,
-               uint32_t image_size,
-               const Eigen::Matrix4f mat,
-               in_tile_t* __restrict__ out)
+void v2_preload_i(uint32_t tile_offset,
+                  uint32_t tile_count,
+                  in_tile_t* __restrict__ out)
 {
-    // Load the axis values
     const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t tile = thread_index + tile_offset;
-    const uint32_t tiles_per_side = image_size / tile_size;
 
     if (tile >= tile_count) {
         return;
     }
-
-    const float size_recip = 1.0f / image_size;
-    const uint32_t x = tile % tiles_per_side;
-    const Interval ix = {(x * tile_size * size_recip - 0.5f) * 2.0f,
-                   ((x + 1) * tile_size * size_recip - 0.5f) * 2.0f};
-    const uint32_t y = (tile / tiles_per_side) % tiles_per_side;
-    const Interval iy = {(y * tile_size * size_recip - 0.5f) * 2.0f,
-                   ((y + 1) * tile_size * size_recip - 0.5f) * 2.0f};
-    const uint32_t z = (tile / tiles_per_side) / tiles_per_side;
-    const Interval iz = {(z * tile_size * size_recip - 0.5f) * 2.0f,
-                   ((z + 1) * tile_size * size_recip - 0.5f) * 2.0f};
-
-    Interval ix_, iy_, iz_, iw_;
-    ix_ = mat(0, 0) * ix +
-          mat(0, 1) * iy +
-          mat(0, 2) * iz + mat(0, 3);
-    iy_ = mat(1, 0) * ix +
-          mat(1, 1) * iy +
-          mat(1, 2) * iz + mat(1, 3);
-    iz_ = mat(2, 0) * ix +
-          mat(2, 1) * iy +
-          mat(2, 2) * iz + mat(2, 3);
-    iw_ = mat(3, 0) * ix +
-          mat(3, 1) * iy +
-          mat(3, 2) * iz + mat(3, 3);
-
-    // Projection!
-    ix_ = ix_ / iw_;
-    iy_ = iy_ / iw_;
-    iz_ = iz_ / iw_;
-
-    out[tile].X = ix_;
-    out[tile].Y = iy_;
-    out[tile].Z = iz_;
     out[tile].position = tile;
     out[tile].tape = 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
+// Splits each tile from the in_tiles list into 64 tiles in out_tiles
 __global__
-void v2_load_s(const out_tile_t* __restrict__ in_tiles,
-               const uint32_t num_in_tiles,
-               const uint32_t in_thread_offset,
-               const uint32_t tile_size,
-               const uint32_t image_size,
-               const Eigen::Matrix4f mat,
-               in_tile_t* __restrict__ out_tiles)
+void v2_preload_s(const out_tile_t* __restrict__ in_tiles,
+                  const uint32_t num_in_tiles,
+                  const uint32_t in_thread_offset,
+                  const uint32_t tiles_per_side,
+                  in_tile_t* __restrict__ out_tiles)
 {
     const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t tile_index = (thread_index + in_thread_offset) / 64;
@@ -327,28 +285,52 @@ void v2_load_s(const out_tile_t* __restrict__ in_tiles,
         return;
     }
 
-    const uint32_t tiles_per_side = image_size / tile_size;
-
     const uint32_t in_parent_tile = in_tiles[tile_index].position;
     const uint32_t tx = (in_parent_tile % tiles_per_side);
     const uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
     const uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
 
-    // We subdivide at a constant rate of 4x
-    const uint32_t subtile_size = tile_size / 4;
+    // We subdivide at a constant rate of 4x on all three axes
     const uint32_t subtiles_per_side = tiles_per_side * 4;
     const uint32_t subtile_offset = thread_index % 64;
     const uint32_t sx = tx * 4 + subtile_offset % 4;
     const uint32_t sy = ty * 4 + (subtile_offset / 4) % 4;
     const uint32_t sz = tz * 4 + (subtile_offset / 4) / 4;
 
-    const float size_recip = 1.0f / image_size;
-    const Interval ix = {(sx * subtile_size * size_recip - 0.5f) * 2.0f,
-                   ((sx + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
-    const Interval iy = {(sy * subtile_size * size_recip - 0.5f) * 2.0f,
-                   ((sy + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
-    const Interval iz = {(sz * subtile_size * size_recip - 0.5f) * 2.0f,
-                   ((sz + 1) * subtile_size * size_recip - 0.5f) * 2.0f};
+    const uint32_t subtile_index = tile_index * 64 + subtile_offset;
+    out_tiles[subtile_index].position =
+        sx +
+        sy * subtiles_per_side +
+        sz * subtiles_per_side * subtiles_per_side;
+    out_tiles[subtile_index].tape = in_tiles[tile_index].tape;
+}
+
+__global__
+void v2_calculate_intervals(in_tile_t* __restrict__ in_tiles,
+                            const uint32_t num_in_tiles,
+                            const uint32_t in_thread_offset,
+                            const uint32_t tiles_per_side,
+                            const uint32_t tile_size,
+                            float image_size_recip,
+                            Eigen::Matrix4f mat)
+{
+    const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const uint32_t tile_index = thread_index + in_thread_offset;
+    if (tile_index >= num_in_tiles) {
+        return;
+    }
+
+    const uint32_t tile = in_tiles[tile_index].position;
+
+    const uint32_t x = tile % tiles_per_side;
+    const Interval ix = {(x * tile_size * image_size_recip - 0.5f) * 2.0f,
+                   ((x + 1) * tile_size * image_size_recip - 0.5f) * 2.0f};
+    const uint32_t y = (tile / tiles_per_side) % tiles_per_side;
+    const Interval iy = {(y * tile_size * image_size_recip - 0.5f) * 2.0f,
+                   ((y + 1) * tile_size * image_size_recip - 0.5f) * 2.0f};
+    const uint32_t z = (tile / tiles_per_side) / tiles_per_side;
+    const Interval iz = {(z * tile_size * image_size_recip - 0.5f) * 2.0f,
+                   ((z + 1) * tile_size * image_size_recip - 0.5f) * 2.0f};
 
     Interval ix_, iy_, iz_, iw_;
     ix_ = mat(0, 0) * ix +
@@ -369,16 +351,12 @@ void v2_load_s(const out_tile_t* __restrict__ in_tiles,
     iy_ = iy_ / iw_;
     iz_ = iz_ / iw_;
 
-    const uint32_t subtile_index = tile_index * 64 + subtile_offset;
-    out_tiles[subtile_index].X = ix_;
-    out_tiles[subtile_index].Y = iy_;
-    out_tiles[subtile_index].Z = iz_;
-    out_tiles[subtile_index].position =
-        sx +
-        sy * subtiles_per_side +
-        sz * subtiles_per_side * subtiles_per_side;
-    out_tiles[subtile_index].tape = in_tiles[tile_index].tape;
+    in_tiles[tile_index].X = ix_;
+    in_tiles[tile_index].Y = iy_;
+    in_tiles[tile_index].Z = iz_;
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 __global__
 void v2_exec_universal(uint64_t* const __restrict__ tape_data,
@@ -1020,15 +998,22 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     stride = LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS;
     count = pow(blob.image_size_px / 64, 3);
     for (unsigned offset=0; offset < count; offset += stride) {
+        cudaDeviceSynchronize();
         // First stage of interval evaluation on every interval
-        v2_load_i<<<LIBFIVE_CUDA_TILE_BLOCKS,
+        v2_preload_i<<<LIBFIVE_CUDA_TILE_BLOCKS,
                     LIBFIVE_CUDA_TILE_THREADS>>>(
                 offset,
                 count,
-                64,
-                blob.image_size_px,
-                mat,
                 blob.tiles.input);
+        v2_calculate_intervals<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                blob.tiles.input,
+                count,
+                offset,
+                blob.image_size_px / 64,
+                64,
+                1.0f / blob.image_size_px,
+                mat);
         v2_exec_universal<<<LIBFIVE_CUDA_TILE_BLOCKS,
                             LIBFIVE_CUDA_TILE_THREADS>>>(
                 blob.tape_data,
@@ -1054,15 +1039,22 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
              LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
     blob.subtiles.resize_to_fit(count * 64);
     for (unsigned offset=0; offset < count; offset += stride) {
-        v2_load_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+        v2_preload_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                       LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
                 blob.tiles.output,
                 count,
                 offset * 64,
-                64,
-                blob.image_size_px,
-                mat,
+                blob.image_size_px / 64,
                 blob.subtiles.input);
+        v2_calculate_intervals<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                blob.subtiles.input,
+                count * 64,
+                offset * 64,
+                blob.image_size_px / 16,
+                16,
+                1.0f / blob.image_size_px,
+                mat);
         v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                             LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
                 blob.tape_data,
@@ -1087,15 +1079,22 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     // stride is unchanged
     blob.microtiles.resize_to_fit(count * 64);
     for (unsigned offset=0; offset < count; offset += stride) {
-        v2_load_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                    LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+        v2_preload_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                       LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
                 blob.subtiles.output,
                 count,
                 offset * 64,
-                16,
-                blob.image_size_px,
-                mat,
+                blob.image_size_px / 16,
                 blob.microtiles.input);
+        v2_calculate_intervals<<<LIBFIVE_CUDA_REFINE_BLOCKS,
+                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                blob.microtiles.input,
+                count * 64,
+                offset * 64,
+                blob.image_size_px / 4,
+                4,
+                1.0f / blob.image_size_px,
+                mat);
         v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
                             LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
                 blob.tape_data,
