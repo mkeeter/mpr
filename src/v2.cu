@@ -1006,7 +1006,7 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
     return out;
 }
 
-void free_v2_blob(v2_blob_t blob) {
+void free_v2_blob(v2_blob_t& blob) {
     cudaFree(blob.image);
     cudaFree(blob.tape_data);
     cudaFree(blob.tape_index);
@@ -1021,7 +1021,7 @@ void free_v2_blob(v2_blob_t blob) {
 }
 
 
-void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
+void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     // Reset the tape index
     *blob.tape_index = blob.tape_length;
 

@@ -55,5 +55,5 @@ struct v2_blob_t {
 };
 
 v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);
-void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat);
-void free_v2_blob(v2_blob_t blob);
+void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat);
+void free_v2_blob(v2_blob_t& blob);
