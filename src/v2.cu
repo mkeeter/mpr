@@ -662,6 +662,12 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
         const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
         const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
 
+        // Early return if this pixel won't ever be filled
+        if (image[px + py * image_size] >= pz) {
+            return;
+        }
+
+        // Otherwise, calculate the X/Y/Z values
         const float fw_ = mat(3, 0) * fx +
                           mat(3, 1) * fy +
                           mat(3, 2) * fz + mat(3, 3);
