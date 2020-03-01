@@ -379,6 +379,15 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     if (tile_index >= in_tile_count) {
         return;
     }
+    {   // Check for early return if the tile is already covered
+        const uint32_t tile = in_tiles[tile_index].position;
+        const uint32_t tx = tile % tiles_per_side;
+        const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
+        const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
+        if (image[tx + ty * tiles_per_side] >= tz) {
+            return;
+        }
+    }
 
     Interval slots[128];
 
@@ -717,33 +726,19 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
 __global__
-void v2_build_image(uint32_t* __restrict__ image,
-                    const uint32_t image_size_px,
-                    const uint32_t* __restrict__ tiles,
-                    const uint32_t* __restrict__ subtiles,
-                    const uint32_t* __restrict__ microtiles)
+void v2_copy_filled(const uint32_t* __restrict__ prev,
+                    uint32_t* __restrict__ image,
+                    const uint32_t image_size_px)
 {
     const uint32_t x = threadIdx.x + blockIdx.x * blockDim.x;
     const uint32_t y = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (x < image_size_px && y < image_size_px) {
-        uint32_t t = tiles[x / 64 + y / 64 * (image_size_px / 64)];
-        if (t) { t = t * 64 + 63; }
-
-        uint32_t s = subtiles[x / 16 + y / 16 * (image_size_px / 16)];
-        if (s) { s = s * 16 + 15; }
-
-        uint32_t u = microtiles[x / 4 + y / 4 * (image_size_px / 4)];
-        if (u) { u = u * 4 + 3; }
-
-        const uint32_t p = image[x + y * image_size_px];
-
-        const uint32_t a = (t > s ? t : s);
-        const uint32_t b = (u > p ? u : p);
-        const uint32_t r = (a > b ? a : b);
-        image[x + y * image_size_px] = r;
+        uint32_t t = prev[x / 4 + y / 4 * (image_size_px / 4)];
+        if (t) {
+            image[x + y * image_size_px] = t * 4 + 3;
+        }
     }
 }
 
@@ -1052,6 +1047,14 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 (Interval*)blob.values);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
+    {   // Copy filled tiles onto subtiles
+        const uint32_t u = ((blob.image_size_px / 16) / 32);
+        v2_copy_filled<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+                blob.tiles.filled,
+                blob.subtiles.filled,
+                blob.image_size_px / 16);
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 16x16x16 subtiles
@@ -1097,6 +1100,14 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 blob.subtiles.output,
                 blob.subtiles.output_index,
                 (Interval*)blob.values);
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+    {   // Copy filled subtiles onto microtiles
+        const uint32_t u = ((blob.image_size_px / 4) / 32);
+        v2_copy_filled<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+                blob.subtiles.filled,
+                blob.microtiles.filled,
+                blob.image_size_px / 4);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -1145,6 +1156,14 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 (Interval*)blob.values);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
+    {   // Copy filled microtiles onto pixels
+        const uint32_t u = (blob.image_size_px / 32);
+        v2_copy_filled<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+                blob.microtiles.filled,
+                blob.image,
+                blob.image_size_px);
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of individual voxels
@@ -1167,17 +1186,6 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
             offset * 64,
             blob.image_size_px,
             mat);
-    }
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    {   // Copy all of the filled stuff into the per-pixel image
-        const uint32_t u = (blob.image_size_px + 31) / 32;
-        v2_build_image<<<dim3(u, u), dim3(32, 32)>>>(
-                blob.image,
-                blob.image_size_px,
-                blob.tiles.filled,
-                blob.subtiles.filled,
-                blob.microtiles.filled);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }
