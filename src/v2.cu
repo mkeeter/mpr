@@ -13,13 +13,13 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 struct in_tile_t {
-    uint32_t position;
-    uint32_t tape;
+    int32_t position;
+    int32_t tape;
 };
 
 struct out_tile_t {
-    uint32_t position;
-    uint32_t tape;
+    int32_t position;
+    int32_t tape;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -360,30 +360,30 @@ void v2_calculate_intervals(in_tile_t* __restrict__ in_tiles,
 
 __global__
 void v2_exec_universal(uint64_t* const __restrict__ tape_data,
-                       uint32_t* const __restrict__ tape_index,
+                       int32_t* const __restrict__ tape_index,
 
-                       uint32_t* const __restrict__ image,
+                       int32_t* const __restrict__ image,
                        const uint32_t tiles_per_side,
 
                        in_tile_t* const __restrict__ in_tiles,
-                       const uint32_t in_tile_count,
-                       const uint32_t in_thread_offset,
+                       const int32_t in_tile_count,
+                       const int32_t in_thread_offset,
 
                        out_tile_t* __restrict__ out_tile,
-                       uint32_t* const __restrict__ out_tile_index,
+                       int32_t* const __restrict__ out_tile_index,
 
                        const Interval* __restrict__ values)
 {
-    const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t tile_index = thread_index + in_thread_offset;
+    const int32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = thread_index + in_thread_offset;
     if (tile_index >= in_tile_count) {
         return;
     }
     {   // Check for early return if the tile is already covered
-        const uint32_t tile = in_tiles[tile_index].position;
-        const uint32_t tx = tile % tiles_per_side;
-        const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
-        const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
+        const int32_t tile = in_tiles[tile_index].position;
+        const int32_t tx = tile % tiles_per_side;
+        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
+        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
         if (image[tx + ty * tiles_per_side] >= tz) {
             return;
         }
@@ -490,10 +490,10 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    const uint32_t tile = in_tiles[tile_index].position;
-    const uint32_t tx = tile % tiles_per_side;
-    const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
-    const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
+    const int32_t tile = in_tiles[tile_index].position;
+    const int32_t tx = tile % tiles_per_side;
+    const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
+    const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
     // Filled
     if (slots[i_out].upper() < 0.0f) {
         atomicMax(&image[tx + ty * tiles_per_side], tz);
@@ -611,20 +611,20 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
 
 __global__
 void v2_exec_f(const uint64_t* const __restrict__ tapes,
-               uint32_t* const __restrict__ image,
-               const uint32_t tiles_per_side,
+               int32_t* const __restrict__ image,
+               const int32_t tiles_per_side,
 
                const out_tile_t* const __restrict__ in_tiles,
-               const uint32_t num_in_tiles,
-               const uint32_t in_thread_offset,
+               const int32_t num_in_tiles,
+               const int32_t in_thread_offset,
 
-               const uint32_t image_size,
+               const int32_t image_size,
                Eigen::Matrix4f mat)
 {
     float slots[128];
 
-    const uint32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t tile_index = (thread_index + in_thread_offset) / 64;
+    const int32_t thread_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = (thread_index + in_thread_offset) / 64;
     if (tile_index >= num_in_tiles) {
         return;
     }
@@ -633,22 +633,22 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     const uint64_t* __restrict__ data = &tapes[in_tiles[tile_index].tape];
 
     {   // Load values into registers!
-        const uint32_t in_parent_tile = in_tiles[tile_index].position;
+        const int32_t in_parent_tile = in_tiles[tile_index].position;
 
         // We subdivide at a constant rate of 4x
-        const uint32_t subtile_offset = thread_index % 64;
+        const int32_t subtile_offset = thread_index % 64;
         const float size_recip = 1.0f / image_size;
 
-        const uint32_t tx = (in_parent_tile % tiles_per_side);
-        const uint32_t px = tx * 4 + subtile_offset % 4;
+        const int32_t tx = (in_parent_tile % tiles_per_side);
+        const int32_t px = tx * 4 + subtile_offset % 4;
         const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
 
-        const uint32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-        const uint32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const int32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
+        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
         const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
 
-        const uint32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
-        const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+        const int32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
         const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
 
         // Early return if this pixel won't ever be filled
@@ -711,31 +711,31 @@ void v2_exec_f(const uint64_t* const __restrict__ tapes,
     // Check the result
     const uint8_t i_out = I_OUT(data);
     if (slots[i_out] < 0.0f) {
-        const uint32_t tile = in_tiles[tile_index].position;
-        const uint32_t tx = tile % tiles_per_side;
-        const uint32_t ty = (tile / tiles_per_side) % tiles_per_side;
-        const uint32_t tz = (tile / tiles_per_side) / tiles_per_side;
+        const int32_t tile = in_tiles[tile_index].position;
+        const int32_t tx = tile % tiles_per_side;
+        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
+        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
 
         // We subdivide at a constant rate of 4x
-        const uint32_t subtile_offset = thread_index % 64;
-        const uint32_t px = tx * 4 + subtile_offset % 4;
-        const uint32_t py = ty * 4 + (subtile_offset / 4) % 4;
-        const uint32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+        const int32_t subtile_offset = thread_index % 64;
+        const int32_t px = tx * 4 + subtile_offset % 4;
+        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
 
         atomicMax(&image[px + py * image_size], pz);
     }
 }
 
 __global__
-void v2_copy_filled(const uint32_t* __restrict__ prev,
-                    uint32_t* __restrict__ image,
-                    const uint32_t image_size_px)
+void v2_copy_filled(const int32_t* __restrict__ prev,
+                    int32_t* __restrict__ image,
+                    const int32_t image_size_px)
 {
-    const uint32_t x = threadIdx.x + blockIdx.x * blockDim.x;
-    const uint32_t y = threadIdx.y + blockIdx.y * blockDim.y;
+    const int32_t x = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t y = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (x < image_size_px && y < image_size_px) {
-        uint32_t t = prev[x / 4 + y / 4 * (image_size_px / 4)];
+        int32_t t = prev[x / 4 + y / 4 * (image_size_px / 4)];
         if (t) {
             image[x + y * image_size_px] = t * 4 + 3;
         }
@@ -744,23 +744,23 @@ void v2_copy_filled(const uint32_t* __restrict__ prev,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
+v2_blob_t build_v2_blob(libfive::Tree tree, const int32_t image_size_px) {
     v2_blob_t out = {0};
 
-    out.tiles.filled      = CUDA_MALLOC(uint32_t, pow(image_size_px / 64, 2));
-    out.subtiles.filled   = CUDA_MALLOC(uint32_t, pow(image_size_px / 16, 2));
-    out.microtiles.filled = CUDA_MALLOC(uint32_t, pow(image_size_px / 4,  2));
+    out.tiles.filled      = CUDA_MALLOC(int32_t, pow(image_size_px / 64, 2));
+    out.subtiles.filled   = CUDA_MALLOC(int32_t, pow(image_size_px / 16, 2));
+    out.microtiles.filled = CUDA_MALLOC(int32_t, pow(image_size_px / 4,  2));
 
     out.image_size_px = image_size_px;
-    out.image = CUDA_MALLOC(uint32_t, pow(image_size_px, 2));
+    out.image = CUDA_MALLOC(int32_t, pow(image_size_px, 2));
 
     out.tape_data = CUDA_MALLOC(uint64_t, LIBFIVE_CUDA_NUM_SUBTAPES *
                                           LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
-    out.tape_index = CUDA_MALLOC(uint32_t, 1);
+    out.tape_index = CUDA_MALLOC(int32_t, 1);
     *out.tape_index = 0;
 
     for (stage_t* t : {&out.tiles, &out.subtiles, &out.microtiles}) {
-        t->output_index = CUDA_MALLOC(uint32_t, 1);
+        t->output_index = CUDA_MALLOC(int32_t, 1);
         *(t->output_index) = 0;
     }
 
@@ -994,13 +994,13 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     ////////////////////////////////////////////////////////////////////////////
 
     // Reset all of the data arrays
-    CUDA_CHECK(cudaMemset(blob.tiles.filled, 0, sizeof(uint32_t) *
+    CUDA_CHECK(cudaMemset(blob.tiles.filled, 0, sizeof(int32_t) *
                           pow(blob.image_size_px / 64, 2)));
-    CUDA_CHECK(cudaMemset(blob.subtiles.filled, 0, sizeof(uint32_t) *
+    CUDA_CHECK(cudaMemset(blob.subtiles.filled, 0, sizeof(int32_t) *
                           pow(blob.image_size_px / 16, 2)));
-    CUDA_CHECK(cudaMemset(blob.microtiles.filled, 0, sizeof(uint32_t) *
+    CUDA_CHECK(cudaMemset(blob.microtiles.filled, 0, sizeof(int32_t) *
                           pow(blob.image_size_px / 4, 2)));
-    CUDA_CHECK(cudaMemset(blob.image, 0, sizeof(uint32_t) *
+    CUDA_CHECK(cudaMemset(blob.image, 0, sizeof(int32_t) *
                           pow(blob.image_size_px, 2)));
     *blob.tiles.output_index = 0;
     *blob.subtiles.output_index = 0;

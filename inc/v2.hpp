@@ -26,10 +26,10 @@ struct out_tile_t;
 struct stage_t {
     void resize_to_fit(size_t count);
 
-    uint32_t* filled;
+    int32_t* filled;
 
     in_tile_t* input;
-    uint32_t input_array_size;
+    int32_t input_array_size;
 
     // The output array is the same size as the input array
     // TODO: re-use the input array instead?  Proposal:
@@ -38,16 +38,16 @@ struct stage_t {
     //      Otherwise (needs recursion), leave its position unchanged
     //          and update the tape value based on pushing
     out_tile_t* output;
-    uint32_t* output_index;
+    int32_t* output_index;
 };
 
 struct v2_blob_t {
-    uint32_t image_size_px;
-    uint32_t* image;
+    int32_t image_size_px;
+    int32_t* image;
 
     uint64_t* tape_data;    // original tape is at index 0
-    uint32_t* tape_index;   // single value
-    uint32_t tape_length;   // used to reset tape index
+    int32_t* tape_index;   // single value
+    int32_t tape_length;   // used to reset tape index
 
     stage_t tiles;
     stage_t subtiles;
@@ -58,6 +58,6 @@ struct v2_blob_t {
     void* values; // Used to pass data around
 };
 
-v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);
+v2_blob_t build_v2_blob(libfive::Tree tree, const int32_t image_size_px);
 void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat);
 void free_v2_blob(v2_blob_t& blob);
