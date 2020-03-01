@@ -6,6 +6,7 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
+#include "../libfive/libfive/test/util/shapes.cpp"
 #include "v2.hpp"
 
 int main(int argc, char** argv)
@@ -22,15 +23,19 @@ int main(int argc, char** argv)
             exit(1);
         }
     } else {
+        auto b = box({-0.5, -0.5, -0.5}, {0.5, 0.5, 0.5});
+        t = rotate_x(b, M_PI/4);
+        /*
         auto X = libfive::Tree::X();
         auto Y = libfive::Tree::Y();
         auto Z = libfive::Tree::Z();
         auto a = sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.2;
         auto b = sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.2;
         t = min(a, b);
+        */
     }
 
-    auto blob = build_v2_blob(t, 64);
+    auto blob = build_v2_blob(t, 512);
     render_v2_blob(blob, Eigen::Matrix4f::Identity());
 
     // Save the image using libfive::Heightmap

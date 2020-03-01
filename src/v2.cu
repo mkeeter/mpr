@@ -828,6 +828,7 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
     auto ordered = tree.orderedDfs();
 
     std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
+    bool axes_used[3] = {false, false, false};
     for (auto& c : ordered) {
         if (c->op != libfive::Opcode::CONSTANT) {
             // Very simple tracking of active spans, without clause reordering
@@ -835,6 +836,9 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
             last_used[c.lhs().id()] = c.id();
             last_used[c.rhs().id()] = c.id();
         }
+        axes_used[0] |= c == libfive::Tree::X();
+        axes_used[1] |= c == libfive::Tree::Y();
+        axes_used[2] |= c == libfive::Tree::Z();
     }
 
     std::vector<uint8_t> free_slots;
@@ -865,7 +869,7 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
         libfive::Tree::Z()};
     uint64_t start = 0;
     for (unsigned i=0; i < 3; ++i) {
-        if (last_used.find(axis_trees[i].id()) != last_used.end()) {
+        if (axes_used[i]) {
             ((uint8_t*)&start)[i + 1] = getSlot(axis_trees[i].id());
         }
     }
@@ -951,8 +955,8 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
                 }                                               \
                 break;                                          \
             }
-            OP_COMMUTATIVE(SUB)
-            OP_COMMUTATIVE(DIV)
+            OP_NONCOMMUTATIVE(SUB)
+            OP_NONCOMMUTATIVE(DIV)
 
             case INVALID:
             case OP_TAN:
@@ -1067,7 +1071,6 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.tiles.output_index);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
-    printf("Done rendering tiles\n");
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 16x16x16 subtiles
@@ -1102,7 +1105,6 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.subtiles.output_index);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
-    printf("Done rendering subtiles\n");
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 4x4x4 subtiles
@@ -1136,7 +1138,6 @@ void render_v2_blob(v2_blob_t blob, Eigen::Matrix4f mat) {
                 blob.microtiles.output_index);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
-    printf("Done rendering microtiles\n");
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of individual voxels
