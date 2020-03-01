@@ -767,6 +767,11 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px) {
         *(t->output_index) = 0;
     }
 
+    // Create streams for parallel execution
+    for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
+        CUDA_CHECK(cudaStreamCreate(&out.streams[i]));
+    }
+
     // The first array of tiles must have enough space to hold all of the
     // 64^3 tiles in the volume, which shouldn't be too much.
     out.tiles.resize_to_fit(pow(out.image_size_px / 64, 3));
@@ -970,6 +975,10 @@ void free_v2_blob(v2_blob_t& blob) {
         cudaFree(t.output);
         cudaFree(t.output_index);
     }
+
+    for (unsigned i=0; i < LIBFIVE_CUDA_NUM_STREAMS; ++i) {
+        CUDA_CHECK(cudaStreamDestroy(blob.streams[i]));
+    }
 }
 
 
@@ -998,15 +1007,17 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     stride = LIBFIVE_CUDA_TILE_BLOCKS * LIBFIVE_CUDA_TILE_THREADS;
     count = pow(blob.image_size_px / 64, 3);
     for (unsigned offset=0; offset < count; offset += stride) {
-        cudaDeviceSynchronize();
+        auto stream = blob.streams[(offset / stride) % LIBFIVE_CUDA_NUM_STREAMS];
         // First stage of interval evaluation on every interval
         v2_preload_i<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                    LIBFIVE_CUDA_TILE_THREADS>>>(
+                       LIBFIVE_CUDA_TILE_THREADS,
+                       0, stream>>>(
                 offset,
                 count,
                 blob.tiles.input);
-        v2_calculate_intervals<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+        v2_calculate_intervals<<<LIBFIVE_CUDA_TILE_BLOCKS,
+                                 LIBFIVE_CUDA_TILE_THREADS,
+                                 0, stream>>>(
                 blob.tiles.input,
                 count,
                 offset,
@@ -1015,7 +1026,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 1.0f / blob.image_size_px,
                 mat);
         v2_exec_universal<<<LIBFIVE_CUDA_TILE_BLOCKS,
-                            LIBFIVE_CUDA_TILE_THREADS>>>(
+                            LIBFIVE_CUDA_TILE_THREADS,
+                            0, stream>>>(
                 blob.tape_data,
                 blob.tape_index,
 
@@ -1039,15 +1051,18 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
              LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK;
     blob.subtiles.resize_to_fit(count * 64);
     for (unsigned offset=0; offset < count; offset += stride) {
+        auto stream = blob.streams[(offset / stride) % LIBFIVE_CUDA_NUM_STREAMS];
         v2_preload_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                       LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                       LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
+                       0, stream>>>(
                 blob.tiles.output,
                 count,
                 offset * 64,
                 blob.image_size_px / 64,
                 blob.subtiles.input);
         v2_calculate_intervals<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
+                                 0, stream>>>(
                 blob.subtiles.input,
                 count * 64,
                 offset * 64,
@@ -1056,7 +1071,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 1.0f / blob.image_size_px,
                 mat);
         v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
+                            0, stream>>>(
                 blob.tape_data,
                 blob.tape_index,
 
@@ -1079,15 +1095,18 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     // stride is unchanged
     blob.microtiles.resize_to_fit(count * 64);
     for (unsigned offset=0; offset < count; offset += stride) {
+        auto stream = blob.streams[(offset / stride) % LIBFIVE_CUDA_NUM_STREAMS];
         v2_preload_s<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                       LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                       LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
+                       0, stream>>>(
                 blob.subtiles.output,
                 count,
                 offset * 64,
                 blob.image_size_px / 16,
                 blob.microtiles.input);
         v2_calculate_intervals<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                                 LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
+                                 0, stream>>>(
                 blob.microtiles.input,
                 count * 64,
                 offset * 64,
@@ -1096,7 +1115,8 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
                 1.0f / blob.image_size_px,
                 mat);
         v2_exec_universal<<<LIBFIVE_CUDA_REFINE_BLOCKS,
-                            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64>>>(
+                            LIBFIVE_CUDA_REFINE_TILES_PER_BLOCK * 64,
+                            0, stream>>>(
                 blob.tape_data,
                 blob.tape_index,
 
@@ -1119,8 +1139,11 @@ void render_v2_blob(v2_blob_t& blob, Eigen::Matrix4f mat) {
     stride = LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS *
              LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK;
     for (unsigned offset=0; offset < count; offset += stride) {
+        auto stream = blob.streams[(offset / stride) % LIBFIVE_CUDA_NUM_STREAMS];
         v2_exec_f<<<LIBFIVE_CUDA_PIXEL_RENDER_BLOCKS,
-                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64>>>(
+                    LIBFIVE_CUDA_PIXEL_RENDER_TILES_PER_BLOCK * 64,
+                    0,
+                    stream>>>(
             blob.tape_data,
             blob.image,
             blob.image_size_px / 4,

@@ -1,7 +1,9 @@
 #pragma once
 #include <Eigen/Eigen>
+#include <cuda_runtime.h>
 
 #include "libfive/tree/tree.hpp"
+#include "parameters.hpp"
 
 /* The clause is implemented as a struct
  * packed into a single 64-bit value
@@ -50,6 +52,8 @@ struct v2_blob_t {
     stage_t tiles;
     stage_t subtiles;
     stage_t microtiles;
+
+    cudaStream_t streams[LIBFIVE_CUDA_NUM_STREAMS];
 };
 
 v2_blob_t build_v2_blob(libfive::Tree tree, const uint32_t image_size_px);
