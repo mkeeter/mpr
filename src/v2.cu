@@ -379,14 +379,12 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
     if (tile_index >= in_tile_count) {
         return;
     }
-    {   // Check for early return if the tile is already covered
-        const int32_t tile = in_tiles[tile_index].position;
-        const int32_t tx = tile % tiles_per_side;
-        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
-        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
-        if (image[tx + ty * tiles_per_side] >= tz) {
-            return;
-        }
+    // Check for early return if the tile is already covered
+    const int32_t tile = in_tiles[tile_index].position;
+    const int32_t txy = tile % (tiles_per_side * tiles_per_side);
+    const int32_t tz  = tile / (tiles_per_side * tiles_per_side);
+    if (image[txy] >= tz) {
+        return;
     }
 
     Interval slots[128];
@@ -490,15 +488,11 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    const int32_t tile = in_tiles[tile_index].position;
-    const int32_t tx = tile % tiles_per_side;
-    const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
-    const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
     // Filled
     if (slots[i_out].upper() < 0.0f) {
-        atomicMax(&image[tx + ty * tiles_per_side], tz);
+        atomicMax(&image[txy], tz);
         return;
-    } else if (image[tx + ty * tiles_per_side] >= tz) {
+    } else if (image[txy] >= tz) {
         // Ambiguous, but blocked by a higher tile
         return;
     }
