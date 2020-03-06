@@ -88,6 +88,15 @@ void name##_lhs_##suffix(const uint64_t data,               \
     const T lhs = slots[i_lhs];                             \
     const uint8_t i_out = I_OUT(&data);                     \
 
+#define FUNCTION_PREAMBLE_LHS_ARRAY(name, T, suffix)        \
+__device__                                                  \
+void name##_lhs_##suffix(const uint64_t data,               \
+                   T (*__restrict__ const slots)[64])       \
+{                                                           \
+    const uint8_t i_lhs = I_LHS(&data);                     \
+    const T lhs = slots[i_lhs][threadIdx.x % 64];           \
+    const uint8_t i_out = I_OUT(&data);                     \
+
 #define FUNCTION_PREAMBLE_IMM_RHS(name, T, suffix)          \
 __device__                                                  \
 void name##_imm_rhs_##suffix(const uint64_t data,           \
@@ -96,6 +105,16 @@ void name##_imm_rhs_##suffix(const uint64_t data,           \
     const float lhs = IMM(&data);                           \
     const uint8_t i_rhs = I_RHS(&data);                     \
     const T rhs = slots[i_rhs];                             \
+    const uint8_t i_out = I_OUT(&data);                     \
+
+#define FUNCTION_PREAMBLE_IMM_RHS_ARRAY(name, T, suffix)   \
+__device__                                                  \
+void name##_imm_rhs_##suffix(const uint64_t data,           \
+                      T (*__restrict__ const slots)[64])    \
+{                                                           \
+    const float lhs = IMM(&data);                           \
+    const uint8_t i_rhs = I_RHS(&data);                     \
+    const T rhs = slots[i_rhs][threadIdx.x % 64];           \
     const uint8_t i_out = I_OUT(&data);                     \
 
 #define FUNCTION_PREAMBLE_LHS_IMM(name, T, suffix)          \
@@ -108,6 +127,16 @@ void name##_lhs_imm_##suffix(const uint64_t data,           \
     const T lhs = slots[i_lhs];                             \
     const uint8_t i_out = I_OUT(&data);                     \
 
+#define FUNCTION_PREAMBLE_LHS_IMM_ARRAY(name, T, suffix)    \
+__device__                                                  \
+void name##_lhs_imm_##suffix(const uint64_t data,           \
+                      T (*__restrict__ const slots)[64])    \
+{                                                           \
+    const float rhs = IMM(&data);                           \
+    const uint8_t i_lhs = I_LHS(&data);                     \
+    const T lhs = slots[i_lhs][threadIdx.x % 64];           \
+    const uint8_t i_out = I_OUT(&data);                     \
+
 #define FUNCTION_PREAMBLE_LHS_RHS(name, T, suffix)          \
 __device__                                                  \
 void name##_lhs_rhs_##suffix(const uint64_t data,           \
@@ -117,6 +146,17 @@ void name##_lhs_rhs_##suffix(const uint64_t data,           \
     const T lhs = slots[i_lhs];                             \
     const uint8_t i_rhs = I_RHS(&data);                     \
     const T rhs = slots[i_rhs];                             \
+    const uint8_t i_out = I_OUT(&data);                     \
+
+#define FUNCTION_PREAMBLE_LHS_RHS_ARRAY(name, T, suffix)    \
+__device__                                                  \
+void name##_lhs_rhs_##suffix(const uint64_t data,           \
+                    T (*const __restrict__ slots)[64])      \
+{                                                           \
+    const uint8_t i_lhs = I_LHS(&data);                     \
+    const T lhs = slots[i_lhs][threadIdx.x % 64];           \
+    const uint8_t i_rhs = I_RHS(&data);                     \
+    const T rhs = slots[i_rhs][threadIdx.x % 64];           \
     const uint8_t i_out = I_OUT(&data);                     \
 
 // Special implementations of min and max, which manipulate the choices array
@@ -355,6 +395,229 @@ void v2_calculate_intervals(in_tile_t* __restrict__ in_tiles,
     values[thread_index * 3 + 1] = iy_;
     values[thread_index * 3 + 2] = iz_;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+// EXPERIMENTAL ZONE
+struct tile_node_t {
+    int32_t position;
+    int32_t tape;
+    int32_t next;
+};
+
+struct tape_push_data_t {
+    uint32_t choices[256];
+    int32_t choice_index;
+    int32_t tape_end;
+};
+
+__global__
+void v2_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
+                     int32_t* const __restrict__ image,
+                     const uint32_t tiles_per_side,
+
+                     tile_node_t* const __restrict__ in_tiles,
+                     const int32_t in_tile_count,
+
+                     const Interval* __restrict__ values,
+
+                     tape_push_data_t* const __restrict__ push_data)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    Interval slots[128];
+    slots[((const uint8_t*)tape_data)[1]] = values[tile_index * 3];
+    slots[((const uint8_t*)tape_data)[2]] = values[tile_index * 3 + 1];
+    slots[((const uint8_t*)tape_data)[3]] = values[tile_index * 3 + 2];
+
+    // Pick out the tape based on the pointer stored in the tiles list
+    const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
+
+    uint32_t choices[256] = {0};
+    int choice_index = 0;
+    bool has_any_choice = false;
+
+    while (OP(++data)) {
+        switch (OP(data)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
+
+            case GPU_OP_SQUARE_LHS: square_lhs_i(*data, slots); break;
+            case GPU_OP_SQRT_LHS: sqrt_lhs_i(*data, slots); break;
+            case GPU_OP_NEG_LHS: neg_lhs_i(*data, slots); break;
+            case GPU_OP_SIN_LHS: sin_lhs_i(*data, slots); break;
+            case GPU_OP_COS_LHS: cos_lhs_i(*data, slots); break;
+            case GPU_OP_ASIN_LHS: asin_lhs_i(*data, slots); break;
+            case GPU_OP_ACOS_LHS: acos_lhs_i(*data, slots); break;
+            case GPU_OP_ATAN_LHS: atan_lhs_i(*data, slots); break;
+            case GPU_OP_EXP_LHS: exp_lhs_i(*data, slots); break;
+            case GPU_OP_ABS_LHS: abs_lhs_i(*data, slots); break;
+            case GPU_OP_LOG_LHS: log_lhs_i(*data, slots); break;
+
+            // Commutative opcodes
+            case GPU_OP_ADD_LHS_IMM: add_lhs_imm_i(*data, slots); break;
+            case GPU_OP_ADD_LHS_RHS: add_lhs_rhs_i(*data, slots); break;
+            case GPU_OP_MUL_LHS_IMM: mul_lhs_imm_i(*data, slots); break;
+            case GPU_OP_MUL_LHS_RHS: mul_lhs_rhs_i(*data, slots); break;
+            case GPU_OP_MIN_LHS_IMM: min_lhs_imm_i(*data, slots); break;
+            case GPU_OP_MIN_LHS_RHS: min_lhs_rhs_i(*data, slots); break;
+            case GPU_OP_MAX_LHS_IMM: max_lhs_imm_i(*data, slots); break;
+            case GPU_OP_MAX_LHS_RHS: max_lhs_rhs_i(*data, slots); break;
+
+            // Non-commutative opcodes
+            case GPU_OP_SUB_LHS_IMM: sub_lhs_imm_i(*data, slots); break;
+            case GPU_OP_SUB_IMM_RHS: sub_imm_rhs_i(*data, slots); break;
+            case GPU_OP_SUB_LHS_RHS: sub_lhs_rhs_i(*data, slots); break;
+            case GPU_OP_DIV_LHS_IMM: div_lhs_imm_i(*data, slots); break;
+            case GPU_OP_DIV_IMM_RHS: div_imm_rhs_i(*data, slots); break;
+            case GPU_OP_DIV_LHS_RHS: div_lhs_rhs_i(*data, slots); break;
+
+            case GPU_OP_COPY_IMM: copy_imm_i(*data, slots); break;
+            case GPU_OP_COPY_LHS: copy_lhs_i(*data, slots); break;
+            case GPU_OP_COPY_RHS: copy_rhs_i(*data, slots); break;
+
+            default: assert(false);
+        }
+        // If this opcode makes a choice, then append that choice to the list
+        if (OP(data) >= GPU_OP_MIN_LHS_IMM && OP(data) <= GPU_OP_MAX_LHS_RHS) {
+            const uint8_t c = slots[0].v.x;
+            choices[choice_index / 16] |= (c << ((choice_index % 16) * 2));
+            has_any_choice |= (c != 0);
+        }
+    }
+
+    // Check the result
+    const uint8_t i_out = I_OUT(data);
+
+    if (slots[i_out].lower() > 0.0f) {
+        in_tiles[tile_index].position = -1;
+        return;
+    }
+
+    // Filled
+    if (slots[i_out].upper() < 0.0f) {
+        const int32_t tile = in_tiles[tile_index].position;
+        const int32_t txy = tile % (tiles_per_side * tiles_per_side);
+        const int32_t tz  = tile / (tiles_per_side * tiles_per_side);
+        in_tiles[tile_index].position = -1;
+        atomicMax(&image[txy], tz);
+        return;
+    }
+
+    if (has_any_choice) {
+        // Copy the choice data to global memory so that we can push the tape
+        // in a separate kernel, after compacting the list of active tiles.
+        for (int i=0; i < (choice_index + 15) / 16; ++i) {
+            push_data[tile_index].choices[i] = choices[i];
+        }
+        push_data[tile_index].choice_index = choice_index;
+        push_data[tile_index].tape_end = data - tape_data;
+    } else {
+        push_data[tile_index].choice_index = -1;
+    }
+}
+
+__global__
+void v2_mask_filled_tiles(int32_t* const __restrict__ image,
+                          const uint32_t tiles_per_side,
+
+                          tile_node_t* const __restrict__ in_tiles,
+                          const int32_t in_tile_count)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    const int32_t tile = in_tiles[tile_index].position;
+    // Already marked as filled or empty
+    if (tile == -1) {
+        return;
+    }
+
+    const int32_t txy = tile % (tiles_per_side * tiles_per_side);
+    const int32_t tz  = tile / (tiles_per_side * tiles_per_side);
+
+    // If this tile is completely masked by the image, then skip it
+    if (image[txy] > tz) {
+        in_tiles[tile_index].position = -1;
+    }
+}
+
+// Accumulates a list of active tiles/tapes which need pushing,
+// storing tile thread indexes in tapes_to_push and the total
+// count in num_tapes_to_push.
+__global__
+void v2_plan_tape_push(tile_node_t* const __restrict__ in_tiles,
+                       const int32_t in_tile_count,
+
+                       // Compute in the previous step
+                       const tape_push_data_t* __restrict__ const push_data,
+
+                       int32_t* __restrict__ const tapes_to_push,
+                       int32_t* __restrict__ const num_tapes_to_push)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+
+    const bool needs_pushing = tile_index < in_tile_count &&
+                               in_tiles[tile_index].position != -1 &&
+                               push_data[tile_index].choice_index != -1;
+
+    // Do two levels of accumulation, to reduce atomic pressure on a single
+    // global variable.  Does this help?  Who knows!
+    __shared__ int local_offset;
+    if (threadIdx.x == 0) {
+        local_offset = 0;
+    }
+    __syncthreads();
+
+    int my_offset;
+    if (needs_pushing) {
+        my_offset = atomicAdd(&local_offset, 1);
+    }
+    __syncthreads();
+
+    // Only one thread gets to contribute to the global offset
+    if (threadIdx.x == 0) {
+        local_offset = atomicAdd(num_tapes_to_push, local_offset);
+    }
+    __syncthreads();
+
+    if (needs_pushing) {
+        tapes_to_push[local_offset + my_offset] = tile_index;
+    }
+}
+
+__global__
+void v2_execute_tape_push(uint64_t* const __restrict__ tape_data,
+                          const int32_t* __restrict__ const tapes_to_push,
+                          const int32_t* __restrict__ const num_tapes_to_push,
+                          const tape_push_data_t* const __restrict__ push_data)
+{
+    const int32_t target_index = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (target_index >= *num_tapes_to_push) {
+        return;
+    }
+
+    const int32_t tile_index = tapes_to_push[target_index];
+
+    uint32_t choices[256] = {0};
+    int choice_index = push_data[tile_index].choice_index;
+    for (int i=0; i < (choice_index + 15) / 16; ++i) {
+        choices[i] = push_data[tile_index].choices[i];
+    }
+
+    const uint64_t* __restrict__ data = tape_data + push_data[tile_index].tape_end;
+
+    const uint8_t i_out = I_OUT(data);
+
+    // THINK: how do we avoid thread divergence here?
+    // probably by rounding up to the nearest multiple of 32 threads?
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
