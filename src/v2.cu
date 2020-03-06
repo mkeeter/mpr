@@ -550,7 +550,7 @@ void v2_mask_filled_tiles(int32_t* const __restrict__ image,
 // storing tile thread indexes in tapes_to_push and the total
 // count in num_tapes_to_push.
 __global__
-void v2_plan_tape_push(tile_node_t* const __restrict__ in_tiles,
+void v2_plan_tape_push(const tile_node_t* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
 
                        // Compute in the previous step
@@ -591,33 +591,124 @@ void v2_plan_tape_push(tile_node_t* const __restrict__ in_tiles,
 }
 
 __global__
-void v2_execute_tape_push(uint64_t* const __restrict__ tape_data,
+void v2_execute_tape_push(tile_node_t* const __restrict__ in_tiles,
+                          uint64_t* const __restrict__ tape_data,
+                          int32_t* const __restrict__ tape_index,
+
                           const int32_t* __restrict__ const tapes_to_push,
                           const int32_t* __restrict__ const num_tapes_to_push,
                           const tape_push_data_t* const __restrict__ push_data)
 {
     const int32_t target_index = threadIdx.x + blockIdx.x * blockDim.x;
-
     if (target_index >= *num_tapes_to_push) {
         return;
     }
-
     const int32_t tile_index = tapes_to_push[target_index];
 
-    uint32_t choices[256] = {0};
+    // Copy choices from global to a thread-local array
+    uint32_t choices[256];
     int choice_index = push_data[tile_index].choice_index;
     for (int i=0; i < (choice_index + 15) / 16; ++i) {
         choices[i] = push_data[tile_index].choices[i];
     }
 
+    // We start with the cursor positioned at the end of the tape
     const uint64_t* __restrict__ data = tape_data + push_data[tile_index].tape_end;
-
     const uint8_t i_out = I_OUT(data);
 
-    // THINK: how do we avoid thread divergence here?
-    // probably by rounding up to the nearest multiple of 32 threads?
-}
+    // Use this array to track which slots are active
+    bool active[128] = {0};
+    active[i_out] = true;
 
+    // Claim a chunk of tape
+    int32_t out_index = atomicAdd(tape_index, LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+    int32_t out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+    assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES *
+                                    LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+
+    // Write out the end of the tape, which is the same as the ending
+    // of the previous tape (0 opcode, with i_out as the last slot)
+    out_offset--;
+    tape_data[out_index + out_offset] = *data;
+
+    while (OP(--data)) {
+        const uint8_t op = OP(data);
+        if (op == GPU_OP_JUMP) {
+            data += JUMP_TARGET(data);
+            continue;
+        }
+
+        const bool has_choice = op >= GPU_OP_MIN_LHS_IMM &&
+                                op <= GPU_OP_MAX_LHS_RHS;
+        choice_index -= has_choice;
+
+        const uint8_t i_out = I_OUT(data);
+        if (!active[i_out]) {
+            continue;
+        }
+
+        const uint8_t choice = has_choice
+            ? ((choices[choice_index / 16] >>
+             ((choice_index % 16) * 2)) & 3)
+            : 0;
+
+        // If we're about to write a new piece of data to the tape,
+        // (and are done with the current chunk), then we need to
+        // add another link to the linked list.
+        --out_offset;
+        if (out_offset == 0) {
+            const int32_t prev_index = out_index;
+            out_index = atomicAdd(tape_index, LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+            out_offset = LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE;
+            assert(out_index + out_offset < LIBFIVE_CUDA_NUM_SUBTAPES *
+                                            LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
+            --out_offset;
+
+            // Forward-pointing link
+            OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
+            const int32_t delta = (int32_t)prev_index -
+                                  (int32_t)(out_index + out_offset);
+            JUMP_TARGET(&tape_data[out_index + out_offset]) = delta;
+
+            // Backward-pointing link
+            OP(&tape_data[prev_index]) = GPU_OP_JUMP;
+            JUMP_TARGET(&tape_data[prev_index]) = -delta;
+
+            // We've written the jump, so adjust the offset again
+            --out_offset;
+        }
+
+        active[i_out] = false;
+        tape_data[out_index + out_offset] = *data;
+        if (choice == 0) {
+            const uint8_t i_lhs = I_LHS(data);
+            active[i_lhs] = true;
+            const uint8_t i_rhs = I_RHS(data);
+            active[i_rhs] = true;
+        } else if (choice == 1 /* LHS */) {
+            // The non-immediate is always the LHS in commutative ops, and
+            // min/max (the only clauses that produce a choice) are commutative
+            OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
+            const uint8_t i_lhs = I_LHS(data);
+            active[i_lhs] = true;
+        } else if (choice == 2 /* RHS */) {
+            const uint8_t i_rhs = I_RHS(data);
+            if (i_rhs) {
+                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+                active[i_rhs] = true;
+            } else {
+                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
+            }
+        }
+    }
+
+    // Write the beginning of the tape
+    out_offset--;
+    tape_data[out_index + out_offset] = *data;
+
+    // Record the beginning of the tape in the output tile
+    in_tiles[tile_index].tape = out_index + out_offset;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
