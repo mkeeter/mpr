@@ -710,6 +710,69 @@ void v2_execute_tape_push(tile_node_t* const __restrict__ in_tiles,
     in_tiles[tile_index].tape = out_index + out_offset;
 }
 
+// Sets the tile.next to an index in the upcoming tile list, without
+// actually doing any work (since that list may not be allocated yet)
+__global__
+void v2_assign_next_nodes(tile_node_t* const __restrict__ in_tiles,
+                          const int32_t in_tile_count,
+
+                          int32_t* __restrict__ const num_active_tiles)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    const bool is_active = tile_index < in_tile_count &&
+                           in_tiles[tile_index].position != -1;
+
+    // Do two levels of accumulation, to reduce atomic pressure on a single
+    // global variable.  Does this help?  Who knows!
+    __shared__ int local_offset;
+    if (threadIdx.x == 0) {
+        local_offset = 0;
+    }
+    __syncthreads();
+
+    int my_offset;
+    if (is_active) {
+        my_offset = atomicAdd(&local_offset, 1);
+    }
+    __syncthreads();
+
+    // Only one thread gets to contribute to the global offset
+    if (threadIdx.x == 0) {
+        local_offset = atomicAdd(num_active_tiles, local_offset);
+    }
+    __syncthreads();
+
+    if (is_active) {
+        in_tiles[tile_index].next = local_offset + my_offset;
+    } else {
+        in_tiles[tile_index].next = -1;
+    }
+}
+
+// Sets the tile.next to an index in the upcoming tile list, without
+// actually doing any work (since that list may not be allocated yet)
+__global__
+void v2_subdivide_tiles(const tile_node_t* const __restrict__ in_tiles,
+                        const int32_t in_tile_count,
+                        tile_node_t* const __restrict__ out_tiles)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count || in_tiles[tile_index].next == -1) {
+        return;
+    }
+
+    int t = in_tiles[tile_index].next * 64;
+    for (int i=0; i < 64; ++i) {
+        out_tiles[t + i].position = 0; // TODO
+        out_tiles[t + i].tape = in_tiles[tile_index].tape;
+        out_tiles[t + i].next = -1;
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
