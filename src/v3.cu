@@ -740,57 +740,13 @@ void v3_copy_filled(const int32_t* __restrict__ prev,
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
-void v3_calculate_voxels(const v3_tile_node_t* const __restrict__ in_tiles,
-                         const int in_tile_count,
-                         const int tiles_per_side,
-                         const Eigen::Matrix4f mat,
-                         float* const __restrict__ values)
-{
-    const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
-    const int32_t tile_index = voxel_index / 64;
-    if (tile_index >= in_tile_count) {
-        return;
-    }
-
-    const int32_t in_parent_tile = in_tiles[tile_index].position;
-
-    // The minimum-size tile is 4x4x4
-    const int32_t subtile_offset = threadIdx.x % 64;
-    const int voxels_per_side = tiles_per_side * 4;
-
-    const int32_t tx = (in_parent_tile % tiles_per_side);
-    const int32_t px = tx * 4 + subtile_offset % 4;
-    const float fx = ((px + 0.5f) / (float)voxels_per_side - 0.5f) * 2.0f;
-
-    const int32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-    const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
-    const float fy = ((py + 0.5f) / (float)voxels_per_side - 0.5f) * 2.0f;
-
-    const int32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
-    const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
-    const float fz = ((pz + 0.5f) / (float)voxels_per_side - 0.5f) * 2.0f;
-
-    // Calculate the projective transform value
-    const float fw_ = mat(3, 0) * fx +
-                      mat(3, 1) * fy +
-                      mat(3, 2) * fz + mat(3, 3);
-
-    for (unsigned i=0; i < 3; ++i) {
-        values[voxel_index * 3 + i] =
-            (mat(i, 0) * fx +
-             mat(i, 1) * fy +
-             mat(i, 2) * fz + mat(0, 3)) / fw_;
-    }
-}
-
-__global__
 void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
                       int32_t* const __restrict__ image,
                       const uint32_t tiles_per_side,
 
                       v3_tile_node_t* const __restrict__ in_tiles,
                       const int32_t in_tile_count,
-                      const float* __restrict__ values)
+                      Eigen::Matrix4f mat)
 {
     // Each tile is executed by 64 threads (one for each voxel).
     //
@@ -803,28 +759,43 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    const int32_t tile = in_tiles[tile_index].position;
-    const int32_t tx = tile % tiles_per_side;
-    const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
-    const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
-
-    // We subdivide at a constant rate of 4x
-    const int32_t subtile_offset = threadIdx.x % 64;
-    const int32_t px = tx * 4 + subtile_offset % 4;
-    const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
-    const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
-    const int32_t pxy = px + py * tiles_per_side * 4;
-
-    // Early abort if the image is already masked
-    if (image[pxy] >= pz) {
-        return;
-    }
-
     float slots[128];
 
-    slots[((const uint8_t*)tape_data)[1]] = values[voxel_index * 3];
-    slots[((const uint8_t*)tape_data)[2]] = values[voxel_index * 3 + 1];
-    slots[((const uint8_t*)tape_data)[3]] = values[voxel_index * 3 + 2];
+    {   // Load values into registers!
+        const int32_t in_parent_tile = in_tiles[tile_index].position;
+
+        // We subdivide at a constant rate of 4x
+        const int32_t subtile_offset = threadIdx.x % 64;
+        const float size_recip = 1.0f / (tiles_per_side * 4);
+
+        const int32_t tx = (in_parent_tile % tiles_per_side);
+        const int32_t px = tx * 4 + subtile_offset % 4;
+        const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        const int32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
+        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        const int32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+        const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        // Early return if this pixel won't ever be filled
+        if (image[px + py * tiles_per_side * 4] >= pz) {
+            return;
+        }
+
+        // Otherwise, calculate the X/Y/Z values
+        const float fw_ = mat(3, 0) * fx +
+                          mat(3, 1) * fy +
+                          mat(3, 2) * fz + mat(3, 3);
+        for (unsigned i=0; i < 3; ++i) {
+            slots[((const uint8_t*)tape_data)[i + 1]] =
+                (mat(i, 0) * fx +
+                 mat(i, 1) * fy +
+                 mat(i, 2) * fz + mat(0, 3)) / fw_;
+        }
+    }
 
     // Pick out the tape based on the pointer stored in the tiles list
     const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
@@ -872,7 +843,18 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     // Check the result
     const uint8_t i_out = I_OUT(data);
     if (slots[i_out] < 0.0f) {
-        atomicMax(&image[pxy], pz);
+        const int32_t tile = in_tiles[tile_index].position;
+        const int32_t tx = tile % tiles_per_side;
+        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
+        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
+
+        // We subdivide at a constant rate of 4x
+        const int32_t subtile_offset = threadIdx.x % 64;
+        const int32_t px = tx * 4 + subtile_offset % 4;
+        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+
+        atomicMax(&image[px + py * tiles_per_side * 4], pz);
     }
 }
 
@@ -1281,14 +1263,6 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     stride = NUM_BLOCKS * NUM_TILES;
     for (unsigned offset=0; offset < count; offset += stride) {
         //printf("Rendering pixels with offset %u, count %u\n", offset, count);
-        // Load x/y/z values into a shared array
-        v3_calculate_voxels<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.stages[3].tiles + offset,
-            std::min(stride, count - offset),
-            blob.image_size_px / 4,
-            mat,
-            (float*)blob.values);
-        // Do the actual tape walking step
         v3_eval_voxels_f<<<NUM_BLOCKS, NUM_THREADS>>>(
             blob.tape_data,
             blob.stages[3].filled,
@@ -1297,7 +1271,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
             blob.stages[3].tiles + offset,
             std::min(stride, count - offset),
 
-            (float*)blob.values);
+            mat);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }
