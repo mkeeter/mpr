@@ -14,11 +14,11 @@
 
 void get_stats(std::function<void()> f) {
     // Warm up
-    for (unsigned i=0; i < 0; ++i) {
+    for (unsigned i=0; i < 20; ++i) {
         f();
     }
     std::vector<double> times_ms;
-    const auto count = 1;
+    const auto count = 100;
     for (unsigned i=0; i < count; ++i) {
         using std::chrono::steady_clock;
         using std::chrono::duration_cast;
@@ -83,7 +83,6 @@ int main(int argc, char **argv)
         }
         out.savePNG("out_gpu_depth_v3_" + std::to_string(size) + ".png");
         free_v3_blob(r);
-        printf("------------------------\n");
     }
     std::cout << "Rendering with v2 architecture:" << std::endl;
     for (auto size: sizes) {

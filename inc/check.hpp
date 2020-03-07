@@ -22,5 +22,5 @@ inline T* cudaMallocManagedChecked(size_t count, const char *file, int line) {
 #define CUDA_FREE(c) cudaFreeChecked((void*)c, __FILE__, __LINE__)
 inline void cudaFreeChecked(void* ptr, const char *file, int line) {
     //printf("%p freed [%s:%i]\n", ptr, file, line);
-    CUDA_CHECK(cudaFree(ptr));
+    gpuCheck(cudaFree(ptr), file, line);
 }

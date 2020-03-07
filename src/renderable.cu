@@ -1498,7 +1498,7 @@ void Renderable2D_copyToSurface(Renderable2D* r, cudaSurfaceObject_t surf,
 void Renderable::Deleter::operator()(Renderable* r)
 {
     r->~Renderable();
-    CUDA_CHECK(cudaFree(r));
+    CUDA_FREE(r);
 }
 
 Renderable::~Renderable()

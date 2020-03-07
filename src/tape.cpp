@@ -225,7 +225,7 @@ Tape::Tape(Tape&& other)
 
 Tape::~Tape()
 {
-    CUDA_CHECK(cudaFree((void*)data));
+    CUDA_FREE((void*)data);
 }
 
 void Tape::print(std::ostream& o)

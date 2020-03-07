@@ -10,7 +10,7 @@ struct Queue {
     void resizeToFit(uint32_t num)
     {
         if (num > size) {
-            CUDA_CHECK(cudaFree(data));
+            CUDA_FREE(data);
             data = CUDA_MALLOC(uint32_t, num);
             size = num;
         }

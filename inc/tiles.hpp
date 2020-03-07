@@ -30,12 +30,12 @@ struct Tiles {
     }
 
     ~Tiles() {
-        CUDA_CHECK(cudaFree(data));
+        CUDA_FREE(data);
     }
 
     void resizeToFit(uint32_t num) {
         if (num > size) {
-            CUDA_CHECK(cudaFree(data));
+            CUDA_FREE(data);
             data = CUDA_MALLOC(Tile, num);
             size = num;
         }
