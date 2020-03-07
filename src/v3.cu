@@ -243,7 +243,16 @@ UNARY_OP_F(cos)
 UNARY_OP_F(log)
 
 ////////////////////////////////////////////////////////////////////////////////
+static inline __device__
+int4 unpack(int32_t pos, int32_t tiles_per_side)
+{
+    return make_int4(pos % tiles_per_side,
+                    (pos / tiles_per_side) % tiles_per_side,
+                    (pos / tiles_per_side) / tiles_per_side,
+                     pos % (tiles_per_side * tiles_per_side));
+}
 
+////////////////////////////////////////////////////////////////////////////////
 __global__
 void v3_preload_tiles(v3_tile_node_t* const __restrict__ in_tiles,
                       const int32_t in_tile_count,
@@ -271,17 +280,13 @@ void v3_calculate_intervals(const v3_tile_node_t* const __restrict__ in_tiles,
         return;
     }
 
-    const uint32_t tile = in_tiles[tile_index].position;
-
-    const uint32_t x = tile % tiles_per_side;
-    const Interval ix = {(x / (float)tiles_per_side - 0.5f) * 2.0f,
-                   ((x + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
-    const uint32_t y = (tile / tiles_per_side) % tiles_per_side;
-    const Interval iy = {(y / (float)tiles_per_side - 0.5f) * 2.0f,
-                   ((y + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
-    const uint32_t z = (tile / tiles_per_side) / tiles_per_side;
-    const Interval iz = {(z / (float)tiles_per_side - 0.5f) * 2.0f,
-                   ((z + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    const Interval ix = {(pos.x / (float)tiles_per_side - 0.5f) * 2.0f,
+                   ((pos.x + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
+    const Interval iy = {(pos.y / (float)tiles_per_side - 0.5f) * 2.0f,
+                   ((pos.y + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
+    const Interval iz = {(pos.z / (float)tiles_per_side - 0.5f) * 2.0f,
+                   ((pos.z + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
 
     Interval ix_, iy_, iz_, iw_;
     ix_ = mat(0, 0) * ix +
@@ -321,6 +326,13 @@ void v3_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
 {
     const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    // Check for early return if the tile is already covered
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    if (image[pos.w] >= pos.z) {
+        in_tiles[tile_index].position = -1;
         return;
     }
 
@@ -407,11 +419,9 @@ void v3_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
 
     // Filled
     if (slots[i_out].upper() < 0.0f) {
-        const int32_t tile = in_tiles[tile_index].position;
-        const int32_t txy = tile % (tiles_per_side * tiles_per_side);
-        const int32_t tz  = tile / (tiles_per_side * tiles_per_side);
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
         in_tiles[tile_index].position = -1;
-        atomicMax(&image[txy], tz);
+        atomicMax(&image[pos.w], pos.z);
         return;
     }
 
@@ -446,11 +456,10 @@ void v3_mask_filled_tiles(int32_t* const __restrict__ image,
         return;
     }
 
-    const int32_t txy = tile % (tiles_per_side * tiles_per_side);
-    const int32_t tz  = tile / (tiles_per_side * tiles_per_side);
+    const int4 pos = unpack(tile, tiles_per_side);
 
     // If this tile is completely masked by the image, then skip it
-    if (image[txy] > tz) {
+    if (image[pos.w] > pos.z) {
         in_tiles[tile_index].position = -1;
     }
 }
@@ -678,16 +687,14 @@ void v3_subdivide_active_tiles(
     }
 
     const int t = in_tiles[tile_index].next * 64;
-    const int32_t in_parent_tile = in_tiles[tile_index].position;
-    const int32_t tx = (in_parent_tile % tiles_per_side);
-    const int32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-    const int32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
     const int32_t subtiles_per_side = tiles_per_side * 4;
 
     for (int i=0; i < 64; ++i) {
-        const int32_t sx = tx * 4 + i % 4;
-        const int32_t sy = ty * 4 + (i / 4) % 4;
-        const int32_t sz = tz * 4 + (i / 4) / 4;
+        const int4 sub = unpack(i, 4);
+        const int32_t sx = pos.x * 4 + sub.x;
+        const int32_t sy = pos.y * 4 + sub.y;
+        const int32_t sz = pos.z * 4 + sub.z;
         const int32_t next_tile =
             sx +
             sy * subtiles_per_side +
@@ -761,29 +768,24 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
 
     float slots[128];
 
-    {   // Load values into registers!
-        const int32_t in_parent_tile = in_tiles[tile_index].position;
+    {   // Load values into registers, subdividing by 4x on each axis
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        const int4 sub = unpack(threadIdx.x % 64, 4);
 
-        // We subdivide at a constant rate of 4x
-        const int32_t subtile_offset = threadIdx.x % 64;
-        const float size_recip = 1.0f / (tiles_per_side * 4);
-
-        const int32_t tx = (in_parent_tile % tiles_per_side);
-        const int32_t px = tx * 4 + subtile_offset % 4;
-        const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
-
-        const int32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
-        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
-        const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
-
-        const int32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
-        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
-        const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
+        const int32_t px = pos.x * 4 + sub.x;
+        const int32_t py = pos.y * 4 + sub.y;
+        const int32_t pz = pos.z * 4 + sub.z;
 
         // Early return if this pixel won't ever be filled
         if (image[px + py * tiles_per_side * 4] >= pz) {
             return;
         }
+
+        const float size_recip = 1.0f / (tiles_per_side * 4);
+
+        const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+        const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
+        const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
 
         // Otherwise, calculate the X/Y/Z values
         const float fw_ = mat(3, 0) * fx +
@@ -843,16 +845,11 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     // Check the result
     const uint8_t i_out = I_OUT(data);
     if (slots[i_out] < 0.0f) {
-        const int32_t tile = in_tiles[tile_index].position;
-        const int32_t tx = tile % tiles_per_side;
-        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
-        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
-
-        // We subdivide at a constant rate of 4x
-        const int32_t subtile_offset = threadIdx.x % 64;
-        const int32_t px = tx * 4 + subtile_offset % 4;
-        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
-        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        const int4 sub = unpack(threadIdx.x % 64, 4);
+        const int32_t px = pos.x * 4 + sub.x;
+        const int32_t py = pos.y * 4 + sub.y;
+        const int32_t pz = pos.z * 4 + sub.z;
 
         atomicMax(&image[px + py * tiles_per_side * 4], pz);
     }
