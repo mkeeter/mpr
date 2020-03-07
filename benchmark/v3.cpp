@@ -35,7 +35,7 @@ int main(int argc, char** argv)
         t = min(a, b);
     }
 
-    auto blob = build_v3_blob(t, 64);
+    auto blob = build_v3_blob(t, 512);
     render_v3_blob(blob, Eigen::Matrix4f::Identity());
 
     // Save the image using libfive::Heightmap

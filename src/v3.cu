@@ -9,7 +9,8 @@
 
 // No need for parameters.hpp, we want to compile faster
 // (without rebuilding everything else)
-#define NUM_THREADS (64 * 2)
+#define NUM_TILES (2)
+#define NUM_THREADS (64 * NUM_TILES)
 #define NUM_BLOCKS (512)
 #define SUBTAPE_CHUNK_SIZE 64
 #define NUM_SUBTAPES 3200000
@@ -1130,7 +1131,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
     // Go the whole list of first-stage tiles, assigning each to
     // be [position, tape = 0, next = -1]
-    const unsigned stride = NUM_BLOCKS * NUM_THREADS;
+    unsigned stride = NUM_BLOCKS * NUM_THREADS;
     unsigned count = pow(blob.image_size_px / 64, 3);
     for (unsigned offset=0; offset < count; offset += stride) {
         v3_preload_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
@@ -1266,6 +1267,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     }
 
     // Time to render individual pixels!
+    stride = NUM_BLOCKS * NUM_TILES;
     for (unsigned offset=0; offset < count; offset += stride) {
         printf("Rendering pixels with offset %u, count %u\n", offset, count);
         // Load x/y/z values into a shared array
