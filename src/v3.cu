@@ -511,11 +511,11 @@ void v3_execute_tape_push(v3_tile_node_t* const __restrict__ in_tiles,
                           int32_t* const __restrict__ tape_index,
 
                           const int32_t* __restrict__ const tapes_to_push,
-                          const int32_t* __restrict__ const num_tapes_to_push,
+                          const int32_t num_tapes_to_push,
                           const v3_tape_push_data_t* const __restrict__ push_data)
 {
     const int32_t target_index = threadIdx.x + blockIdx.x * blockDim.x;
-    if (target_index >= *num_tapes_to_push) {
+    if (target_index >= num_tapes_to_push) {
         return;
     }
     const int32_t tile_index = tapes_to_push[target_index];
@@ -1124,10 +1124,8 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
     // Iterate over 64^3, 16^3, 4^3 tiles
     for (unsigned i=0; i < 3; ++i) {
+        //printf("BEGINNING STAGE %u\n", i);
         const unsigned tile_size_px = 64 / (1 << (i * 2));
-
-        // Mark the total number of active tiles (from this stage) to 0
-        cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
 
         // Now loop through doing evaluation, one batch at a time
         for (unsigned offset=0; offset < count; offset += stride) {
@@ -1196,16 +1194,37 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
                 blob.push_target_buffer,
                 blob.push_target_count);
 
-            // Actually do the pushing.  There will be lots of threads at
-            // the end of this (> push_count) which aren't doing anything.
-            v3_execute_tape_push<<<blocks, NUM_THREADS>>>(
+            int32_t push_target_count;
+            cudaMemcpy(&push_target_count, blob.push_target_count,
+                       sizeof(int32_t), cudaMemcpyDeviceToHost);
+            const int32_t push_blocks = (push_target_count + NUM_THREADS - 1)
+                                        / NUM_THREADS;
+            v3_execute_tape_push<<<push_blocks, NUM_THREADS>>>(
                 blob.stages[i].tiles + offset,
                 blob.tape_data,
                 blob.tape_index,
 
                 blob.push_target_buffer,
-                blob.push_target_count,
+                push_target_count,
                 blob.push_data);
+        }
+
+        // Mark the total number of active tiles (from this stage) to 0
+        cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
+
+        // Now that we have evaluated every tile at this level, we do one more
+        // round of occlusion culling before accumulating tiles to render at
+        // the next phase.
+        for (unsigned offset=0; offset < count; offset += stride) {
+            const int active_threads = std::min(stride, count - offset);
+            const int todo_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
+            const int blocks = std::min(NUM_BLOCKS, todo_blocks);
+
+            v3_mask_filled_tiles<<<blocks, NUM_THREADS>>>(
+                blob.stages[i].filled,
+                blob.image_size_px / tile_size_px,
+                blob.stages[i].tiles + offset,
+                active_threads);
 
             // Count up active tiles, to figure out how much memory needs to be
             // allocated in the next stage.
