@@ -329,10 +329,7 @@ void v3_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    // Check for early return if the tile is already covered
-    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-    if (image[pos.w] >= pos.z) {
-        in_tiles[tile_index].position = -1;
+    if (in_tiles[tile_index].position == -1) {
         return;
     }
 
@@ -1134,31 +1131,54 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
         // Now loop through doing evaluation, one batch at a time
         for (unsigned offset=0; offset < count; offset += stride) {
+            /*
+            printf("    looping with offset = %u, stride = %u, count = %u\n",
+                    offset, stride, count);
+            */
+            const int active_threads = std::min(stride, count - offset);
+            const int todo_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
+            const int blocks = std::min(NUM_BLOCKS, todo_blocks);
+
             // Unpack position values into interval X/Y/Z in the values array
-            v3_calculate_intervals<<<NUM_BLOCKS, NUM_THREADS>>>(
+            // This is done in a separate kernel to avoid bloating the
+            // eval_tiles_i kernel with more registers, which is detrimental
+            // to occupancy.
+            v3_calculate_intervals<<<blocks, NUM_THREADS>>>(
                 blob.stages[i].tiles + offset,
-                std::min(stride, count - offset),
+                active_threads,
                 blob.image_size_px / tile_size_px,
                 mat,
                 (Interval*)blob.values);
 
+            // Mark every tile which is covered in the image as masked,
+            // which means it will be skipped later on.  We do this again below,
+            // but it's basically free, so we should do it here and simplify
+            // the logic in eval_tiles_i.
+            v3_mask_filled_tiles<<<blocks, NUM_THREADS>>>(
+                blob.stages[i].filled,
+                blob.image_size_px / tile_size_px,
+                blob.stages[i].tiles + offset,
+                active_threads);
+
             // Do the actual tape evaluation, which is the expensive step
-            v3_eval_tiles_i<<<NUM_BLOCKS, NUM_THREADS>>>(
+            v3_eval_tiles_i<<<blocks, NUM_THREADS>>>(
                 blob.tape_data,
                 blob.stages[i].filled,
                 blob.image_size_px / tile_size_px,
 
                 blob.stages[i].tiles + offset,
-                std::min(stride, count - offset),
+                active_threads,
 
                 (Interval*)blob.values,
                 blob.push_data);
 
             // Mark every tile which is covered in the image as masked,
             // which means it will be skipped later on.
-            v3_mask_filled_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
-                blob.stages[i].filled, blob.image_size_px / tile_size_px,
-                blob.stages[i].tiles + offset, std::min(stride, count - offset));
+            v3_mask_filled_tiles<<<blocks, NUM_THREADS>>>(
+                blob.stages[i].filled,
+                blob.image_size_px / tile_size_px,
+                blob.stages[i].tiles + offset,
+                active_threads);
 
             // Reset the push target count to 0, without requiring
             // a sync with the host.
@@ -1167,9 +1187,9 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
             // Figure out which tapes need pushing, storing them in the
             // push buffer and recording the count (with atomic increments)
             // in push_count.
-            v3_plan_tape_push<<<NUM_BLOCKS, NUM_THREADS>>>(
+            v3_plan_tape_push<<<blocks, NUM_THREADS>>>(
                 blob.stages[i].tiles + offset,
-                std::min(stride, count - offset),
+                active_threads,
 
                 blob.push_data,
 
@@ -1178,7 +1198,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
             // Actually do the pushing.  There will be lots of threads at
             // the end of this (> push_count) which aren't doing anything.
-            v3_execute_tape_push<<<NUM_BLOCKS, NUM_THREADS>>>(
+            v3_execute_tape_push<<<blocks, NUM_THREADS>>>(
                 blob.stages[i].tiles + offset,
                 blob.tape_data,
                 blob.tape_index,
@@ -1189,9 +1209,9 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
             // Count up active tiles, to figure out how much memory needs to be
             // allocated in the next stage.
-            v3_assign_next_nodes<<<NUM_BLOCKS, NUM_THREADS>>>(
+            v3_assign_next_nodes<<<blocks, NUM_THREADS>>>(
                 blob.stages[i].tiles + offset,
-                std::min(stride, count - offset),
+                active_threads,
                 blob.num_active_tiles);
         }
 
@@ -1215,9 +1235,13 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         if (i < 2) {
             // Build the new tile list from active tiles in the previous list
             for (unsigned offset=0; offset < count; offset += stride) {
-                v3_subdivide_active_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
+                const int active_threads = std::min(stride, count - offset);
+                const int todo_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
+                const int blocks = std::min(NUM_BLOCKS, todo_blocks);
+
+                v3_subdivide_active_tiles<<<blocks, NUM_THREADS>>>(
                     blob.stages[i].tiles + offset,
-                    std::min(stride, count - offset),
+                    active_threads,
                     blob.image_size_px / tile_size_px,
                     blob.stages[i + 1].tiles);
             }
@@ -1226,9 +1250,13 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
             // doesn't unpack every single pixel (since that would take up
             // 64x extra space).
             for (unsigned offset=0; offset < count; offset += stride) {
-                v3_copy_active_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
+                const int active_threads = std::min(stride, count - offset);
+                const int todo_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
+                const int blocks = std::min(NUM_BLOCKS, todo_blocks);
+
+                v3_copy_active_tiles<<<blocks, NUM_THREADS>>>(
                     blob.stages[i].tiles + offset,
-                    std::min(stride, count - offset),
+                    active_threads,
                     blob.image_size_px / tile_size_px,
                     blob.stages[i + 1].tiles);
             }
@@ -1260,13 +1288,17 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     stride = NUM_BLOCKS * NUM_TILES;
     for (unsigned offset=0; offset < count; offset += stride) {
         //printf("Rendering pixels with offset %u, count %u\n", offset, count);
-        v3_eval_voxels_f<<<NUM_BLOCKS, NUM_THREADS>>>(
+        const int active_tiles = std::min(stride, count - offset);
+        const int todo_blocks = (active_tiles*64 + NUM_THREADS - 1) / NUM_THREADS;
+        const int blocks = std::min(NUM_BLOCKS, todo_blocks);
+
+        v3_eval_voxels_f<<<blocks, NUM_THREADS>>>(
             blob.tape_data,
             blob.stages[3].filled,
             blob.image_size_px / 4,
 
             blob.stages[3].tiles + offset,
-            std::min(stride, count - offset),
+            active_tiles,
 
             mat);
     }
