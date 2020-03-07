@@ -803,6 +803,23 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
         return;
     }
 
+    const int32_t tile = in_tiles[tile_index].position;
+    const int32_t tx = tile % tiles_per_side;
+    const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
+    const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
+
+    // We subdivide at a constant rate of 4x
+    const int32_t subtile_offset = threadIdx.x % 64;
+    const int32_t px = tx * 4 + subtile_offset % 4;
+    const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
+    const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+    const int32_t pxy = px + py * tiles_per_side * 4;
+
+    // Early abort if the image is already masked
+    if (image[pxy] >= pz) {
+        return;
+    }
+
     float slots[128];
 
     slots[((const uint8_t*)tape_data)[1]] = values[voxel_index * 3];
@@ -855,18 +872,7 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     // Check the result
     const uint8_t i_out = I_OUT(data);
     if (slots[i_out] < 0.0f) {
-        const int32_t tile = in_tiles[tile_index].position;
-        const int32_t tx = tile % tiles_per_side;
-        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
-        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
-
-        // We subdivide at a constant rate of 4x
-        const int32_t subtile_offset = threadIdx.x % 64;
-        const int32_t px = tx * 4 + subtile_offset % 4;
-        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
-        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
-
-        atomicMax(&image[px + py * tiles_per_side * 4], pz);
+        atomicMax(&image[pxy], pz);
     }
 }
 
@@ -1212,9 +1218,12 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
         // Count the number of active tiles, which have been accumulated
         // through repeated calls to v3_assign_next_nodes
-        CUDA_CHECK(cudaDeviceSynchronize());
-        const int32_t num_active_tiles = (*blob.num_active_tiles) *
-                                         ((i < 2) ? 64 : 1);
+        int32_t num_active_tiles;
+        cudaMemcpy(&num_active_tiles, blob.num_active_tiles, sizeof(int32_t),
+                   cudaMemcpyDeviceToHost);
+        if (i < 2) {
+            num_active_tiles *= 64;
+        }
 
         // Make sure that the subtiles buffer has enough room
         if (num_active_tiles > blob.stages[i + 1].tile_array_size) {
@@ -1261,15 +1270,17 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         // Assign the next number of tiles to evaluate
         count = num_active_tiles;
 
+        /*
         printf("------------------------------------------------------------\n");
         printf("Done with stage %u with %u tiles to do\n",
                 i, count);
+                */
     }
 
     // Time to render individual pixels!
     stride = NUM_BLOCKS * NUM_TILES;
     for (unsigned offset=0; offset < count; offset += stride) {
-        printf("Rendering pixels with offset %u, count %u\n", offset, count);
+        //printf("Rendering pixels with offset %u, count %u\n", offset, count);
         // Load x/y/z values into a shared array
         v3_calculate_voxels<<<NUM_BLOCKS, NUM_THREADS>>>(
             blob.stages[3].tiles + offset,
