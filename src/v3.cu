@@ -414,6 +414,13 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
         return;
     }
 
+    // Masked
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    if (image[pos.w] > pos.z) {
+        in_tiles[tile_index].position = -1;
+        return;
+    }
+
     // Filled
     if (slots[i_out].upper() < 0.0f) {
         const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
@@ -1096,14 +1103,6 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
                 active_threads,
 
                 (Interval*)blob.values);
-
-            // Mark every tile which is covered in the image as masked,
-            // which means it will be skipped later on.
-            v3_mask_filled_tiles<<<active_blocks, NUM_THREADS>>>(
-                blob.stages[i].filled,
-                blob.image_size_px / tile_size_px,
-                blob.stages[i].tiles + offset,
-                active_threads);
         }
 
         // Mark the total number of active tiles (from this stage) to 0
