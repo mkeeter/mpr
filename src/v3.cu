@@ -674,9 +674,12 @@ void v3_subdivide_tiles(const v3_tile_node_t* const __restrict__ in_tiles,
 v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
     v3_blob_t out = {0};
 
-    out.tiles.filled      = CUDA_MALLOC(int32_t, pow(image_size_px / 64, 2));
-    out.subtiles.filled   = CUDA_MALLOC(int32_t, pow(image_size_px / 16, 2));
-    out.microtiles.filled = CUDA_MALLOC(int32_t, pow(image_size_px / 4,  2));
+    for (unsigned i=0; i < 3; ++i) {
+        const unsigned tile_size_px = 64 / (1 << (i * 2));
+        out.stages[i].filled = CUDA_MALLOC(
+                int32_t,
+                pow(image_size_px / tile_size_px, 2));
+    }
 
     out.image_size_px = image_size_px;
     out.image = CUDA_MALLOC(int32_t, pow(image_size_px, 2));
@@ -698,7 +701,9 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
 
     // The first array of tiles must have enough space to hold all of the
     // 64^3 tiles in the volume, which shouldn't be too much.
-    out.tiles.tiles = CUDA_MALLOC(v3_tile_node_t, pow(out.image_size_px / 64, 3));
+    out.stages[0].tiles = CUDA_MALLOC(
+            v3_tile_node_t,
+            pow(out.image_size_px / 64, 3));
 
     // We leave the other stage_t's input/output arrays unallocated for now,
     // since they're initialized to all zeros and will be resized to fit later.
@@ -889,9 +894,10 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
 }
 
 void free_v3_blob(v3_blob_t& blob) {
-    CUDA_CHECK(cudaFree(blob.tiles.filled));
-    CUDA_CHECK(cudaFree(blob.subtiles.filled));
-    CUDA_CHECK(cudaFree(blob.microtiles.filled));
+    for (unsigned i=0; i < 3; ++i) {
+        CUDA_CHECK(cudaFree(blob.stages[i].filled));
+        CUDA_CHECK(cudaFree(blob.stages[i].tiles));
+    }
 
     CUDA_CHECK(cudaFree(blob.image));
 
@@ -905,10 +911,6 @@ void free_v3_blob(v3_blob_t& blob) {
     CUDA_CHECK(cudaFree(blob.push_target_count));
 
     CUDA_CHECK(cudaFree(blob.values));
-
-    CUDA_CHECK(cudaFree(blob.tiles.tiles));
-    CUDA_CHECK(cudaFree(blob.subtiles.tiles));
-    CUDA_CHECK(cudaFree(blob.microtiles.tiles));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -922,111 +924,112 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     ////////////////////////////////////////////////////////////////////////////
 
     // Reset all of the data arrays
-    CUDA_CHECK(cudaMemset(blob.tiles.filled, 0, sizeof(int32_t) *
-                          pow(blob.image_size_px / 64, 2)));
-    CUDA_CHECK(cudaMemset(blob.subtiles.filled, 0, sizeof(int32_t) *
-                          pow(blob.image_size_px / 16, 2)));
-    CUDA_CHECK(cudaMemset(blob.microtiles.filled, 0, sizeof(int32_t) *
-                          pow(blob.image_size_px / 4, 2)));
-    CUDA_CHECK(cudaMemset(blob.image, 0, sizeof(int32_t) *
-                          pow(blob.image_size_px, 2)));
-
-    uint32_t stride, count;
+    for (unsigned i=0; i < 3; ++i) {
+        const unsigned tile_size_px = 64 / (1 << (i * 2));
+        CUDA_CHECK(cudaMemset(blob.stages[i].filled, 0, sizeof(int32_t) *
+                              pow(blob.image_size_px / tile_size_px, 2)));
+    }
 
     // Go the whole list of first-stage tiles, assigning each to
     // be [position, tape = 0, next = -1]
-    stride = NUM_BLOCKS * NUM_THREADS;
-    count = pow(blob.image_size_px / 64, 3);
+    const unsigned stride = NUM_BLOCKS * NUM_THREADS;
+    unsigned count = pow(blob.image_size_px / 64, 3);
     for (unsigned offset=0; offset < count; offset += stride) {
         v3_preload_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.tiles + offset,
+            blob.stages[0].tiles + offset,
             std::min(stride, count - offset),
             offset);
     }
 
-    // Now loop through doing evaluation, one batch at a time
-    for (unsigned offset=0; offset < count; offset += stride) {
-        // Unpack position values into interval X/Y/Z in the values array
-        v3_calculate_intervals<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.tiles + offset,
-            std::min(stride, count - offset),
-            blob.image_size_px / 64,
-            mat,
-            (Interval*)blob.values);
+    for (unsigned i=0; i < 3; ++i) {
+        const unsigned tile_size_px = 64 / (1 << (i * 2));
 
-        // Do the actual tape evaluation, which is the expensive step
-        v3_eval_tiles_i<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tape_data,
-            blob.tiles.filled,
-            blob.image_size_px / 64,
+        // Now loop through doing evaluation, one batch at a time
+        for (unsigned offset=0; offset < count; offset += stride) {
+            // Unpack position values into interval X/Y/Z in the values array
+            v3_calculate_intervals<<<NUM_BLOCKS, NUM_THREADS>>>(
+                blob.stages[i].tiles + offset,
+                std::min(stride, count - offset),
+                blob.image_size_px / tile_size_px,
+                mat,
+                (Interval*)blob.values);
 
-            blob.tiles.tiles + offset,
-            std::min(stride, count - offset),
+            // Do the actual tape evaluation, which is the expensive step
+            v3_eval_tiles_i<<<NUM_BLOCKS, NUM_THREADS>>>(
+                blob.tape_data,
+                blob.stages[i].filled,
+                blob.image_size_px / tile_size_px,
 
-            (Interval*)blob.values,
-            blob.push_data);
+                blob.stages[i].tiles + offset,
+                std::min(stride, count - offset),
 
-        // Mark every tile which is covered in the image as masked,
-        // which means it will be skipped later on.
-        v3_mask_filled_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.filled, blob.image_size_px / 64,
-            blob.tiles.tiles + offset, std::min(stride, count - offset));
+                (Interval*)blob.values,
+                blob.push_data);
 
-        // Reset the push target count to 0, without requiring
-        // a sync with the host.
-        cudaMemsetAsync(blob.push_target_count, 0, sizeof(int32_t));
+            // Mark every tile which is covered in the image as masked,
+            // which means it will be skipped later on.
+            v3_mask_filled_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
+                blob.stages[i].filled, blob.image_size_px / tile_size_px,
+                blob.stages[i].tiles + offset, std::min(stride, count - offset));
 
-        // Figure out which tapes need pushing, storing them in the
-        // push buffer and recording the count (with atomic increments)
-        // in push_count.
-        v3_plan_tape_push<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.tiles + offset,
-            std::min(stride, count - offset),
+            // Reset the push target count to 0, without requiring
+            // a sync with the host.
+            cudaMemsetAsync(blob.push_target_count, 0, sizeof(int32_t));
 
-            blob.push_data,
+            // Figure out which tapes need pushing, storing them in the
+            // push buffer and recording the count (with atomic increments)
+            // in push_count.
+            v3_plan_tape_push<<<NUM_BLOCKS, NUM_THREADS>>>(
+                blob.stages[i].tiles + offset,
+                std::min(stride, count - offset),
 
-            blob.push_target_buffer,
-            blob.push_target_count);
+                blob.push_data,
 
-        // Actually do the pushing.  There will be lots of threads at
-        // the end of this (> push_count) which aren't doing anything.
-        v3_execute_tape_push<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.tiles + offset,
-            blob.tape_data,
-            blob.tape_index,
+                blob.push_target_buffer,
+                blob.push_target_count);
 
-            blob.push_target_buffer,
-            blob.push_target_count,
-            blob.push_data);
+            // Actually do the pushing.  There will be lots of threads at
+            // the end of this (> push_count) which aren't doing anything.
+            v3_execute_tape_push<<<NUM_BLOCKS, NUM_THREADS>>>(
+                blob.stages[i].tiles + offset,
+                blob.tape_data,
+                blob.tape_index,
 
-        // Count up active tiles, to figure out how much memory needs to be
-        // allocated in the next stage.
-        cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
-        v3_assign_next_nodes<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.tiles + offset,
-            std::min(stride, count - offset),
-            blob.num_active_tiles);
+                blob.push_target_buffer,
+                blob.push_target_count,
+                blob.push_data);
+
+            // Count up active tiles, to figure out how much memory needs to be
+            // allocated in the next stage.
+            cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
+            v3_assign_next_nodes<<<NUM_BLOCKS, NUM_THREADS>>>(
+                blob.stages[i].tiles + offset,
+                std::min(stride, count - offset),
+                blob.num_active_tiles);
+        }
+
+        // Make sure that the subtiles buffer has enough room
+        CUDA_CHECK(cudaDeviceSynchronize());
+        const int32_t num_active_tiles = *blob.num_active_tiles;
+        if (i + 1 < 3) {
+            if (num_active_tiles * 64 > blob.stages[i + 1].tile_array_size) {
+                blob.stages[i + 1].tile_array_size = num_active_tiles * 64;
+                CUDA_CHECK(cudaFree(blob.stages[i + 1].tiles));
+                blob.stages[i + 1].tiles = CUDA_MALLOC(
+                        v3_tile_node_t, num_active_tiles * 64);
+            }
+
+            // Build the new tape from the active tiles in the previous tape
+            for (unsigned offset=0; offset < count; offset += stride) {
+                v3_subdivide_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
+                    blob.stages[i].tiles + offset,
+                    std::min(stride, count - offset),
+                    blob.stages[i + 1].tiles + offset * 64);
+            }
+        }
+        count = num_active_tiles * 64;
     }
-
-    // Make sure that the subtiles buffer has enough room
     CUDA_CHECK(cudaDeviceSynchronize());
-    const int32_t num_active_tiles = *blob.num_active_tiles;
-    if (num_active_tiles * 64 > blob.subtiles.tile_array_size) {
-        blob.subtiles.tile_array_size = num_active_tiles * 64;
-        CUDA_CHECK(cudaFree(blob.subtiles.tiles));
-        blob.subtiles.tiles = CUDA_MALLOC(
-                v3_tile_node_t, num_active_tiles * 64);
-    }
-
-    // Build the new tape from the active tiles in the previous tape
-    for (unsigned offset=0; offset < count; offset += stride) {
-        v3_subdivide_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.tiles.tiles + offset,
-            std::min(stride, count - offset),
-            blob.subtiles.tiles + offset * 64);
-    }
-    CUDA_CHECK(cudaDeviceSynchronize());
-
 }
 
 // END OF EXPERIMENTAL ZONE

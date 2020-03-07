@@ -34,9 +34,7 @@ struct v3_blob_t {
     int32_t* tape_index;    // single value
     int32_t tape_length;    // used to reset tape index
 
-    v3_tiles_t tiles;
-    v3_tiles_t subtiles;
-    v3_tiles_t microtiles;
+    v3_tiles_t stages[3];   // 64^3, 16^3, 4^3
 
     int32_t* num_active_tiles;  // GPU-allocated count of active tiles
 
