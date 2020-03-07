@@ -3,7 +3,8 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -src-in-ptx -keep --ptxas-options=-v -
 add_library(five-cuda
     tape.cpp
     renderable.cu
-    v2.cu)
+    v2.cu
+    v3.cu)
 target_include_directories(five-cuda PUBLIC
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/../inc

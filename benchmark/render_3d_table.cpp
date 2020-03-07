@@ -9,7 +9,7 @@
 #include <libfive/render/discrete/heightmap.hpp>
 
 #include "renderable.hpp"
-#include "v2.hpp"
+#include "v3.hpp"
 
 int main(int argc, char **argv)
 {
@@ -32,19 +32,19 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
     const std::vector<int> sizes = {256, 512, 1024, 1536, 2048};
-    std::cout << "Rendering with v2 architecture:" << std::endl;
+    std::cout << "Rendering with v3 architecture:" << std::endl;
     for (auto size: sizes) {
         Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
         T(3,2) = 0.3f;
-        auto r = build_v2_blob(t, size);
+        auto r = build_v3_blob(t, size);
         // Warm-up
         for (unsigned i=0; i < 20; ++i) {
-            render_v2_blob(r, Eigen::Matrix4f::Identity());
+            render_v3_blob(r, Eigen::Matrix4f::Identity());
         }
         auto start_gpu = std::chrono::steady_clock::now();
         const auto count = 100;
         for (unsigned i=0; i < count; ++i) {
-            render_v2_blob(r, Eigen::Matrix4f::Identity());
+            render_v3_blob(r, Eigen::Matrix4f::Identity());
         }
         auto end_gpu = std::chrono::steady_clock::now();
         std::cout << size << " " <<
@@ -58,8 +58,8 @@ int main(int argc, char **argv)
                 out.depth(y, x) = r.image[i++];
             }
         }
-        out.savePNG("out_gpu_depth_v2_" + std::to_string(size) + ".png");
-        free_v2_blob(r);
+        out.savePNG("out_gpu_depth_v3_" + std::to_string(size) + ".png");
+        free_v3_blob(r);
     }
     std::cout << "Rendering with original architecture:" << std::endl;
     for (auto size: sizes) {
