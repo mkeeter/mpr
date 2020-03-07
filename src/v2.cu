@@ -753,8 +753,7 @@ void v2_assign_next_nodes(tile_node_t* const __restrict__ in_tiles,
     }
 }
 
-// Sets the tile.next to an index in the upcoming tile list, without
-// actually doing any work (since that list may not be allocated yet)
+// Copies each active tile into 64 subtiles
 __global__
 void v2_subdivide_tiles(const tile_node_t* const __restrict__ in_tiles,
                         const int32_t in_tile_count,
