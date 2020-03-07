@@ -31,9 +31,6 @@ struct v3_blob_t {
 
     int32_t* num_active_tiles;  // GPU-allocated count of active tiles
 
-    int32_t* push_target_buffer;    // Array of values which need tape push
-    int32_t* push_target_count;     // Single counter value allocated on GPU
-
     void* values; // Used to pass data around
 };
 

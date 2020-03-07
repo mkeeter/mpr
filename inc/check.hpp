@@ -15,5 +15,12 @@ template <typename T>
 inline T* cudaMallocManagedChecked(size_t count, const char *file, int line) {
     void* ptr;
     gpuCheck(cudaMallocManaged(&ptr, sizeof(T) * count), file, line);
+    //printf("%p allocated %lu at [%s:%i]\n", ptr, sizeof(T) * count, file, line);
     return static_cast<T*>(ptr);
+}
+
+#define CUDA_FREE(c) cudaFreeChecked((void*)c, __FILE__, __LINE__)
+inline void cudaFreeChecked(void* ptr, const char *file, int line) {
+    //printf("%p freed [%s:%i]\n", ptr, file, line);
+    CUDA_CHECK(cudaFree(ptr));
 }

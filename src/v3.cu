@@ -811,10 +811,6 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
     // Allocate an index to keep track of active tiles
     out.num_active_tiles = CUDA_MALLOC(int32_t, 1);
 
-    // Allocate temporary storage in global memory to calculate pushed tapes
-    out.push_target_buffer = CUDA_MALLOC(int32_t, NUM_THREADS * NUM_BLOCKS);
-    out.push_target_count = CUDA_MALLOC(int32_t, 1);
-
     // Allocate a bunch of scratch space for passing intervals around
     out.values = CUDA_MALLOC(Interval, NUM_THREADS * NUM_BLOCKS * 3);
 
@@ -1014,19 +1010,16 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
 
 void free_v3_blob(v3_blob_t& blob) {
     for (unsigned i=0; i < 4; ++i) {
-        CUDA_CHECK(cudaFree(blob.stages[i].filled));
-        CUDA_CHECK(cudaFree(blob.stages[i].tiles));
+        CUDA_FREE(blob.stages[i].filled);
+        CUDA_FREE(blob.stages[i].tiles);
     }
 
-    CUDA_CHECK(cudaFree(blob.tape_data));
-    CUDA_CHECK(cudaFree(blob.tape_index));
+    CUDA_FREE(blob.tape_data);
+    CUDA_FREE(blob.tape_index);
 
-    CUDA_CHECK(cudaFree(blob.num_active_tiles));
+    CUDA_FREE(blob.num_active_tiles);
 
-    CUDA_CHECK(cudaFree(blob.push_target_buffer));
-    CUDA_CHECK(cudaFree(blob.push_target_count));
-
-    CUDA_CHECK(cudaFree(blob.values));
+    CUDA_FREE(blob.values);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1141,7 +1134,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         // Make sure that the subtiles buffer has enough room
         if (num_active_tiles > blob.stages[i + 1].tile_array_size) {
             blob.stages[i + 1].tile_array_size = num_active_tiles;
-            CUDA_CHECK(cudaFree(blob.stages[i + 1].tiles));
+            CUDA_FREE(blob.stages[i + 1].tiles);
             blob.stages[i + 1].tiles = CUDA_MALLOC(
                     v3_tile_node_t, num_active_tiles);
         }

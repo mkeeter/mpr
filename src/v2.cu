@@ -788,6 +788,7 @@ v2_blob_t build_v2_blob(libfive::Tree tree, const int32_t image_size_px) {
     out.image_size_px = image_size_px;
     out.image = CUDA_MALLOC(int32_t, pow(image_size_px, 2));
 
+    printf("Requesting %lu\n", sizeof(uint64_t) * LIBFIVE_CUDA_NUM_SUBTAPES *LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
     out.tape_data = CUDA_MALLOC(uint64_t, LIBFIVE_CUDA_NUM_SUBTAPES *
                                           LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE);
     out.tape_index = CUDA_MALLOC(int32_t, 1);
