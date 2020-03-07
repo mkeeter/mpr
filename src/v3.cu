@@ -780,10 +780,6 @@ void v3_calculate_voxels(const v3_tile_node_t* const __restrict__ in_tiles,
              mat(i, 1) * fy +
              mat(i, 2) * fz + mat(0, 3)) / fw_;
     }
-    printf("%u:%u -> [%f %f %f]\n", blockIdx.x, threadIdx.x,
-            values[voxel_index * 3],
-            values[voxel_index * 3 + 1],
-            values[voxel_index * 3 + 2]);
 }
 
 __global__
@@ -1276,7 +1272,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         v3_calculate_voxels<<<NUM_BLOCKS, NUM_THREADS>>>(
             blob.stages[3].tiles + offset,
             std::min(stride, count - offset),
-            blob.image_size_px,
+            blob.image_size_px / 4,
             mat,
             (float*)blob.values);
         // Do the actual tape walking step
