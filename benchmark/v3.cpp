@@ -43,7 +43,7 @@ int main(int argc, char** argv)
     uint32_t i = 0;
     for (int x=0; x < blob.image_size_px; ++x) {
         for (int y=0; y < blob.image_size_px; ++y) {
-            out.depth(y, x) = blob.image[i++];
+            out.depth(y, x) = blob.stages[3].filled[i++];
         }
     }
     out.savePNG("v3.png");

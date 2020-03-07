@@ -28,13 +28,12 @@ struct v3_tiles_t {
 
 struct v3_blob_t {
     int32_t image_size_px;
-    int32_t* image;
 
     uint64_t* tape_data;    // original tape is at index 0
     int32_t* tape_index;    // single value
     int32_t tape_length;    // used to reset tape index
 
-    v3_tiles_t stages[3];   // 64^3, 16^3, 4^3
+    v3_tiles_t stages[4];   // 64^3, 16^3, 4^3, voxels
 
     int32_t* num_active_tiles;  // GPU-allocated count of active tiles
 
