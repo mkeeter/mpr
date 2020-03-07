@@ -32,7 +32,7 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    const std::vector<int> sizes = {256, 512, 1024, 1536, 2048};
+    const std::vector<int> sizes = {256, 512};//, 1024, 1536, 2048};
     std::cout << "Rendering with v3 architecture:" << std::endl;
     for (auto size: sizes) {
         Eigen::Matrix4f T = Eigen::Matrix4f::Identity();

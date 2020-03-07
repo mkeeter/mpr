@@ -13,7 +13,7 @@
 #define NUM_THREADS (64 * NUM_TILES)
 #define NUM_BLOCKS (512)
 #define SUBTAPE_CHUNK_SIZE 64
-#define NUM_SUBTAPES 3200000
+#define NUM_SUBTAPES 320000
 
 ////////////////////////////////////////////////////////////////////////////////
 // COPYPASTA
@@ -313,22 +313,22 @@ void v3_calculate_intervals(const v3_tile_node_t* const __restrict__ in_tiles,
 }
 
 __global__
-void v3_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
+void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
+                     int32_t* const __restrict__ tape_index,
                      int32_t* const __restrict__ image,
                      const uint32_t tiles_per_side,
 
                      v3_tile_node_t* const __restrict__ in_tiles,
                      const int32_t in_tile_count,
 
-                     const Interval* __restrict__ values,
-
-                     v3_tape_push_data_t* const __restrict__ push_data)
+                     const Interval* __restrict__ values)
 {
     const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count) {
         return;
     }
 
+    // Check to see if we're masked
     if (in_tiles[tile_index].position == -1) {
         return;
     }
@@ -422,117 +422,17 @@ void v3_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    if (has_any_choice) {
-        // Copy the choice data to global memory so that we can push the tape
-        // in a separate kernel, after compacting the list of active tiles.
-        for (int i=0; i < (choice_index + 15) / 16; ++i) {
-            push_data[tile_index].choices[i] = choices[i];
-        }
-        push_data[tile_index].choice_index = choice_index;
-        push_data[tile_index].tape_end = data - tape_data;
-    } else {
-        push_data[tile_index].choice_index = -1;
-    }
-}
-
-__global__
-void v3_mask_filled_tiles(int32_t* const __restrict__ image,
-                          const uint32_t tiles_per_side,
-
-                          v3_tile_node_t* const __restrict__ in_tiles,
-                          const int32_t in_tile_count)
-{
-    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tile_index >= in_tile_count) {
+    if (!has_any_choice) {
         return;
     }
 
-    const int32_t tile = in_tiles[tile_index].position;
-    // Already marked as filled or empty
-    if (tile == -1) {
-        return;
-    }
-
-    const int4 pos = unpack(tile, tiles_per_side);
-
-    // If this tile is completely masked by the image, then skip it
-    if (image[pos.w] > pos.z) {
-        in_tiles[tile_index].position = -1;
-    }
-}
-
-// Accumulates a list of active tiles/tapes which need pushing,
-// storing tile thread indexes in tapes_to_push and the total
-// count in num_tapes_to_push.
-__global__
-void v3_plan_tape_push(const v3_tile_node_t* const __restrict__ in_tiles,
-                       const int32_t in_tile_count,
-
-                       // Compute in the previous step
-                       const v3_tape_push_data_t* __restrict__ const push_data,
-
-                       int32_t* __restrict__ const tapes_to_push,
-                       int32_t* __restrict__ const num_tapes_to_push)
-{
-    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
-
-    const bool needs_pushing = tile_index < in_tile_count &&
-                               in_tiles[tile_index].position != -1 &&
-                               push_data[tile_index].choice_index != -1;
-
-    // Do two levels of accumulation, to reduce atomic pressure on a single
-    // global variable.  Does this help?  Who knows!
-    __shared__ int local_offset;
-    if (threadIdx.x == 0) {
-        local_offset = 0;
-    }
-    __syncthreads();
-
-    int my_offset;
-    if (needs_pushing) {
-        my_offset = atomicAdd(&local_offset, 1);
-    }
-    __syncthreads();
-
-    // Only one thread gets to contribute to the global offset
-    if (threadIdx.x == 0) {
-        local_offset = atomicAdd(num_tapes_to_push, local_offset);
-    }
-    __syncthreads();
-
-    if (needs_pushing) {
-        tapes_to_push[local_offset + my_offset] = tile_index;
-    }
-}
-
-__global__
-void v3_execute_tape_push(v3_tile_node_t* const __restrict__ in_tiles,
-                          uint64_t* const __restrict__ tape_data,
-                          int32_t* const __restrict__ tape_index,
-
-                          const int32_t* __restrict__ const tapes_to_push,
-                          const int32_t num_tapes_to_push,
-                          const v3_tape_push_data_t* const __restrict__ push_data)
-{
-    const int32_t target_index = threadIdx.x + blockIdx.x * blockDim.x;
-    if (target_index >= num_tapes_to_push) {
-        return;
-    }
-    const int32_t tile_index = tapes_to_push[target_index];
-
-    // Copy choices from global to a thread-local array
-    uint32_t choices[128];
-    int choice_index = push_data[tile_index].choice_index;
-    for (int i=0; i < (choice_index + 15) / 16; ++i) {
-        choices[i] = push_data[tile_index].choices[i];
-    }
-
-    // We start with the cursor positioned at the end of the tape
-    const uint64_t* __restrict__ data = tape_data + push_data[tile_index].tape_end;
-    const uint8_t i_out = I_OUT(data);
-
+    ////////////////////////////////////////////////////////////////////////////
+    // Tape pushing!
     // Use this array to track which slots are active
-    bool active[128] = {0};
+    int* const __restrict__ active = (int*)slots;
+    for (unsigned i=0; i < 128; ++i) {
+        active[i] = false;
+    }
     active[i_out] = true;
 
     // Claim a chunk of tape
@@ -626,6 +526,36 @@ void v3_execute_tape_push(v3_tile_node_t* const __restrict__ in_tiles,
     // Record the beginning of the tape in the output tile
     in_tiles[tile_index].tape = out_index + out_offset;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+__global__
+void v3_mask_filled_tiles(int32_t* const __restrict__ image,
+                          const uint32_t tiles_per_side,
+
+                          v3_tile_node_t* const __restrict__ in_tiles,
+                          const int32_t in_tile_count)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    const int32_t tile = in_tiles[tile_index].position;
+    // Already marked as filled or empty
+    if (tile == -1) {
+        return;
+    }
+
+    const int4 pos = unpack(tile, tiles_per_side);
+
+    // If this tile is completely masked by the image, then skip it
+    if (image[pos.w] > pos.z) {
+        in_tiles[tile_index].position = -1;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Sets the tile.next to an index in the upcoming tile list, without
 // actually doing any work (since that list may not be allocated yet)
@@ -875,7 +805,6 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
     out.num_active_tiles = CUDA_MALLOC(int32_t, 1);
 
     // Allocate temporary storage in global memory to calculate pushed tapes
-    out.push_data = CUDA_MALLOC(v3_tape_push_data_t, NUM_THREADS * NUM_BLOCKS);
     out.push_target_buffer = CUDA_MALLOC(int32_t, NUM_THREADS * NUM_BLOCKS);
     out.push_target_count = CUDA_MALLOC(int32_t, 1);
 
@@ -1087,7 +1016,6 @@ void free_v3_blob(v3_blob_t& blob) {
 
     CUDA_CHECK(cudaFree(blob.num_active_tiles));
 
-    CUDA_CHECK(cudaFree(blob.push_data));
     CUDA_CHECK(cudaFree(blob.push_target_buffer));
     CUDA_CHECK(cudaFree(blob.push_target_count));
 
@@ -1160,14 +1088,14 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
             // Do the actual tape evaluation, which is the expensive step
             v3_eval_tiles_i<<<active_blocks, NUM_THREADS>>>(
                 blob.tape_data,
+                blob.tape_index,
                 blob.stages[i].filled,
                 blob.image_size_px / tile_size_px,
 
                 blob.stages[i].tiles + offset,
                 active_threads,
 
-                (Interval*)blob.values,
-                blob.push_data);
+                (Interval*)blob.values);
 
             // Mark every tile which is covered in the image as masked,
             // which means it will be skipped later on.
@@ -1176,36 +1104,6 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
                 blob.image_size_px / tile_size_px,
                 blob.stages[i].tiles + offset,
                 active_threads);
-
-            // Reset the push target count to 0, without requiring
-            // a sync with the host.
-            cudaMemsetAsync(blob.push_target_count, 0, sizeof(int32_t));
-
-            // Figure out which tapes need pushing, storing them in the
-            // push buffer and recording the count (with atomic increments)
-            // in push_count.
-            v3_plan_tape_push<<<active_blocks, NUM_THREADS>>>(
-                blob.stages[i].tiles + offset,
-                active_threads,
-
-                blob.push_data,
-
-                blob.push_target_buffer,
-                blob.push_target_count);
-
-            int32_t push_target_count;
-            cudaMemcpy(&push_target_count, blob.push_target_count,
-                       sizeof(int32_t), cudaMemcpyDeviceToHost);
-            const int32_t push_blocks = (push_target_count + NUM_THREADS - 1)
-                                        / NUM_THREADS;
-            v3_execute_tape_push<<<push_blocks, NUM_THREADS>>>(
-                blob.stages[i].tiles + offset,
-                blob.tape_data,
-                blob.tape_index,
-
-                blob.push_target_buffer,
-                push_target_count,
-                blob.push_data);
         }
 
         // Mark the total number of active tiles (from this stage) to 0

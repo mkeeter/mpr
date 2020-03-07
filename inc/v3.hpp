@@ -11,12 +11,6 @@ struct v3_tile_node_t {
     int32_t next;
 };
 
-struct v3_tape_push_data_t {
-    uint32_t choices[128]; // This holds up to 2048 choices, at 2 bits each
-    int32_t choice_index;
-    int32_t tape_end;
-};
-
 struct v3_tiles_t {
     /* 2D array of filled Z values (or 0) */
     int32_t* filled;
@@ -37,7 +31,6 @@ struct v3_blob_t {
 
     int32_t* num_active_tiles;  // GPU-allocated count of active tiles
 
-    v3_tape_push_data_t* push_data; // Data useful when pushing the tape
     int32_t* push_target_buffer;    // Array of values which need tape push
     int32_t* push_target_count;     // Single counter value allocated on GPU
 
