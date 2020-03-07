@@ -260,13 +260,13 @@ void v3_preload_tiles(v3_tile_node_t* const __restrict__ in_tiles,
 
 __global__
 void v3_calculate_intervals(const v3_tile_node_t* const __restrict__ in_tiles,
-                            const uint32_t num_in_tiles,
+                            const uint32_t in_tile_count,
                             const uint32_t tiles_per_side,
                             const Eigen::Matrix4f mat,
                             Interval* const __restrict__ values)
 {
     const uint32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tile_index >= num_in_tiles) {
+    if (tile_index >= in_tile_count) {
         return;
     }
 
@@ -331,7 +331,7 @@ void v3_eval_tiles_i(const uint64_t* const __restrict__ tape_data,
     // Pick out the tape based on the pointer stored in the tiles list
     const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
 
-    uint32_t choices[256] = {0};
+    uint32_t choices[128] = {0};
     int choice_index = 0;
     bool has_any_choice = false;
 
@@ -514,7 +514,7 @@ void v3_execute_tape_push(v3_tile_node_t* const __restrict__ in_tiles,
     const int32_t tile_index = tapes_to_push[target_index];
 
     // Copy choices from global to a thread-local array
-    uint32_t choices[256];
+    uint32_t choices[128];
     int choice_index = push_data[tile_index].choice_index;
     for (int i=0; i < (choice_index + 15) / 16; ++i) {
         choices[i] = push_data[tile_index].choices[i];
@@ -665,10 +665,11 @@ void v3_assign_next_nodes(v3_tile_node_t* const __restrict__ in_tiles,
 
 // Copies each active tile into 64 subtiles
 __global__
-void v3_subdivide_tiles(const v3_tile_node_t* const __restrict__ in_tiles,
-                        const int32_t in_tile_count,
-                        const int32_t tiles_per_side,
-                        v3_tile_node_t* const __restrict__ out_tiles)
+void v3_subdivide_active_tiles(
+        const v3_tile_node_t* const __restrict__ in_tiles,
+        const int32_t in_tile_count,
+        const int32_t tiles_per_side,
+        v3_tile_node_t* const __restrict__ out_tiles)
 {
     const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count || in_tiles[tile_index].next == -1) {
@@ -697,6 +698,26 @@ void v3_subdivide_tiles(const v3_tile_node_t* const __restrict__ in_tiles,
     }
 }
 
+// Copies each active tile into the out_tiles list, clearing its `next` value.
+// This is used right before per-pixel evaluation, which wants a compact list
+// of active tiles, but doesn't need to subdivide them by 64 itself.
+__global__
+void v3_copy_active_tiles(v3_tile_node_t* const __restrict__ in_tiles,
+                          const int32_t in_tile_count,
+                          const int32_t tiles_per_side,
+                          v3_tile_node_t* const __restrict__ out_tiles)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count || in_tiles[tile_index].next == -1) {
+        return;
+    }
+    const int t = in_tiles[tile_index].next;
+    out_tiles[t].position = in_tiles[tile_index].position;
+    out_tiles[t].tape = in_tiles[tile_index].tape;
+    out_tiles[t].next = -1;
+    in_tiles[tile_index].next = -1;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
@@ -714,6 +735,144 @@ void v3_copy_filled(const int32_t* __restrict__ prev,
         }
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+__global__
+void v3_calculate_voxels(const v3_tile_node_t* const __restrict__ in_tiles,
+                         const int in_tile_count,
+                         const int tiles_per_side,
+                         const Eigen::Matrix4f mat,
+                         float* const __restrict__ values)
+{
+    const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = voxel_index / 64;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    const int32_t in_parent_tile = in_tiles[tile_index].position;
+
+    // The minimum-size tile is 4x4x4
+    const int32_t subtile_offset = threadIdx.x % 64;
+    const int voxels_per_side = tiles_per_side * 4;
+
+    const int32_t tx = (in_parent_tile % tiles_per_side);
+    const int32_t px = tx * 4 + subtile_offset % 4;
+    const float fx = ((px + 0.5f) / (float)voxels_per_side - 0.5f) * 2.0f;
+
+    const int32_t ty = ((in_parent_tile / tiles_per_side) % tiles_per_side);
+    const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
+    const float fy = ((py + 0.5f) / (float)voxels_per_side - 0.5f) * 2.0f;
+
+    const int32_t tz = ((in_parent_tile / tiles_per_side) / tiles_per_side);
+    const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+    const float fz = ((pz + 0.5f) / (float)voxels_per_side - 0.5f) * 2.0f;
+
+    // Calculate the projective transform value
+    const float fw_ = mat(3, 0) * fx +
+                      mat(3, 1) * fy +
+                      mat(3, 2) * fz + mat(3, 3);
+
+    for (unsigned i=0; i < 3; ++i) {
+        values[voxel_index * 3 + i] =
+            (mat(i, 0) * fx +
+             mat(i, 1) * fy +
+             mat(i, 2) * fz + mat(0, 3)) / fw_;
+    }
+    printf("%u:%u -> [%f %f %f]\n", blockIdx.x, threadIdx.x,
+            values[voxel_index * 3],
+            values[voxel_index * 3 + 1],
+            values[voxel_index * 3 + 2]);
+}
+
+__global__
+void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
+                      int32_t* const __restrict__ image,
+                      const uint32_t tiles_per_side,
+
+                      v3_tile_node_t* const __restrict__ in_tiles,
+                      const int32_t in_tile_count,
+                      const float* __restrict__ values)
+{
+    // Each tile is executed by 64 threads (one for each voxel).
+    //
+    // This is different from the v3_eval_tiles_i function, which evaluates one
+    // tile per thread, because the tiles are already expanded by 64x by the
+    // time they're stored in the in_tiles list.
+    const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = voxel_index / 64;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    float slots[128];
+
+    slots[((const uint8_t*)tape_data)[1]] = values[voxel_index * 3];
+    slots[((const uint8_t*)tape_data)[2]] = values[voxel_index * 3 + 1];
+    slots[((const uint8_t*)tape_data)[3]] = values[voxel_index * 3 + 2];
+
+    // Pick out the tape based on the pointer stored in the tiles list
+    const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
+
+    while (OP(++data)) {
+        switch (OP(data)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
+
+            case GPU_OP_SQUARE_LHS: square_lhs_f(*data, slots); break;
+            case GPU_OP_SQRT_LHS: sqrt_lhs_f(*data, slots); break;
+            case GPU_OP_NEG_LHS: neg_lhs_f(*data, slots); break;
+            case GPU_OP_SIN_LHS: sin_lhs_f(*data, slots); break;
+            case GPU_OP_COS_LHS: cos_lhs_f(*data, slots); break;
+            case GPU_OP_ASIN_LHS: asin_lhs_f(*data, slots); break;
+            case GPU_OP_ACOS_LHS: acos_lhs_f(*data, slots); break;
+            case GPU_OP_ATAN_LHS: atan_lhs_f(*data, slots); break;
+            case GPU_OP_EXP_LHS: exp_lhs_f(*data, slots); break;
+            case GPU_OP_ABS_LHS: abs_lhs_f(*data, slots); break;
+            case GPU_OP_LOG_LHS: log_lhs_f(*data, slots); break;
+
+            // Commutative opcodes
+            case GPU_OP_ADD_LHS_IMM: add_lhs_imm_f(*data, slots); break;
+            case GPU_OP_ADD_LHS_RHS: add_lhs_rhs_f(*data, slots); break;
+            case GPU_OP_MUL_LHS_IMM: mul_lhs_imm_f(*data, slots); break;
+            case GPU_OP_MUL_LHS_RHS: mul_lhs_rhs_f(*data, slots); break;
+            case GPU_OP_MIN_LHS_IMM: min_lhs_imm_f(*data, slots); break;
+            case GPU_OP_MIN_LHS_RHS: min_lhs_rhs_f(*data, slots); break;
+            case GPU_OP_MAX_LHS_IMM: max_lhs_imm_f(*data, slots); break;
+            case GPU_OP_MAX_LHS_RHS: max_lhs_rhs_f(*data, slots); break;
+
+            // Non-commutative opcodes
+            case GPU_OP_SUB_LHS_IMM: sub_lhs_imm_f(*data, slots); break;
+            case GPU_OP_SUB_IMM_RHS: sub_imm_rhs_f(*data, slots); break;
+            case GPU_OP_SUB_LHS_RHS: sub_lhs_rhs_f(*data, slots); break;
+            case GPU_OP_DIV_LHS_IMM: div_lhs_imm_f(*data, slots); break;
+            case GPU_OP_DIV_IMM_RHS: div_imm_rhs_f(*data, slots); break;
+            case GPU_OP_DIV_LHS_RHS: div_lhs_rhs_f(*data, slots); break;
+
+            case GPU_OP_COPY_IMM: copy_imm_f(*data, slots); break;
+            case GPU_OP_COPY_LHS: copy_lhs_f(*data, slots); break;
+            case GPU_OP_COPY_RHS: copy_rhs_f(*data, slots); break;
+        }
+    }
+
+    // Check the result
+    const uint8_t i_out = I_OUT(data);
+    if (slots[i_out] < 0.0f) {
+        const int32_t tile = in_tiles[tile_index].position;
+        const int32_t tx = tile % tiles_per_side;
+        const int32_t ty = (tile / tiles_per_side) % tiles_per_side;
+        const int32_t tz = (tile / tiles_per_side) / tiles_per_side;
+
+        // We subdivide at a constant rate of 4x
+        const int32_t subtile_offset = threadIdx.x % 64;
+        const int32_t px = tx * 4 + subtile_offset % 4;
+        const int32_t py = ty * 4 + (subtile_offset / 4) % 4;
+        const int32_t pz = tz * 4 + (subtile_offset / 4) / 4;
+
+        atomicMax(&image[px + py * tiles_per_side * 4], pz);
+    }
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -988,6 +1147,9 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     for (unsigned i=0; i < 3; ++i) {
         const unsigned tile_size_px = 64 / (1 << (i * 2));
 
+        // Mark the total number of active tiles (from this stage) to 0
+        cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
+
         // Now loop through doing evaluation, one batch at a time
         for (unsigned offset=0; offset < count; offset += stride) {
             // Unpack position values into interval X/Y/Z in the values array
@@ -1045,40 +1207,52 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
             // Count up active tiles, to figure out how much memory needs to be
             // allocated in the next stage.
-            cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
             v3_assign_next_nodes<<<NUM_BLOCKS, NUM_THREADS>>>(
                 blob.stages[i].tiles + offset,
                 std::min(stride, count - offset),
                 blob.num_active_tiles);
         }
 
-        // Make sure that the subtiles buffer has enough room
+        // Count the number of active tiles, which have been accumulated
+        // through repeated calls to v3_assign_next_nodes
         CUDA_CHECK(cudaDeviceSynchronize());
-        const int32_t num_active_tiles = *blob.num_active_tiles;
-        if (i < 2) {
-            if (num_active_tiles * 64 > blob.stages[i + 1].tile_array_size) {
-                blob.stages[i + 1].tile_array_size = num_active_tiles * 64;
-                CUDA_CHECK(cudaFree(blob.stages[i + 1].tiles));
-                blob.stages[i + 1].tiles = CUDA_MALLOC(
-                        v3_tile_node_t, num_active_tiles * 64);
-            }
+        const int32_t num_active_tiles = (*blob.num_active_tiles) *
+                                         ((i < 2) ? 64 : 1);
 
-            // Build the new tape from the active tiles in the previous tape
+        // Make sure that the subtiles buffer has enough room
+        if (num_active_tiles > blob.stages[i + 1].tile_array_size) {
+            blob.stages[i + 1].tile_array_size = num_active_tiles;
+            CUDA_CHECK(cudaFree(blob.stages[i + 1].tiles));
+            blob.stages[i + 1].tiles = CUDA_MALLOC(
+                    v3_tile_node_t, num_active_tiles);
+        }
+
+        if (i < 2) {
+            // Build the new tile list from active tiles in the previous list
             for (unsigned offset=0; offset < count; offset += stride) {
-                v3_subdivide_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
+                v3_subdivide_active_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
                     blob.stages[i].tiles + offset,
                     std::min(stride, count - offset),
                     blob.image_size_px / tile_size_px,
-                    blob.stages[i + 1].tiles + offset * 64);
+                    blob.stages[i + 1].tiles);
             }
         } else {
-            // TODO: Special case for per-pixel evaluation, which
-            // doesn't unpack every single pixel since that would take up
-            // 64x extra space.
-
+            // Special case for per-pixel evaluation, which
+            // doesn't unpack every single pixel (since that would take up
+            // 64x extra space).
+            for (unsigned offset=0; offset < count; offset += stride) {
+                v3_copy_active_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
+                    blob.stages[i].tiles + offset,
+                    std::min(stride, count - offset),
+                    blob.image_size_px / tile_size_px,
+                    blob.stages[i + 1].tiles);
+            }
         }
 
-        {   // Copy filled tiles into the next level
+        {   // Copy filled tiles into the next level's image (expanding them
+            // by 64x).  This is cleaner that accumulating all of the levels
+            // in a single pass, and could (possibly?) help with skipping
+            // fully occluded tiles.
             const unsigned next_tile_size = tile_size_px / 4;
             const uint32_t u = ((blob.image_size_px / next_tile_size) / 32);
             v3_copy_filled<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
@@ -1088,11 +1262,33 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         }
 
         // Assign the next number of tiles to evaluate
-        count = num_active_tiles * 64;
+        count = num_active_tiles;
 
         printf("------------------------------------------------------------\n");
         printf("Done with stage %u with %u tiles to do\n",
                 i, count);
+    }
+
+    // Time to render individual pixels!
+    for (unsigned offset=0; offset < count; offset += stride) {
+        printf("Rendering pixels with offset %u, count %u\n", offset, count);
+        // Load x/y/z values into a shared array
+        v3_calculate_voxels<<<NUM_BLOCKS, NUM_THREADS>>>(
+            blob.stages[3].tiles + offset,
+            std::min(stride, count - offset),
+            blob.image_size_px,
+            mat,
+            (float*)blob.values);
+        // Do the actual tape walking step
+        v3_eval_voxels_f<<<NUM_BLOCKS, NUM_THREADS>>>(
+            blob.tape_data,
+            blob.stages[3].filled,
+            blob.image_size_px / 4,
+
+            blob.stages[3].tiles + offset,
+            std::min(stride, count - offset),
+
+            (float*)blob.values);
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }

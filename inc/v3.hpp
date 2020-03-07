@@ -12,7 +12,7 @@ struct v3_tile_node_t {
 };
 
 struct v3_tape_push_data_t {
-    uint32_t choices[256];
+    uint32_t choices[128]; // This holds up to 2048 choices, at 2 bits each
     int32_t choice_index;
     int32_t tape_end;
 };
