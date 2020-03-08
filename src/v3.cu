@@ -300,9 +300,13 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
         tape_data[out_index + out_offset] = *data;
         if (choice == 0) {
             const uint8_t i_lhs = I_LHS(data);
-            active[i_lhs] = true;
+            if (i_lhs) {
+                active[i_lhs] = true;
+            }
             const uint8_t i_rhs = I_RHS(data);
-            active[i_rhs] = true;
+            if (i_rhs) {
+                active[i_rhs] = true;
+            }
         } else if (choice == 1 /* LHS */) {
             // The non-immediate is always the LHS in commutative ops, and
             // min/max (the only clauses that produce a choice) are commutative
