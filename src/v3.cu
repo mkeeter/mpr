@@ -1,8 +1,5 @@
 #include <cassert>
 
-#include <thrust/sort.h>
-#include <thrust/execution_policy.h>
-
 #include "libfive/tree/cache.hpp"
 
 #include "v3.hpp"
@@ -1203,11 +1200,6 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
                 i, count);
                 */
     }
-
-    // Sort tiles to encourage z pruning when rendering pixels
-    thrust::sort(thrust::device,
-                 blob.stages[3].tiles, blob.stages[3].tiles + count,
-                 SortByPosition());
 
     // Time to render individual pixels!
     stride = NUM_BLOCKS * NUM_TILES;
