@@ -83,15 +83,6 @@ void name##_lhs_##suffix(const uint64_t data,               \
     const T lhs = slots[i_lhs];                             \
     const uint8_t i_out = I_OUT(&data);                     \
 
-#define FUNCTION_PREAMBLE_LHS_ARRAY(name, T, suffix)        \
-static __device__                                           \
-void name##_lhs_##suffix(const uint64_t data,               \
-                   T (*__restrict__ const slots)[64])       \
-{                                                           \
-    const uint8_t i_lhs = I_LHS(&data);                     \
-    const T lhs = slots[i_lhs][threadIdx.x % 64];           \
-    const uint8_t i_out = I_OUT(&data);                     \
-
 #define FUNCTION_PREAMBLE_IMM_RHS(name, T, suffix)          \
 static __device__                                           \
 void name##_imm_rhs_##suffix(const uint64_t data,           \
@@ -100,16 +91,6 @@ void name##_imm_rhs_##suffix(const uint64_t data,           \
     const float lhs = IMM(&data);                           \
     const uint8_t i_rhs = I_RHS(&data);                     \
     const T rhs = slots[i_rhs];                             \
-    const uint8_t i_out = I_OUT(&data);                     \
-
-#define FUNCTION_PREAMBLE_IMM_RHS_ARRAY(name, T, suffix)    \
-static __device__                                           \
-void name##_imm_rhs_##suffix(const uint64_t data,           \
-                      T (*__restrict__ const slots)[64])    \
-{                                                           \
-    const float lhs = IMM(&data);                           \
-    const uint8_t i_rhs = I_RHS(&data);                     \
-    const T rhs = slots[i_rhs][threadIdx.x % 64];           \
     const uint8_t i_out = I_OUT(&data);                     \
 
 #define FUNCTION_PREAMBLE_LHS_IMM(name, T, suffix)          \
@@ -122,16 +103,6 @@ void name##_lhs_imm_##suffix(const uint64_t data,           \
     const T lhs = slots[i_lhs];                             \
     const uint8_t i_out = I_OUT(&data);                     \
 
-#define FUNCTION_PREAMBLE_LHS_IMM_ARRAY(name, T, suffix)    \
-static __device__                                           \
-void name##_lhs_imm_##suffix(const uint64_t data,           \
-                      T (*__restrict__ const slots)[64])    \
-{                                                           \
-    const float rhs = IMM(&data);                           \
-    const uint8_t i_lhs = I_LHS(&data);                     \
-    const T lhs = slots[i_lhs][threadIdx.x % 64];           \
-    const uint8_t i_out = I_OUT(&data);                     \
-
 #define FUNCTION_PREAMBLE_LHS_RHS(name, T, suffix)          \
 static __device__                                           \
 void name##_lhs_rhs_##suffix(const uint64_t data,           \
@@ -141,17 +112,6 @@ void name##_lhs_rhs_##suffix(const uint64_t data,           \
     const T lhs = slots[i_lhs];                             \
     const uint8_t i_rhs = I_RHS(&data);                     \
     const T rhs = slots[i_rhs];                             \
-    const uint8_t i_out = I_OUT(&data);                     \
-
-#define FUNCTION_PREAMBLE_LHS_RHS_ARRAY(name, T, suffix)    \
-static __device__                                           \
-void name##_lhs_rhs_##suffix(const uint64_t data,           \
-                    T (*const __restrict__ slots)[64])      \
-{                                                           \
-    const uint8_t i_lhs = I_LHS(&data);                     \
-    const T lhs = slots[i_lhs][threadIdx.x % 64];           \
-    const uint8_t i_rhs = I_RHS(&data);                     \
-    const T rhs = slots[i_rhs][threadIdx.x % 64];           \
     const uint8_t i_out = I_OUT(&data);                     \
 
 // Special implementations of min and max, which manipulate the choices array
