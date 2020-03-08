@@ -634,8 +634,11 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
             v3_tile_node_t,
             pow(out.image_size_px / 64, 3));
 
-    // We leave the other stage_t's input/output arrays unallocated for now,
-    // since they're initialized to all zeros and will be resized to fit later.
+    // We leave the other stage_t's tile arrays unallocated for now, since
+    // they're initialized to all zeros and will be resized to fit later.
+
+    // Prefer the L1 cache!
+    cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 
     // TAPE PLANNING TIME!
     // Hold a single cache lock to avoid needing mutex locks everywhere
