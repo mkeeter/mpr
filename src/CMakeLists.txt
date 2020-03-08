@@ -3,6 +3,7 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -src-in-ptx -keep --ptxas-options=-v -
 add_library(five-cuda
     tape.cpp
     renderable.cu
+    gpu_opcode.cu
     v2.cu
     v3.cu)
 target_include_directories(five-cuda PUBLIC

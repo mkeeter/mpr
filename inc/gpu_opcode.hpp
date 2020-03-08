@@ -1,4 +1,5 @@
 #pragma once
+#include <cuda_runtime.h>
 
 enum GPUOp {
     GPU_OP_INVALID = 0,
@@ -39,3 +40,6 @@ enum GPUOp {
     GPU_OP_COPY_LHS,
     GPU_OP_COPY_RHS,
 };
+
+__host__ __device__
+const char* gpu_op_str(uint8_t op);
