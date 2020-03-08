@@ -41,8 +41,8 @@ int main(int argc, char** argv)
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(blob.image_size_px, blob.image_size_px);
     uint32_t i = 0;
-    for (unsigned x=0; x < blob.image_size_px; ++x) {
-        for (unsigned y=0; y < blob.image_size_px; ++y) {
+    for (int x=0; x < blob.image_size_px; ++x) {
+        for (int y=0; y < blob.image_size_px; ++y) {
             out.depth(y, x) = blob.image[i++];
         }
     }
