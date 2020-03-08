@@ -1,11 +1,26 @@
 #include <cassert>
 
+#include <thrust/sort.h>
+#include <thrust/execution_policy.h>
+
 #include "libfive/tree/cache.hpp"
 
 #include "v3.hpp"
 #include "check.hpp"
 #include "gpu_interval.hpp"
 #include "gpu_opcode.hpp"
+
+////////////////////////////////////////////////////////////////////////////////
+
+struct SortByPosition {
+    __host__ __device__ bool operator()(const v3_tile_node_t& lhs,
+                                        const v3_tile_node_t& rhs)
+    {
+        return lhs.position > rhs.position;
+    }
+};
+
+////////////////////////////////////////////////////////////////////////////////
 
 // No need for parameters.hpp, we want to compile faster
 // (without rebuilding everything else)
@@ -1188,6 +1203,11 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
                 i, count);
                 */
     }
+
+    // Sort tiles to encourage z pruning when rendering pixels
+    thrust::sort(thrust::device,
+                 blob.stages[3].tiles, blob.stages[3].tiles + count,
+                 SortByPosition());
 
     // Time to render individual pixels!
     stride = NUM_BLOCKS * NUM_TILES;
