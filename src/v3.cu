@@ -9,16 +9,6 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct SortByPosition {
-    __host__ __device__ bool operator()(const v3_tile_node_t& lhs,
-                                        const v3_tile_node_t& rhs)
-    {
-        return lhs.position > rhs.position;
-    }
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
 // No need for parameters.hpp, we want to compile faster
 // (without rebuilding everything else)
 #define NUM_TILES (2)
