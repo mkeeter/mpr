@@ -474,13 +474,21 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
         } else if (choice == 1 /* LHS */) {
             // The non-immediate is always the LHS in commutative ops, and
             // min/max (the only clauses that produce a choice) are commutative
-            OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
             const uint8_t i_lhs = I_LHS(data);
+            if (i_lhs == i_out) {
+                ++out_offset;
+            } else {
+                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
+            }
             active[i_lhs] = true;
         } else if (choice == 2 /* RHS */) {
             const uint8_t i_rhs = I_RHS(data);
             if (i_rhs) {
-                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+                if (i_rhs == i_out) {
+                    ++out_offset;
+                } else {
+                    OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+                }
                 active[i_rhs] = true;
             } else {
                 OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
