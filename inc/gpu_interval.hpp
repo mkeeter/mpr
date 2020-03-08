@@ -3,7 +3,7 @@
 #include <math_constants.h>
 
 struct Interval {
-    __device__ inline Interval() : v(make_float2(0.0f, 0.0f)) {}
+    __device__ inline Interval() { /* YOLO */ }
     __device__ inline explicit Interval(float f) : v(make_float2(f, f)) {}
     __device__ inline Interval(float a, float b) : v(make_float2(a, b)) {}
     __device__ inline float upper() const { return v.y; }
