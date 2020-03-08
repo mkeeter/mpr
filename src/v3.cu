@@ -25,184 +25,6 @@
 #define IMM(d) (((float*)d)[1])
 #define JUMP_TARGET(d) (((int32_t*)d)[1])
 
-static __device__ void copy_imm_i(const uint64_t data,
-                                  Interval* const __restrict__ slots)
-{
-    const float lhs = IMM(&data);
-    const uint8_t i_out = I_OUT(&data);
-    slots[i_out] = {lhs, lhs};
-}
-
-static __device__ void copy_imm_f(const uint64_t data,
-                                  float* const __restrict__ slots)
-{
-    const float lhs = IMM(&data);
-    const uint8_t i_out = I_OUT(&data);
-    slots[i_out] = lhs;
-}
-
-static __device__ void copy_lhs_i(const uint64_t data,
-                                  Interval* const __restrict__ slots)
-{
-    const uint8_t i_lhs = I_LHS(&data);
-    const uint8_t i_out = I_OUT(&data);
-    slots[i_out] = slots[i_lhs];
-}
-
-static __device__ void copy_lhs_f(const uint64_t data,
-                                  float* const __restrict__ slots)
-{
-    const uint8_t i_lhs = I_LHS(&data);
-    const uint8_t i_out = I_OUT(&data);
-    slots[i_out] = slots[i_lhs];
-}
-
-static __device__ void copy_rhs_i(const uint64_t data,
-                                  Interval* const __restrict__ slots)
-{
-    const uint8_t i_rhs = I_RHS(&data);
-    const uint8_t i_out = I_OUT(&data);
-    slots[i_out] = slots[i_rhs];
-}
-
-static __device__ void copy_rhs_f(const uint64_t data,
-                                  float* const __restrict__ slots)
-{
-    const uint8_t i_rhs = I_RHS(&data);
-    const uint8_t i_out = I_OUT(&data);
-    slots[i_out] = slots[i_rhs];
-}
-
-#define FUNCTION_PREAMBLE_LHS(name, T, suffix)              \
-static __device__                                           \
-void name##_lhs_##suffix(const uint64_t data,               \
-                    T* const __restrict__ slots)            \
-{                                                           \
-    const uint8_t i_lhs = I_LHS(&data);                     \
-    const T lhs = slots[i_lhs];                             \
-    const uint8_t i_out = I_OUT(&data);                     \
-
-#define FUNCTION_PREAMBLE_IMM_RHS(name, T, suffix)          \
-static __device__                                           \
-void name##_imm_rhs_##suffix(const uint64_t data,           \
-                    T* const __restrict__ slots)            \
-{                                                           \
-    const float lhs = IMM(&data);                           \
-    const uint8_t i_rhs = I_RHS(&data);                     \
-    const T rhs = slots[i_rhs];                             \
-    const uint8_t i_out = I_OUT(&data);                     \
-
-#define FUNCTION_PREAMBLE_LHS_IMM(name, T, suffix)          \
-static __device__                                           \
-void name##_lhs_imm_##suffix(const uint64_t data,           \
-                    T* const __restrict__ slots)            \
-{                                                           \
-    const float rhs = IMM(&data);                           \
-    const uint8_t i_lhs = I_LHS(&data);                     \
-    const T lhs = slots[i_lhs];                             \
-    const uint8_t i_out = I_OUT(&data);                     \
-
-#define FUNCTION_PREAMBLE_LHS_RHS(name, T, suffix)          \
-static __device__                                           \
-void name##_lhs_rhs_##suffix(const uint64_t data,           \
-                    T* const __restrict__ slots)            \
-{                                                           \
-    const uint8_t i_lhs = I_LHS(&data);                     \
-    const T lhs = slots[i_lhs];                             \
-    const uint8_t i_rhs = I_RHS(&data);                     \
-    const T rhs = slots[i_rhs];                             \
-    const uint8_t i_out = I_OUT(&data);                     \
-
-// Special implementations of min and max, which manipulate the choices array
-FUNCTION_PREAMBLE_LHS_IMM(min, float, f)
-    slots[i_out] = fminf(lhs, rhs);
-}
-FUNCTION_PREAMBLE_LHS_IMM(min, Interval, i)
-    uint8_t choice = 0;
-    slots[i_out] = min(lhs, rhs, choice);
-    slots[0].v.x = choice;
-}
-FUNCTION_PREAMBLE_LHS_RHS(min, float, f)
-    slots[i_out] = fminf(lhs, rhs);
-}
-FUNCTION_PREAMBLE_LHS_RHS(min, Interval, i)
-    uint8_t choice = 0;
-    slots[i_out] = min(lhs, rhs, choice);
-    slots[0].v.x = choice;
-}
-
-FUNCTION_PREAMBLE_LHS_IMM(max, float, f)
-    slots[i_out] = fmaxf(lhs, rhs);
-}
-FUNCTION_PREAMBLE_LHS_IMM(max, Interval, i)
-    uint8_t choice = 0;
-    slots[i_out] = max(lhs, rhs, choice);
-    slots[0].v.x = choice;
-}
-FUNCTION_PREAMBLE_LHS_RHS(max, float, f)
-    slots[i_out] = fmaxf(lhs, rhs);
-}
-FUNCTION_PREAMBLE_LHS_RHS(max, Interval, i)
-    uint8_t choice = 0;
-    slots[i_out] = max(lhs, rhs, choice);
-    slots[0].v.x = choice;
-}
-
-#define COMMUTATIVE_OP(name, form)                                  \
-FUNCTION_PREAMBLE_LHS_IMM(name, Interval, i)                        \
-    slots[i_out] = (form);                                          \
-}                                                                   \
-FUNCTION_PREAMBLE_LHS_RHS(name, Interval, i)                        \
-    slots[i_out] = (form);                                          \
-}                                                                   \
-FUNCTION_PREAMBLE_LHS_IMM(name, float, f)                           \
-    slots[i_out] = (form);                                          \
-}                                                                   \
-FUNCTION_PREAMBLE_LHS_RHS(name, float, f)                           \
-    slots[i_out] = (form);                                          \
-}
-
-COMMUTATIVE_OP(add, lhs + rhs);
-COMMUTATIVE_OP(mul, lhs * rhs);
-
-#define NONCOMMUTATIVE_OP(name, form)                               \
-FUNCTION_PREAMBLE_IMM_RHS(name, Interval, i)                        \
-    slots[i_out] = (form);                                          \
-}                                                                   \
-FUNCTION_PREAMBLE_IMM_RHS(name, float, f)                           \
-    slots[i_out] = (form);                                          \
-}                                                                   \
-COMMUTATIVE_OP(name, form)
-
-NONCOMMUTATIVE_OP(sub, lhs - rhs);
-NONCOMMUTATIVE_OP(div, lhs / rhs);
-
-#define UNARY_OP(name, form_f, form_i)                              \
-FUNCTION_PREAMBLE_LHS(name, Interval, i)                            \
-    slots[i_out] = (form_i);                                        \
-}                                                                   \
-FUNCTION_PREAMBLE_LHS(name, float, f)                               \
-    slots[i_out] = (form_f);                                        \
-}
-#define UNARY_OP_F(func) UNARY_OP(func, func##f(lhs), func(lhs))
-
-// Completely different shapes
-UNARY_OP(abs, fabsf(lhs), abs(lhs))
-UNARY_OP(square, lhs * lhs, square(lhs))
-
-// Same form for float and interval
-UNARY_OP(neg, -lhs, -lhs)
-
-// Standardized names based on function
-UNARY_OP_F(sqrt)
-UNARY_OP_F(asin)
-UNARY_OP_F(acos)
-UNARY_OP_F(atan)
-UNARY_OP_F(exp)
-UNARY_OP_F(sin)
-UNARY_OP_F(cos)
-UNARY_OP_F(log)
-
 ////////////////////////////////////////////////////////////////////////////////
 static inline __device__
 int4 unpack(int32_t pos, int32_t tiles_per_side)
@@ -305,53 +127,65 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
     int choice_index = 0;
     bool has_any_choice = false;
 
+    Interval out;
     while (OP(++data)) {
         switch (OP(data)) {
             case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
 
-            case GPU_OP_SQUARE_LHS: square_lhs_i(*data, slots); break;
-            case GPU_OP_SQRT_LHS: sqrt_lhs_i(*data, slots); break;
-            case GPU_OP_NEG_LHS: neg_lhs_i(*data, slots); break;
-            case GPU_OP_SIN_LHS: sin_lhs_i(*data, slots); break;
-            case GPU_OP_COS_LHS: cos_lhs_i(*data, slots); break;
-            case GPU_OP_ASIN_LHS: asin_lhs_i(*data, slots); break;
-            case GPU_OP_ACOS_LHS: acos_lhs_i(*data, slots); break;
-            case GPU_OP_ATAN_LHS: atan_lhs_i(*data, slots); break;
-            case GPU_OP_EXP_LHS: exp_lhs_i(*data, slots); break;
-            case GPU_OP_ABS_LHS: abs_lhs_i(*data, slots); break;
-            case GPU_OP_LOG_LHS: log_lhs_i(*data, slots); break;
+#define lhs slots[I_LHS(data)]
+#define rhs slots[I_RHS(data)]
+#define imm Interval{IMM(data), IMM(data)}
+#define out slots[I_OUT(data)]
+
+            case GPU_OP_SQUARE_LHS: out = square(lhs); break;
+            case GPU_OP_SQRT_LHS:   out = sqrt(lhs); break;
+            case GPU_OP_NEG_LHS:    out = -lhs; break;
+            case GPU_OP_SIN_LHS:    out = sin(lhs); break;
+            case GPU_OP_COS_LHS:    out = cos(lhs); break;
+            case GPU_OP_ASIN_LHS:   out = asin(lhs); break;
+            case GPU_OP_ACOS_LHS:   out = acos(lhs); break;
+            case GPU_OP_ATAN_LHS:   out = atan(lhs); break;
+            case GPU_OP_EXP_LHS:    out = exp(lhs); break;
+            case GPU_OP_ABS_LHS:    out = abs(lhs); break;
+            case GPU_OP_LOG_LHS:    out = log(lhs); break;
 
             // Commutative opcodes
-            case GPU_OP_ADD_LHS_IMM: add_lhs_imm_i(*data, slots); break;
-            case GPU_OP_ADD_LHS_RHS: add_lhs_rhs_i(*data, slots); break;
-            case GPU_OP_MUL_LHS_IMM: mul_lhs_imm_i(*data, slots); break;
-            case GPU_OP_MUL_LHS_RHS: mul_lhs_rhs_i(*data, slots); break;
-            case GPU_OP_MIN_LHS_IMM: min_lhs_imm_i(*data, slots); break;
-            case GPU_OP_MIN_LHS_RHS: min_lhs_rhs_i(*data, slots); break;
-            case GPU_OP_MAX_LHS_IMM: max_lhs_imm_i(*data, slots); break;
-            case GPU_OP_MAX_LHS_RHS: max_lhs_rhs_i(*data, slots); break;
+            case GPU_OP_ADD_LHS_IMM: out = lhs + imm; break;
+            case GPU_OP_ADD_LHS_RHS: out = lhs + rhs; break;
+            case GPU_OP_MUL_LHS_IMM: out = lhs * imm; break;
+            case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
+
+#define CHOICE(f, a, b) {                                           \
+    uint8_t c = 0;                                                  \
+    out = f(a, b, c);                                               \
+    choices[choice_index / 16] |= (c << ((choice_index % 16) * 2)); \
+    choice_index++;                                                 \
+    has_any_choice |= (c != 0);                                     \
+    break;                                                          \
+}
+            case GPU_OP_MIN_LHS_IMM: CHOICE(min, lhs, imm);
+            case GPU_OP_MIN_LHS_RHS: CHOICE(min, lhs, rhs);
+            case GPU_OP_MAX_LHS_IMM: CHOICE(max, lhs, imm);
+            case GPU_OP_MAX_LHS_RHS: CHOICE(max, lhs, rhs);
 
             // Non-commutative opcodes
-            case GPU_OP_SUB_LHS_IMM: sub_lhs_imm_i(*data, slots); break;
-            case GPU_OP_SUB_IMM_RHS: sub_imm_rhs_i(*data, slots); break;
-            case GPU_OP_SUB_LHS_RHS: sub_lhs_rhs_i(*data, slots); break;
-            case GPU_OP_DIV_LHS_IMM: div_lhs_imm_i(*data, slots); break;
-            case GPU_OP_DIV_IMM_RHS: div_imm_rhs_i(*data, slots); break;
-            case GPU_OP_DIV_LHS_RHS: div_lhs_rhs_i(*data, slots); break;
+            case GPU_OP_SUB_LHS_IMM: out = lhs - imm; break;
+            case GPU_OP_SUB_IMM_RHS: out = imm - rhs; break;
+            case GPU_OP_SUB_LHS_RHS: out = lhs - rhs; break;
+            case GPU_OP_DIV_LHS_IMM: out = lhs / imm; break;
+            case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
+            case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
 
-            case GPU_OP_COPY_IMM: copy_imm_i(*data, slots); break;
-            case GPU_OP_COPY_LHS: copy_lhs_i(*data, slots); break;
-            case GPU_OP_COPY_RHS: copy_rhs_i(*data, slots); break;
+            case GPU_OP_COPY_IMM: out = imm; break;
+            case GPU_OP_COPY_LHS: out = lhs; break;
+            case GPU_OP_COPY_RHS: out = rhs; break;
 
             default: assert(false);
         }
-        // If this opcode makes a choice, then append that choice to the list
-        if (OP(data) >= GPU_OP_MIN_LHS_IMM && OP(data) <= GPU_OP_MAX_LHS_RHS) {
-            const uint8_t c = slots[0].v.x;
-            choices[choice_index / 16] |= (c << ((choice_index % 16) * 2));
-            choice_index++;
-            has_any_choice |= (c != 0);
-        }
+#undef lhs
+#undef rhs
+#undef imm
+#undef out
     }
 
     // Check the result
@@ -708,39 +542,50 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
         switch (OP(data)) {
             case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
 
-            case GPU_OP_SQUARE_LHS: square_lhs_f(*data, slots); break;
-            case GPU_OP_SQRT_LHS: sqrt_lhs_f(*data, slots); break;
-            case GPU_OP_NEG_LHS: neg_lhs_f(*data, slots); break;
-            case GPU_OP_SIN_LHS: sin_lhs_f(*data, slots); break;
-            case GPU_OP_COS_LHS: cos_lhs_f(*data, slots); break;
-            case GPU_OP_ASIN_LHS: asin_lhs_f(*data, slots); break;
-            case GPU_OP_ACOS_LHS: acos_lhs_f(*data, slots); break;
-            case GPU_OP_ATAN_LHS: atan_lhs_f(*data, slots); break;
-            case GPU_OP_EXP_LHS: exp_lhs_f(*data, slots); break;
-            case GPU_OP_ABS_LHS: abs_lhs_f(*data, slots); break;
-            case GPU_OP_LOG_LHS: log_lhs_f(*data, slots); break;
+#define lhs slots[I_LHS(data)]
+#define rhs slots[I_RHS(data)]
+#define imm IMM(data)
+#define out slots[I_OUT(data)]
+
+            case GPU_OP_SQUARE_LHS: out = lhs * lhs; break;
+            case GPU_OP_SQRT_LHS: out = sqrtf(lhs); break;
+            case GPU_OP_NEG_LHS: out = -lhs; break;
+            case GPU_OP_SIN_LHS: out = sinf(lhs); break;
+            case GPU_OP_COS_LHS: out = cosf(lhs); break;
+            case GPU_OP_ASIN_LHS: out = asinf(lhs); break;
+            case GPU_OP_ACOS_LHS: out = acosf(lhs); break;
+            case GPU_OP_ATAN_LHS: out = atanf(lhs); break;
+            case GPU_OP_EXP_LHS: out = expf(lhs); break;
+            case GPU_OP_ABS_LHS: out = fabsf(lhs); break;
+            case GPU_OP_LOG_LHS: out = logf(lhs); break;
 
             // Commutative opcodes
-            case GPU_OP_ADD_LHS_IMM: add_lhs_imm_f(*data, slots); break;
-            case GPU_OP_ADD_LHS_RHS: add_lhs_rhs_f(*data, slots); break;
-            case GPU_OP_MUL_LHS_IMM: mul_lhs_imm_f(*data, slots); break;
-            case GPU_OP_MUL_LHS_RHS: mul_lhs_rhs_f(*data, slots); break;
-            case GPU_OP_MIN_LHS_IMM: min_lhs_imm_f(*data, slots); break;
-            case GPU_OP_MIN_LHS_RHS: min_lhs_rhs_f(*data, slots); break;
-            case GPU_OP_MAX_LHS_IMM: max_lhs_imm_f(*data, slots); break;
-            case GPU_OP_MAX_LHS_RHS: max_lhs_rhs_f(*data, slots); break;
+            case GPU_OP_ADD_LHS_IMM: out = lhs + imm; break;
+            case GPU_OP_ADD_LHS_RHS: out = lhs + rhs; break;
+            case GPU_OP_MUL_LHS_IMM: out = lhs * imm; break;
+            case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
+            case GPU_OP_MIN_LHS_IMM: out = fminf(lhs, imm); break;
+            case GPU_OP_MIN_LHS_RHS: out = fminf(lhs, rhs); break;
+            case GPU_OP_MAX_LHS_IMM: out = fmaxf(lhs, imm); break;
+            case GPU_OP_MAX_LHS_RHS: out = fmaxf(lhs, rhs); break;
 
             // Non-commutative opcodes
-            case GPU_OP_SUB_LHS_IMM: sub_lhs_imm_f(*data, slots); break;
-            case GPU_OP_SUB_IMM_RHS: sub_imm_rhs_f(*data, slots); break;
-            case GPU_OP_SUB_LHS_RHS: sub_lhs_rhs_f(*data, slots); break;
-            case GPU_OP_DIV_LHS_IMM: div_lhs_imm_f(*data, slots); break;
-            case GPU_OP_DIV_IMM_RHS: div_imm_rhs_f(*data, slots); break;
-            case GPU_OP_DIV_LHS_RHS: div_lhs_rhs_f(*data, slots); break;
+            case GPU_OP_SUB_LHS_IMM: out = lhs - imm; break;
+            case GPU_OP_SUB_IMM_RHS: out = imm - rhs; break;
+            case GPU_OP_SUB_LHS_RHS: out = lhs - rhs; break;
 
-            case GPU_OP_COPY_IMM: copy_imm_f(*data, slots); break;
-            case GPU_OP_COPY_LHS: copy_lhs_f(*data, slots); break;
-            case GPU_OP_COPY_RHS: copy_rhs_f(*data, slots); break;
+            case GPU_OP_DIV_LHS_IMM: out = lhs / imm; break;
+            case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
+            case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
+
+            case GPU_OP_COPY_IMM: out = imm; break;
+            case GPU_OP_COPY_LHS: out = lhs; break;
+            case GPU_OP_COPY_RHS: out = rhs; break;
+
+#undef lhs
+#undef rhs
+#undef imm
+#undef out
         }
     }
 
