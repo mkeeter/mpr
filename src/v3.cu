@@ -13,7 +13,6 @@
 // (without rebuilding everything else)
 #define NUM_TILES (4)
 #define NUM_THREADS (64 * NUM_TILES)
-#define NUM_BLOCKS (512)
 #define SUBTAPE_CHUNK_SIZE 64
 #define NUM_SUBTAPES 320000
 
@@ -217,15 +216,14 @@ int4 unpack(int32_t pos, int32_t tiles_per_side)
 ////////////////////////////////////////////////////////////////////////////////
 __global__
 void v3_preload_tiles(v3_tile_node_t* const __restrict__ in_tiles,
-                      const int32_t in_tile_count,
-                      const int32_t offset)
+                      const int32_t in_tile_count)
 {
     const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count) {
         return;
     }
 
-    in_tiles[tile_index].position = tile_index + offset;
+    in_tiles[tile_index].position = tile_index;
     in_tiles[tile_index].tape = 0;
     in_tiles[tile_index].next = -1;
 }
@@ -781,9 +779,6 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
     // Allocate an index to keep track of active tiles
     out.num_active_tiles = CUDA_MALLOC(int32_t, 1);
 
-    // Allocate a bunch of scratch space for passing intervals around
-    out.values = CUDA_MALLOC(Interval, NUM_THREADS * NUM_BLOCKS * 3);
-
     // The first array of tiles must have enough space to hold all of the
     // 64^3 tiles in the volume, which shouldn't be too much.
     out.stages[0].tiles = CUDA_MALLOC(
@@ -1011,62 +1006,56 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
     // Go the whole list of first-stage tiles, assigning each to
     // be [position, tape = 0, next = -1]
-    unsigned stride = NUM_BLOCKS * NUM_THREADS;
     unsigned count = pow(blob.image_size_px / 64, 3);
-    for (unsigned offset=0; offset < count; offset += stride) {
-        v3_preload_tiles<<<NUM_BLOCKS, NUM_THREADS>>>(
-            blob.stages[0].tiles + offset,
-            std::min(stride, count - offset),
-            offset);
-    }
+    unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+    v3_preload_tiles<<<num_blocks, NUM_THREADS>>>(
+        blob.stages[0].tiles,
+        count);
 
     // Iterate over 64^3, 16^3, 4^3 tiles
     for (unsigned i=0; i < 3; ++i) {
         //printf("BEGINNING STAGE %u\n", i);
         const unsigned tile_size_px = 64 / (1 << (i * 2));
+        const unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
 
-        // Now loop through doing evaluation, one batch at a time
-        for (unsigned offset=0; offset < count; offset += stride) {
-            /*
-            printf("    looping with offset = %u, stride = %u, count = %u\n",
-                    offset, stride, count);
-            */
-            const int active_threads = std::min(stride, count - offset);
-            const int active_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
-
-            // Unpack position values into interval X/Y/Z in the values array
-            // This is done in a separate kernel to avoid bloating the
-            // eval_tiles_i kernel with more registers, which is detrimental
-            // to occupancy.
-            v3_calculate_intervals<<<active_blocks, NUM_THREADS>>>(
-                blob.stages[i].tiles + offset,
-                active_threads,
-                blob.image_size_px / tile_size_px,
-                mat,
-                (Interval*)blob.values);
-
-            // Mark every tile which is covered in the image as masked,
-            // which means it will be skipped later on.  We do this again below,
-            // but it's basically free, so we should do it here and simplify
-            // the logic in eval_tiles_i.
-            v3_mask_filled_tiles<<<active_blocks, NUM_THREADS>>>(
-                blob.stages[i].filled,
-                blob.image_size_px / tile_size_px,
-                blob.stages[i].tiles + offset,
-                active_threads);
-
-            // Do the actual tape evaluation, which is the expensive step
-            v3_eval_tiles_i<<<active_blocks, NUM_THREADS>>>(
-                blob.tape_data,
-                blob.tape_index,
-                blob.stages[i].filled,
-                blob.image_size_px / tile_size_px,
-
-                blob.stages[i].tiles + offset,
-                active_threads,
-
-                (Interval*)blob.values);
+        if (blob.values_size < num_blocks * NUM_THREADS * 3) {
+            CUDA_FREE(blob.values);
+            blob.values = CUDA_MALLOC(Interval, num_blocks * NUM_THREADS * 3);
+            blob.values_size = num_blocks * NUM_THREADS * 3;
         }
+
+        // Unpack position values into interval X/Y/Z in the values array
+        // This is done in a separate kernel to avoid bloating the
+        // eval_tiles_i kernel with more registers, which is detrimental
+        // to occupancy.
+        v3_calculate_intervals<<<num_blocks, NUM_THREADS>>>(
+            blob.stages[i].tiles,
+            count,
+            blob.image_size_px / tile_size_px,
+            mat,
+            (Interval*)blob.values);
+
+        // Mark every tile which is covered in the image as masked,
+        // which means it will be skipped later on.  We do this again below,
+        // but it's basically free, so we should do it here and simplify
+        // the logic in eval_tiles_i.
+        v3_mask_filled_tiles<<<num_blocks, NUM_THREADS>>>(
+            blob.stages[i].filled,
+            blob.image_size_px / tile_size_px,
+            blob.stages[i].tiles,
+            count);
+
+        // Do the actual tape evaluation, which is the expensive step
+        v3_eval_tiles_i<<<num_blocks, NUM_THREADS>>>(
+            blob.tape_data,
+            blob.tape_index,
+            blob.stages[i].filled,
+            blob.image_size_px / tile_size_px,
+
+            blob.stages[i].tiles,
+            count,
+
+            (Interval*)blob.values);
 
         // Mark the total number of active tiles (from this stage) to 0
         cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
@@ -1074,23 +1063,18 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         // Now that we have evaluated every tile at this level, we do one more
         // round of occlusion culling before accumulating tiles to render at
         // the next phase.
-        for (unsigned offset=0; offset < count; offset += stride) {
-            const int active_threads = std::min(stride, count - offset);
-            const int active_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
+        v3_mask_filled_tiles<<<num_blocks, NUM_THREADS>>>(
+            blob.stages[i].filled,
+            blob.image_size_px / tile_size_px,
+            blob.stages[i].tiles,
+            count);
 
-            v3_mask_filled_tiles<<<active_blocks, NUM_THREADS>>>(
-                blob.stages[i].filled,
-                blob.image_size_px / tile_size_px,
-                blob.stages[i].tiles + offset,
-                active_threads);
-
-            // Count up active tiles, to figure out how much memory needs to be
-            // allocated in the next stage.
-            v3_assign_next_nodes<<<active_blocks, NUM_THREADS>>>(
-                blob.stages[i].tiles + offset,
-                active_threads,
-                blob.num_active_tiles);
-        }
+        // Count up active tiles, to figure out how much memory needs to be
+        // allocated in the next stage.
+        v3_assign_next_nodes<<<num_blocks, NUM_THREADS>>>(
+            blob.stages[i].tiles,
+            count,
+            blob.num_active_tiles);
 
         // Count the number of active tiles, which have been accumulated
         // through repeated calls to v3_assign_next_nodes
@@ -1111,30 +1095,20 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
         if (i < 2) {
             // Build the new tile list from active tiles in the previous list
-            for (unsigned offset=0; offset < count; offset += stride) {
-                const int active_threads = std::min(stride, count - offset);
-                const int active_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
-
-                v3_subdivide_active_tiles<<<active_blocks, NUM_THREADS>>>(
-                    blob.stages[i].tiles + offset,
-                    active_threads,
-                    blob.image_size_px / tile_size_px,
-                    blob.stages[i + 1].tiles);
-            }
+            v3_subdivide_active_tiles<<<num_blocks, NUM_THREADS>>>(
+                blob.stages[i].tiles,
+                count,
+                blob.image_size_px / tile_size_px,
+                blob.stages[i + 1].tiles);
         } else {
             // Special case for per-pixel evaluation, which
             // doesn't unpack every single pixel (since that would take up
             // 64x extra space).
-            for (unsigned offset=0; offset < count; offset += stride) {
-                const int active_threads = std::min(stride, count - offset);
-                const int active_blocks = (active_threads + NUM_THREADS - 1) / NUM_THREADS;
-
-                v3_copy_active_tiles<<<active_blocks, NUM_THREADS>>>(
-                    blob.stages[i].tiles + offset,
-                    active_threads,
-                    blob.image_size_px / tile_size_px,
-                    blob.stages[i + 1].tiles);
-            }
+            v3_copy_active_tiles<<<num_blocks, NUM_THREADS>>>(
+                blob.stages[i].tiles,
+                count,
+                blob.image_size_px / tile_size_px,
+                blob.stages[i + 1].tiles);
         }
 
         {   // Copy filled tiles into the next level's image (expanding them
@@ -1160,22 +1134,16 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     }
 
     // Time to render individual pixels!
-    stride = NUM_BLOCKS * NUM_TILES;
-    for (unsigned offset=0; offset < count; offset += stride) {
-        //printf("Rendering pixels with offset %u, count %u\n", offset, count);
-        const int active_tiles = std::min(stride, count - offset);
-        const int active_blocks = (active_tiles*64 + NUM_THREADS - 1) / NUM_THREADS;
+    num_blocks = (count*64 + NUM_THREADS - 1) / NUM_THREADS;
+    v3_eval_voxels_f<<<num_blocks, NUM_THREADS>>>(
+        blob.tape_data,
+        blob.stages[3].filled,
+        blob.image_size_px / 4,
 
-        v3_eval_voxels_f<<<active_blocks, NUM_THREADS>>>(
-            blob.tape_data,
-            blob.stages[3].filled,
-            blob.image_size_px / 4,
+        blob.stages[3].tiles,
+        count,
 
-            blob.stages[3].tiles + offset,
-            active_tiles,
-
-            mat);
-    }
+        mat);
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 

@@ -32,6 +32,7 @@ struct v3_blob_t {
     int32_t* num_active_tiles;  // GPU-allocated count of active tiles
 
     void* values; // Used to pass data around
+    int32_t values_size;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
