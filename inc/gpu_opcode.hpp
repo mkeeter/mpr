@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <cuda_runtime.h>
 
 enum GPUOp {
