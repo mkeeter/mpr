@@ -11,7 +11,7 @@
 
 // No need for parameters.hpp, we want to compile faster
 // (without rebuilding everything else)
-#define NUM_TILES (2)
+#define NUM_TILES (4)
 #define NUM_THREADS (64 * NUM_TILES)
 #define NUM_BLOCKS (512)
 #define SUBTAPE_CHUNK_SIZE 64
