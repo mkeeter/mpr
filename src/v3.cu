@@ -610,80 +610,29 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
-void v3_find_pixel_tapes(const int32_t* const __restrict__ image,
-                         int32_t* const __restrict__ tapes,
-                         const uint32_t image_size_px,
-                         const v3_tile_node_t* const __restrict__ tiles,
-                         const v3_tile_node_t* const __restrict__ subtiles,
-                         const v3_tile_node_t* const __restrict__ microtiles)
-{
-    const int32_t px = threadIdx.x + blockIdx.x * blockDim.x;
-    const int32_t py = threadIdx.x + blockIdx.x * blockDim.x;
-    if (px >= image_size_px || py >= image_size_px) {
-        return;
-    }
-
-    const int32_t pz = image[px + py * image_size_px];
-    if (pz == 0) {
-        return;
-    }
-
-    const int32_t tile_x = px / 64;
-    const int32_t tile_y = py / 64;
-    const int32_t tile_z = pz / 64;
-    const int32_t tile = tile_x +
-                         tile_y * (image_size_px / 64) +
-                         tile_z * (image_size_px / 64) * (image_size_px / 64);
-
-    if (tiles[tile].next == -1) {
-        tapes[px + py * image_size_px] = tiles[tile].tape;
-        return;
-    }
-
-    const int32_t sx = (px % 64) / 16;
-    const int32_t sy = (py % 64) / 16;
-    const int32_t sz = (pz % 64) / 16;
-    const int32_t subtile = tiles[tile].next * 64 +
-                            sx +
-                            sy * 4 +
-                            sz * 16;
-
-    if (subtiles[subtile].next == -1) {
-        tapes[px + py * image_size_px] = subtiles[subtile].tape;
-        return;
-    }
-
-    const int32_t ux = (px % 16) / 4;
-    const int32_t uy = (py % 16) / 4;
-    const int32_t uz = (pz % 16) / 4;
-    const int32_t microtile = subtiles[subtile].next * 64 +
-                            ux +
-                            uy * 4 +
-                            uz * 16;
-
-    tapes[px + py * image_size_px] = microtiles[microtile].tape;
-}
-
-__global__
 void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
-                      int32_t* const __restrict__ image,
-                      const int32_t* const __restrict__ pixel_tapes,
+                      const int32_t* const __restrict__ image,
                       uint32_t* const __restrict__ output,
                       const uint32_t image_size_px,
 
-                      Eigen::Matrix4f mat)
+                      Eigen::Matrix4f mat,
+
+                      const v3_tile_node_t* const __restrict__ tiles,
+                      const v3_tile_node_t* const __restrict__ subtiles,
+                      const v3_tile_node_t* const __restrict__ microtiles)
 {
     const int32_t px = threadIdx.x + blockIdx.x * blockDim.x;
-    const int32_t py = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t py = threadIdx.y + blockIdx.y * blockDim.y;
     if (px >= image_size_px || py >= image_size_px) {
         return;
     }
 
     const int32_t pxy = px + py * image_size_px;
-    const int32_t pz = image[pxy];
+    int32_t pz = image[pxy];
     if (pz == 0) {
         return;
     }
+    pz += 1; // Move slightly in front of the surface
 
     Deriv slots[128];
 
@@ -709,8 +658,42 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
         slots[((const uint8_t*)tape_data)[3]].v.z = 1.0f;
     }
 
-    // Pick out the tape based on the pointer stored in the tiles list
-    const uint64_t* __restrict__ data = &tape_data[pixel_tapes[pxy]];
+
+    const uint64_t* __restrict__ data = tape_data;
+
+    {   // Pick out the tape based on the pointer stored in the tiles list
+        const int32_t tile_x = px / 64;
+        const int32_t tile_y = py / 64;
+        const int32_t tile_z = pz / 64;
+        const int32_t tile = tile_x +
+                             tile_y * (image_size_px / 64) +
+                             tile_z * (image_size_px / 64) * (image_size_px / 64);
+
+        if (tiles[tile].next == -1) {
+            data = &tape_data[tiles[tile].tape];
+        } else {
+            const int32_t sx = (px % 64) / 16;
+            const int32_t sy = (py % 64) / 16;
+            const int32_t sz = (pz % 64) / 16;
+            const int32_t subtile = tiles[tile].next * 64 +
+                                    sx +
+                                    sy * 4 +
+                                    sz * 16;
+
+            if (subtiles[subtile].next == -1) {
+                data = &tape_data[subtiles[subtile].tape];
+            } else {
+                const int32_t ux = (px % 16) / 4;
+                const int32_t uy = (py % 16) / 4;
+                const int32_t uz = (pz % 16) / 4;
+                const int32_t microtile = subtiles[subtile].next * 64 +
+                                        ux +
+                                        uy * 4 +
+                                        uz * 16;
+                data = &tape_data[microtiles[microtile].tape];
+            }
+        }
+    }
 
     while (OP(++data)) {
         switch (OP(data)) {
@@ -787,6 +770,7 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
     }
 
     out.image_size_px = image_size_px;
+    out.normals = CUDA_MALLOC(uint32_t, image_size_px * image_size_px);
 
     out.tape_data = CUDA_MALLOC(uint64_t, NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE);
     out.tape_index = CUDA_MALLOC(int32_t, 1);
@@ -997,6 +981,7 @@ void free_v3_blob(v3_blob_t& blob) {
         CUDA_FREE(blob.stages[i].filled);
         CUDA_FREE(blob.stages[i].tiles);
     }
+    CUDA_FREE(blob.normals);
 
     CUDA_FREE(blob.tape_data);
     CUDA_FREE(blob.tape_index);
@@ -1022,6 +1007,8 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         CUDA_CHECK(cudaMemset(blob.stages[i].filled, 0, sizeof(int32_t) *
                               pow(blob.image_size_px / tile_size_px, 2)));
     }
+    CUDA_CHECK(cudaMemset(blob.normals, 0, sizeof(uint32_t) *
+                          pow(blob.image_size_px, 2)));
 
     // Go the whole list of first-stage tiles, assigning each to
     // be [position, tape = 0, next = -1]
@@ -1163,6 +1150,20 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         count,
 
         mat);
+
+    {   // Then render normals into those pixels
+        const uint32_t u = ((blob.image_size_px + 15) / 16);
+        v3_eval_pixels_d<<<dim3(u, u), dim3(16, 16)>>>(
+                blob.tape_data,
+                blob.stages[3].filled,
+                blob.normals,
+                blob.image_size_px,
+                mat,
+                blob.stages[0].tiles,
+                blob.stages[1].tiles,
+                blob.stages[2].tiles);
+    }
+
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 

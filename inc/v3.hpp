@@ -33,6 +33,8 @@ struct v3_blob_t {
 
     void* values; // Used to pass data around
     int32_t values_size;
+
+    uint32_t* normals;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
