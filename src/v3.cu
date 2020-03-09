@@ -157,7 +157,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
             case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
 
 #define CHOICE(f, a, b) {                                           \
-    uint8_t c = 0;                                                  \
+    int c = 0;                                                      \
     out = f(a, b, c);                                               \
     choices[choice_index / 16] |= (c << ((choice_index % 16) * 2)); \
     choice_index++;                                                 \
@@ -266,7 +266,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
         assert(!has_choice || choice_index >= 0);
 
-        const uint8_t choice = has_choice
+        const int choice = has_choice
             ? ((choices[choice_index / 16] >>
               ((choice_index % 16) * 2)) & 3)
             : 0;

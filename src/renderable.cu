@@ -74,7 +74,7 @@ __device__ void storeAxes(const uint32_t tile,
 }
 
 template <typename A, typename B>
-__device__ inline IntervalType intervalOp(uint8_t op, A lhs, B rhs, uint8_t& choice)
+__device__ inline IntervalType intervalOp(uint8_t op, A lhs, B rhs, int& choice)
 {
     using namespace libfive::Opcode;
     switch (op) {
@@ -172,7 +172,7 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
 
         const Clause c = clause_ptr[i];
         IntervalType out;
-        uint8_t choice = 0;
+        int choice = 0;
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<IntervalType, IntervalType>(c.opcode,
@@ -254,7 +254,7 @@ TileResult TileRenderer<TILE_SIZE_PX, DIMENSION>::check(
         using namespace libfive::Opcode;
         Clause c = clause_ptr[num_clauses - i - 1];
 
-        uint8_t choice = 0;
+        int choice = 0;
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             --choice_index;
             choice = (choices[choice_index / 16] >> ((choice_index % 16) * 2)) & 3;
@@ -420,7 +420,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         const Clause c = tape[s++];
 
         IntervalType out;
-        uint8_t choice = 0;
+        int choice = 0;
         switch (c.banks) {
             case 0: // Interval op Interval
                 out = intervalOp<IntervalType, IntervalType>(c.opcode,
@@ -532,7 +532,7 @@ TileResult SubtileRenderer<TILE_SIZE_PX, SUBTILE_SIZE_PX, DIMENSION>::check(
         }
         Clause c = in_tape[--in_s];
 
-        uint8_t choice = 0;
+        int choice = 0;
         if (c.opcode == OP_MIN || c.opcode == OP_MAX) {
             --choice_index;
             choice = (choices[choice_index / 16] >> ((choice_index % 16) * 2)) & 3;

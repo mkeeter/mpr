@@ -163,7 +163,7 @@ FUNCTION_PREAMBLE_LHS_IMM(min, float, f)
     slots[i_out] = fminf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_IMM(min, Interval, i)
-    uint8_t choice = 0;
+    int choice = 0;
     slots[i_out] = min(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -171,7 +171,7 @@ FUNCTION_PREAMBLE_LHS_RHS(min, float, f)
     slots[i_out] = fminf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_RHS(min, Interval, i)
-    uint8_t choice = 0;
+    int choice = 0;
     slots[i_out] = min(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -180,7 +180,7 @@ FUNCTION_PREAMBLE_LHS_IMM(max, float, f)
     slots[i_out] = fmaxf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_IMM(max, Interval, i)
-    uint8_t choice = 0;
+    int choice = 0;
     slots[i_out] = max(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -188,7 +188,7 @@ FUNCTION_PREAMBLE_LHS_RHS(max, float, f)
     slots[i_out] = fmaxf(lhs, rhs);
 }
 FUNCTION_PREAMBLE_LHS_RHS(max, Interval, i)
-    uint8_t choice = 0;
+    int choice = 0;
     slots[i_out] = max(lhs, rhs, choice);
     slots[0].v.x = choice;
 }
@@ -457,7 +457,7 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
         }
         // If this opcode makes a choice, then append that choice to the list
         if (OP(data) >= GPU_OP_MIN_LHS_IMM && OP(data) <= GPU_OP_MAX_LHS_RHS) {
-            const uint8_t choice = slots[0].v.x;
+            const int choice = slots[0].v.x;
             choices[choice_index / 16] |= (choice << ((choice_index % 16) * 2));
             choice_index++;
             has_any_choice |= (choice != 0);
@@ -525,7 +525,7 @@ void v2_exec_universal(uint64_t* const __restrict__ tape_data,
             continue;
         }
 
-        uint8_t choice = 0;
+        int choice = 0;
         if (op >= GPU_OP_MIN_LHS_IMM && op <= GPU_OP_MAX_LHS_RHS) {
             --choice_index;
             choice = (choices[choice_index / 16] >>

@@ -192,7 +192,7 @@ __device__ inline Interval operator/(const float& x, const Interval& y) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Interval min(const Interval& x, const Interval& y, uint8_t& choice) {
+__device__ inline Interval min(const Interval& x, const Interval& y, int& choice) {
     if (x.upper() < y.lower()) {
         choice = 1;
         return x;
@@ -203,7 +203,7 @@ __device__ inline Interval min(const Interval& x, const Interval& y, uint8_t& ch
     return {fminf(x.lower(), y.lower()), fminf(x.upper(), y.upper())};
 }
 
-__device__ inline Interval min(const Interval& x, const float& y, uint8_t& choice) {
+__device__ inline Interval min(const Interval& x, const float& y, int& choice) {
     if (x.upper() < y) {
         choice = 1;
         return x;
@@ -214,7 +214,7 @@ __device__ inline Interval min(const Interval& x, const float& y, uint8_t& choic
     return {fminf(x.lower(), y), fminf(x.upper(), y)};
 }
 
-__device__ inline Interval min(const float& x, const Interval& y, uint8_t& choice) {
+__device__ inline Interval min(const float& x, const Interval& y, int& choice) {
     if (x < y.lower()) {
         choice = 1;
         return Interval(x);
@@ -225,7 +225,7 @@ __device__ inline Interval min(const float& x, const Interval& y, uint8_t& choic
     return {fminf(x, y.lower()), fminf(x, y.upper())};
 }
 
-__device__ inline Interval min(const float& x, const float& y, uint8_t& choice) {
+__device__ inline Interval min(const float& x, const float& y, int& choice) {
     if (x < y) {
         choice = 1;
         return Interval(x);
@@ -238,7 +238,7 @@ __device__ inline Interval min(const float& x, const float& y, uint8_t& choice) 
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__device__ inline Interval max(const Interval& x, const Interval& y, uint8_t& choice) {
+__device__ inline Interval max(const Interval& x, const Interval& y, int& choice) {
     if (x.lower() > y.upper()) {
         choice = 1;
         return x;
@@ -249,7 +249,7 @@ __device__ inline Interval max(const Interval& x, const Interval& y, uint8_t& ch
     return {fmaxf(x.lower(), y.lower()), fmaxf(x.upper(), y.upper())};
 }
 
-__device__ inline Interval max(const Interval& x, const float& y, uint8_t& choice) {
+__device__ inline Interval max(const Interval& x, const float& y, int& choice) {
     if (x.lower() > y) {
         choice = 1;
         return x;
@@ -260,7 +260,7 @@ __device__ inline Interval max(const Interval& x, const float& y, uint8_t& choic
     return {fmaxf(x.lower(), y), fmaxf(x.upper(), y)};
 }
 
-__device__ inline Interval max(const float& x, const Interval& y, uint8_t& choice) {
+__device__ inline Interval max(const float& x, const Interval& y, int& choice) {
     if (x > y.upper()) {
         choice = 1;
         return Interval(x);
@@ -271,7 +271,7 @@ __device__ inline Interval max(const float& x, const Interval& y, uint8_t& choic
     return {fmaxf(x, y.lower()), fmaxf(x, y.upper())};
 }
 
-__device__ inline Interval max(const float& x, const float& y, uint8_t& choice) {
+__device__ inline Interval max(const float& x, const float& y, int& choice) {
     if (x > y) {
         choice = 1;
         return Interval(x);
