@@ -4,6 +4,7 @@
 
 #include "v3.hpp"
 #include "check.hpp"
+#include "gpu_deriv.hpp"
 #include "gpu_interval.hpp"
 #include "gpu_opcode.hpp"
 
@@ -606,6 +607,172 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+__global__
+void v3_find_pixel_tapes(const int32_t* const __restrict__ image,
+                         int32_t* const __restrict__ tapes,
+                         const uint32_t image_size_px,
+                         const v3_tile_node_t* const __restrict__ tiles,
+                         const v3_tile_node_t* const __restrict__ subtiles,
+                         const v3_tile_node_t* const __restrict__ microtiles)
+{
+    const int32_t px = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t py = threadIdx.x + blockIdx.x * blockDim.x;
+    if (px >= image_size_px || py >= image_size_px) {
+        return;
+    }
+
+    const int32_t pz = image[px + py * image_size_px];
+    if (pz == 0) {
+        return;
+    }
+
+    const int32_t tile_x = px / 64;
+    const int32_t tile_y = py / 64;
+    const int32_t tile_z = pz / 64;
+    const int32_t tile = tile_x +
+                         tile_y * (image_size_px / 64) +
+                         tile_z * (image_size_px / 64) * (image_size_px / 64);
+
+    if (tiles[tile].next == -1) {
+        tapes[px + py * image_size_px] = tiles[tile].tape;
+        return;
+    }
+
+    const int32_t sx = (px % 64) / 16;
+    const int32_t sy = (py % 64) / 16;
+    const int32_t sz = (pz % 64) / 16;
+    const int32_t subtile = tiles[tile].next * 64 +
+                            sx +
+                            sy * 4 +
+                            sz * 16;
+
+    if (subtiles[subtile].next == -1) {
+        tapes[px + py * image_size_px] = subtiles[subtile].tape;
+        return;
+    }
+
+    const int32_t ux = (px % 16) / 4;
+    const int32_t uy = (py % 16) / 4;
+    const int32_t uz = (pz % 16) / 4;
+    const int32_t microtile = subtiles[subtile].next * 64 +
+                            ux +
+                            uy * 4 +
+                            uz * 16;
+
+    tapes[px + py * image_size_px] = microtiles[microtile].tape;
+}
+
+__global__
+void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
+                      int32_t* const __restrict__ image,
+                      const int32_t* const __restrict__ pixel_tapes,
+                      uint32_t* const __restrict__ output,
+                      const uint32_t image_size_px,
+
+                      Eigen::Matrix4f mat)
+{
+    const int32_t px = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t py = threadIdx.x + blockIdx.x * blockDim.x;
+    if (px >= image_size_px || py >= image_size_px) {
+        return;
+    }
+
+    const int32_t pxy = px + py * image_size_px;
+    const int32_t pz = image[pxy];
+    if (pz == 0) {
+        return;
+    }
+
+    Deriv slots[128];
+
+    {   // Calculate size and load into initial slots
+        const float size_recip = 1.0f / image_size_px;
+
+        const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+        const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
+        const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+        // Otherwise, calculate the X/Y/Z values
+        const float fw_ = mat(3, 0) * fx +
+                          mat(3, 1) * fy +
+                          mat(3, 2) * fz + mat(3, 3);
+        for (unsigned i=0; i < 3; ++i) {
+            slots[((const uint8_t*)tape_data)[i + 1]] =
+                (mat(i, 0) * fx +
+                 mat(i, 1) * fy +
+                 mat(i, 2) * fz + mat(0, 3)) / fw_;
+        }
+        slots[((const uint8_t*)tape_data)[1]].v.x = 1.0f;
+        slots[((const uint8_t*)tape_data)[2]].v.y = 1.0f;
+        slots[((const uint8_t*)tape_data)[3]].v.z = 1.0f;
+    }
+
+    // Pick out the tape based on the pointer stored in the tiles list
+    const uint64_t* __restrict__ data = &tape_data[pixel_tapes[pxy]];
+
+    while (OP(++data)) {
+        switch (OP(data)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
+
+#define lhs slots[I_LHS(data)]
+#define rhs slots[I_RHS(data)]
+#define imm Deriv(IMM(data))
+#define out slots[I_OUT(data)]
+
+            case GPU_OP_SQUARE_LHS: out = lhs * lhs; break;
+            case GPU_OP_SQRT_LHS: out = sqrt(lhs); break;
+            case GPU_OP_NEG_LHS: out = -lhs; break;
+            case GPU_OP_SIN_LHS: out = sin(lhs); break;
+            case GPU_OP_COS_LHS: out = cos(lhs); break;
+            case GPU_OP_ASIN_LHS: out = asin(lhs); break;
+            case GPU_OP_ACOS_LHS: out = acos(lhs); break;
+            case GPU_OP_ATAN_LHS: out = atan(lhs); break;
+            case GPU_OP_EXP_LHS: out = exp(lhs); break;
+            case GPU_OP_ABS_LHS: out = abs(lhs); break;
+            case GPU_OP_LOG_LHS: out = log(lhs); break;
+
+            // Commutative opcodes
+            case GPU_OP_ADD_LHS_IMM: out = lhs + imm; break;
+            case GPU_OP_ADD_LHS_RHS: out = lhs + rhs; break;
+            case GPU_OP_MUL_LHS_IMM: out = lhs * imm; break;
+            case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
+            case GPU_OP_MIN_LHS_IMM: out = min(lhs, imm); break;
+            case GPU_OP_MIN_LHS_RHS: out = min(lhs, rhs); break;
+            case GPU_OP_MAX_LHS_IMM: out = max(lhs, imm); break;
+            case GPU_OP_MAX_LHS_RHS: out = max(lhs, rhs); break;
+
+            // Non-commutative opcodes
+            case GPU_OP_SUB_LHS_IMM: out = lhs - imm; break;
+            case GPU_OP_SUB_IMM_RHS: out = imm - rhs; break;
+            case GPU_OP_SUB_LHS_RHS: out = lhs - rhs; break;
+
+            case GPU_OP_DIV_LHS_IMM: out = lhs / imm; break;
+            case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
+            case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
+
+            case GPU_OP_COPY_IMM: out = imm; break;
+            case GPU_OP_COPY_LHS: out = lhs; break;
+            case GPU_OP_COPY_RHS: out = rhs; break;
+
+#undef lhs
+#undef rhs
+#undef imm
+#undef out
+        }
+    }
+
+    const uint8_t i_out = I_OUT(data);
+    const Deriv result = slots[i_out];
+    float norm = sqrtf(powf(result.dx(), 2) +
+                       powf(result.dy(), 2) +
+                       powf(result.dz(), 2));
+    uint8_t dx = (result.dx() / norm) * 127 + 128;
+    uint8_t dy = (result.dy() / norm) * 127 + 128;
+    uint8_t dz = (result.dz() / norm) * 127 + 128;
+    output[pxy] = (0xFF << 24) | (dz << 16) | (dy << 8) | dx;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
