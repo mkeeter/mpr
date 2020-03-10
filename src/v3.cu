@@ -487,60 +487,105 @@ void v3_copy_filled(const int32_t* __restrict__ prev,
 ////////////////////////////////////////////////////////////////////////////////
 
 __global__
+void v3_calculate_voxels(const v3_tile_node_t* const __restrict__ in_tiles,
+                         const uint32_t in_tile_count,
+                         const uint32_t tiles_per_side,
+                         const Eigen::Matrix4f mat,
+                         float2* const __restrict__ values)
+{
+    // Each tile is executed by 32 threads (one for each pair of voxels).
+    //
+    // This is different from the v3_eval_tiles_i function, which evaluates one
+    // tile per thread, because the tiles are already expanded by 64x by the
+    // time they're stored in the in_tiles list.
+    const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = voxel_index / 32;
+
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    const int4 sub = unpack(threadIdx.x % 32, 4);
+
+    const int32_t px = pos.x * 4 + sub.x;
+    const int32_t py = pos.y * 4 + sub.y;
+    const int32_t pz_a = pos.z * 4 + sub.z;
+
+    const float size_recip = 1.0f / (tiles_per_side * 4);
+
+    const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fz_a = ((pz_a + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+    // Otherwise, calculate the X/Y/Z values
+    const float fw_a = mat(3, 0) * fx +
+                       mat(3, 1) * fy +
+                       mat(3, 2) * fz_a + mat(3, 3);
+    for (unsigned i=0; i < 3; ++i) {
+        values[voxel_index * 3 + i].x =
+            (mat(i, 0) * fx +
+             mat(i, 1) * fy +
+             mat(i, 2) * fz_a + mat(i, 3)) / fw_a;
+    }
+
+    // Do the same calculation for the second pixel
+    const int32_t pz_b = pos.z * 4 + sub.z + 2;
+    const float fz_b = ((pz_b + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fw_b = mat(3, 0) * fx +
+                       mat(3, 1) * fy +
+                       mat(3, 2) * fz_b + mat(3, 3);
+
+    for (unsigned i=0; i < 3; ++i) {
+        values[voxel_index * 3 + i].y =
+            (mat(i, 0) * fx +
+             mat(i, 1) * fy +
+             mat(i, 2) * fz_b + mat(i, 3)) / fw_b;
+    }
+}
+
+__global__
 void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
                       int32_t* const __restrict__ image,
                       const uint32_t tiles_per_side,
 
                       v3_tile_node_t* const __restrict__ in_tiles,
                       const int32_t in_tile_count,
-                      Eigen::Matrix4f mat)
+
+                      const float2* const __restrict__ values)
 {
-    // Each tile is executed by 64 threads (one for each voxel).
+    // Each tile is executed by 32 threads (one for each pair of voxels, so
+    // we can do all of our load/stores as float2s and make memory happier).
     //
     // This is different from the v3_eval_tiles_i function, which evaluates one
     // tile per thread, because the tiles are already expanded by 64x by the
     // time they're stored in the in_tiles list.
     const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
-    const int32_t tile_index = voxel_index / 64;
+    const int32_t tile_index = voxel_index / 32;
     if (tile_index >= in_tile_count) {
         return;
     }
 
-    float slots[128];
-
     {   // Load values into registers, subdividing by 4x on each axis
         const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-        const int4 sub = unpack(threadIdx.x % 64, 4);
+        const int4 sub = unpack(threadIdx.x % 32, 4);
 
         const int32_t px = pos.x * 4 + sub.x;
         const int32_t py = pos.y * 4 + sub.y;
         const int32_t pz = pos.z * 4 + sub.z;
 
         // Early return if this pixel won't ever be filled
-        if (image[px + py * tiles_per_side * 4] >= pz) {
+        if (image[px + py * tiles_per_side * 4] >= pz + 2) {
             return;
-        }
-
-        const float size_recip = 1.0f / (tiles_per_side * 4);
-
-        const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
-        const float fy = ((py + 0.5f) * size_recip - 0.5f) * 2.0f;
-        const float fz = ((pz + 0.5f) * size_recip - 0.5f) * 2.0f;
-
-        // Otherwise, calculate the X/Y/Z values
-        const float fw_ = mat(3, 0) * fx +
-                          mat(3, 1) * fy +
-                          mat(3, 2) * fz + mat(3, 3);
-        for (unsigned i=0; i < 3; ++i) {
-            slots[((const uint8_t*)tape_data)[i + 1]] =
-                (mat(i, 0) * fx +
-                 mat(i, 1) * fy +
-                 mat(i, 2) * fz + mat(0, 3)) / fw_;
         }
     }
 
+    float2 slots[128];
+
     // Pick out the tape based on the pointer stored in the tiles list
     const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
+    slots[((const uint8_t*)tape_data)[1]] = values[voxel_index * 3];
+    slots[((const uint8_t*)tape_data)[2]] = values[voxel_index * 3 + 1];
+    slots[((const uint8_t*)tape_data)[3]] = values[voxel_index * 3 + 2];
 
     while (OP(++data)) {
         switch (OP(data)) {
@@ -551,40 +596,40 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
 #define imm IMM(data)
 #define out slots[I_OUT(data)]
 
-            case GPU_OP_SQUARE_LHS: out = lhs * lhs; break;
-            case GPU_OP_SQRT_LHS: out = sqrtf(lhs); break;
-            case GPU_OP_NEG_LHS: out = -lhs; break;
-            case GPU_OP_SIN_LHS: out = sinf(lhs); break;
-            case GPU_OP_COS_LHS: out = cosf(lhs); break;
-            case GPU_OP_ASIN_LHS: out = asinf(lhs); break;
-            case GPU_OP_ACOS_LHS: out = acosf(lhs); break;
-            case GPU_OP_ATAN_LHS: out = atanf(lhs); break;
-            case GPU_OP_EXP_LHS: out = expf(lhs); break;
-            case GPU_OP_ABS_LHS: out = fabsf(lhs); break;
-            case GPU_OP_LOG_LHS: out = logf(lhs); break;
+            case GPU_OP_SQUARE_LHS: out = make_float2(lhs.x * lhs.x, lhs.y * lhs.y); break;
+            case GPU_OP_SQRT_LHS: out = make_float2(sqrtf(lhs.x), sqrtf(lhs.y)); break;
+            case GPU_OP_NEG_LHS: out = make_float2(-lhs.x, -lhs.y); break;
+            case GPU_OP_SIN_LHS: out = make_float2(sinf(lhs.x), sinf(lhs.y)); break;
+            case GPU_OP_COS_LHS: out = make_float2(cosf(lhs.x), cosf(lhs.y)); break;
+            case GPU_OP_ASIN_LHS: out = make_float2(asinf(lhs.x), asinf(lhs.y)); break;
+            case GPU_OP_ACOS_LHS: out = make_float2(acosf(lhs.x), acosf(lhs.y)); break;
+            case GPU_OP_ATAN_LHS: out = make_float2(atanf(lhs.x), atanf(lhs.y)); break;
+            case GPU_OP_EXP_LHS: out = make_float2(expf(lhs.x), expf(lhs.y)); break;
+            case GPU_OP_ABS_LHS: out = make_float2(fabsf(lhs.x), fabsf(lhs.y)); break;
+            case GPU_OP_LOG_LHS: out = make_float2(logf(lhs.x), logf(lhs.y)); break;
 
             // Commutative opcodes
-            case GPU_OP_ADD_LHS_IMM: out = lhs + imm; break;
-            case GPU_OP_ADD_LHS_RHS: out = lhs + rhs; break;
-            case GPU_OP_MUL_LHS_IMM: out = lhs * imm; break;
-            case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
-            case GPU_OP_MIN_LHS_IMM: out = fminf(lhs, imm); break;
-            case GPU_OP_MIN_LHS_RHS: out = fminf(lhs, rhs); break;
-            case GPU_OP_MAX_LHS_IMM: out = fmaxf(lhs, imm); break;
-            case GPU_OP_MAX_LHS_RHS: out = fmaxf(lhs, rhs); break;
+            case GPU_OP_ADD_LHS_IMM: out = make_float2(lhs.x + imm, lhs.y + imm); break;
+            case GPU_OP_ADD_LHS_RHS: out = make_float2(lhs.x + rhs.x, lhs.y + rhs.y); break;
+            case GPU_OP_MUL_LHS_IMM: out = make_float2(lhs.x * imm, lhs.y * imm); break;
+            case GPU_OP_MUL_LHS_RHS: out = make_float2(lhs.x * rhs.x, lhs.y * rhs.y); break;
+            case GPU_OP_MIN_LHS_IMM: out = make_float2(fminf(lhs.x, imm), fminf(lhs.y, imm)); break;
+            case GPU_OP_MIN_LHS_RHS: out = make_float2(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y)); break;
+            case GPU_OP_MAX_LHS_IMM: out = make_float2(fmaxf(lhs.x, imm), fmaxf(lhs.y, imm)); break;
+            case GPU_OP_MAX_LHS_RHS: out = make_float2(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y)); break;
 
             // Non-commutative opcodes
-            case GPU_OP_SUB_LHS_IMM: out = lhs - imm; break;
-            case GPU_OP_SUB_IMM_RHS: out = imm - rhs; break;
-            case GPU_OP_SUB_LHS_RHS: out = lhs - rhs; break;
+            case GPU_OP_SUB_LHS_IMM: out = make_float2(lhs.x - imm, lhs.y - imm); break;
+            case GPU_OP_SUB_IMM_RHS: out = make_float2(imm - rhs.x, imm - rhs.y); break;
+            case GPU_OP_SUB_LHS_RHS: out = make_float2(lhs.x - rhs.x, lhs.y - rhs.y); break;
 
-            case GPU_OP_DIV_LHS_IMM: out = lhs / imm; break;
-            case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
-            case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
+            case GPU_OP_DIV_LHS_IMM: out = make_float2(lhs.x / imm, lhs.y / imm); break;
+            case GPU_OP_DIV_IMM_RHS: out = make_float2(imm / rhs.x, imm / rhs.y); break;
+            case GPU_OP_DIV_LHS_RHS: out = make_float2(lhs.x / rhs.x, lhs.y / rhs.y); break;
 
-            case GPU_OP_COPY_IMM: out = imm; break;
-            case GPU_OP_COPY_LHS: out = lhs; break;
-            case GPU_OP_COPY_RHS: out = rhs; break;
+            case GPU_OP_COPY_IMM: out = make_float2(imm, imm); break;
+            case GPU_OP_COPY_LHS: out = make_float2(lhs.x, lhs.y); break;
+            case GPU_OP_COPY_RHS: out = make_float2(rhs.x, rhs.y); break;
 
 #undef lhs
 #undef rhs
@@ -595,9 +640,19 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
 
     // Check the result
     const uint8_t i_out = I_OUT(data);
-    if (slots[i_out] < 0.0f) {
+
+    // The second voxel is always higher in Z, so it masks the lower voxel
+    if (slots[i_out].y < 0.0f) {
         const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-        const int4 sub = unpack(threadIdx.x % 64, 4);
+        const int4 sub = unpack(threadIdx.x % 32, 4);
+        const int32_t px = pos.x * 4 + sub.x;
+        const int32_t py = pos.y * 4 + sub.y;
+        const int32_t pz = pos.z * 4 + sub.z + 2;
+
+        atomicMax(&image[px + py * tiles_per_side * 4], pz);
+    } else if (slots[i_out].x < 0.0f) {
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        const int4 sub = unpack(threadIdx.x % 32, 4);
         const int32_t px = pos.x * 4 + sub.x;
         const int32_t py = pos.y * 4 + sub.y;
         const int32_t pz = pos.z * 4 + sub.z;
@@ -960,6 +1015,7 @@ v3_blob_t build_v3_blob(libfive::Tree tree, const int32_t image_size_px) {
         I_OUT(&clause) = getSlot(c.id());
         flat.push_back(clause);
     }
+
     {   // Push the end of the tape, which points to the final clauses's
         // output slot so that we know where to read the result.
         uint64_t end = 0;
@@ -1139,8 +1195,20 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
     }
 
     // Time to render individual pixels!
-    num_blocks = (count*64 + NUM_THREADS - 1) / NUM_THREADS;
-    v3_eval_voxels_f<<<num_blocks, NUM_THREADS>>>(
+    num_blocks = (count + NUM_TILES - 1) / NUM_TILES;
+    const size_t num_values = num_blocks * NUM_TILES * 32 * 3;
+    if (blob.values_size < num_values) {
+        CUDA_FREE(blob.values);
+        blob.values = CUDA_MALLOC(float2, num_values);
+        blob.values_size = num_values;
+    }
+    v3_calculate_voxels<<<num_blocks, NUM_TILES * 32>>>(
+        blob.stages[3].tiles,
+        count,
+        blob.image_size_px / 4,
+        mat,
+        (float2*)blob.values);
+    v3_eval_voxels_f<<<num_blocks, NUM_TILES * 32>>>(
         blob.tape_data,
         blob.stages[3].filled,
         blob.image_size_px / 4,
@@ -1148,7 +1216,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         blob.stages[3].tiles,
         count,
 
-        mat);
+        (float2*)blob.values);
 
     {   // Then render normals into those pixels
         const uint32_t u = ((blob.image_size_px + 15) / 16);
