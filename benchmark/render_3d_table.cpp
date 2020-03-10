@@ -105,7 +105,7 @@ int main(int argc, char **argv)
     for (auto size: sizes) {
         auto r = Renderable::build(t, size, 3);
         std::cout << size << " ";
-        get_stats([&](){r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);});
+        get_stats([&](){r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_SHADED);});
 
         libfive::Heightmap out(size, size);
         for (int x=0; x < size; ++x) {
