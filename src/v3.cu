@@ -128,7 +128,6 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
     int choice_index = 0;
     bool has_any_choice = false;
 
-    Interval out;
     while (OP(++data)) {
         switch (OP(data)) {
             case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
