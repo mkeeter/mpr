@@ -247,8 +247,11 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
     out_offset--;
     tape_data[out_index + out_offset] = *data;
 
-    while (OP(--data)) {
-        uint64_t d = *data;
+    while (1) {
+        uint64_t d = *--data;
+        if (!OP(&d)) {
+            break;
+        }
         const uint8_t op = OP(&d);
         if (op == GPU_OP_JUMP) {
             data += JUMP_TARGET(&d);
