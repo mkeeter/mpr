@@ -248,9 +248,10 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
     tape_data[out_index + out_offset] = *data;
 
     while (OP(--data)) {
-        const uint8_t op = OP(data);
+        uint64_t d = *data;
+        const uint8_t op = OP(&d);
         if (op == GPU_OP_JUMP) {
-            data += JUMP_TARGET(data);
+            data += JUMP_TARGET(&d);
             continue;
         }
 
@@ -258,7 +259,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
                                 op <= GPU_OP_MAX_LHS_RHS;
         choice_index -= has_choice;
 
-        const uint8_t i_out = I_OUT(data);
+        const uint8_t i_out = I_OUT(&d);
         if (!active[i_out]) {
             continue;
         }
@@ -297,39 +298,41 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
         }
 
         active[i_out] = false;
-        tape_data[out_index + out_offset] = *data;
         if (choice == 0) {
-            const uint8_t i_lhs = I_LHS(data);
+            const uint8_t i_lhs = I_LHS(&d);
             if (i_lhs) {
                 active[i_lhs] = true;
             }
-            const uint8_t i_rhs = I_RHS(data);
+            const uint8_t i_rhs = I_RHS(&d);
             if (i_rhs) {
                 active[i_rhs] = true;
             }
         } else if (choice == 1 /* LHS */) {
             // The non-immediate is always the LHS in commutative ops, and
             // min/max (the only clauses that produce a choice) are commutative
-            const uint8_t i_lhs = I_LHS(data);
+            const uint8_t i_lhs = I_LHS(&d);
+            active[i_lhs] = true;
             if (i_lhs == i_out) {
                 ++out_offset;
+                continue;
             } else {
-                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_LHS;
+                OP(&d) = GPU_OP_COPY_LHS;
             }
-            active[i_lhs] = true;
         } else if (choice == 2 /* RHS */) {
-            const uint8_t i_rhs = I_RHS(data);
+            const uint8_t i_rhs = I_RHS(&d);
             if (i_rhs) {
+                active[i_rhs] = true;
                 if (i_rhs == i_out) {
                     ++out_offset;
+                    continue;
                 } else {
-                    OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_RHS;
+                    OP(&d) = GPU_OP_COPY_RHS;
                 }
-                active[i_rhs] = true;
             } else {
-                OP(&tape_data[out_index + out_offset]) = GPU_OP_COPY_IMM;
+                OP(&d) = GPU_OP_COPY_IMM;
             }
         }
+        tape_data[out_index + out_offset] = d;
     }
 
     // Write the beginning of the tape
