@@ -134,7 +134,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
 #define lhs slots[I_LHS(data)]
 #define rhs slots[I_RHS(data)]
-#define imm Interval{IMM(data), IMM(data)}
+#define imm IMM(data)
 #define out slots[I_OUT(data)]
 
             case GPU_OP_SQUARE_LHS: out = square(lhs); break;
@@ -176,7 +176,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
             case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
             case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
 
-            case GPU_OP_COPY_IMM: out = imm; break;
+            case GPU_OP_COPY_IMM: out = Interval(imm); break;
             case GPU_OP_COPY_LHS: out = lhs; break;
             case GPU_OP_COPY_RHS: out = rhs; break;
 
