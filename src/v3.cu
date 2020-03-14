@@ -128,14 +128,18 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
     int choice_index = 0;
     bool has_any_choice = false;
 
-    while (OP(++data)) {
-        switch (OP(data)) {
-            case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
+    while (1) {
+        const uint64_t d = *++data;
+        if (!OP(&d)) {
+            break;
+        }
+        switch (OP(&d)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(&d); continue;
 
-#define lhs slots[I_LHS(data)]
-#define rhs slots[I_RHS(data)]
-#define imm IMM(data)
-#define out slots[I_OUT(data)]
+#define lhs slots[I_LHS(&d)]
+#define rhs slots[I_RHS(&d)]
+#define imm IMM(&d)
+#define out slots[I_OUT(&d)]
 
             case GPU_OP_SQUARE_LHS: out = square(lhs); break;
             case GPU_OP_SQRT_LHS:   out = sqrt(lhs); break;
@@ -593,14 +597,18 @@ void v3_eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     slots[((const uint8_t*)tape_data)[2]] = values[voxel_index * 3 + 1];
     slots[((const uint8_t*)tape_data)[3]] = values[voxel_index * 3 + 2];
 
-    while (OP(++data)) {
-        switch (OP(data)) {
-            case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
+    while (1) {
+        const uint64_t d = *++data;
+        if (!OP(&d)) {
+            break;
+        }
+        switch (OP(&d)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(&d); continue;
 
-#define lhs slots[I_LHS(data)]
-#define rhs slots[I_RHS(data)]
-#define imm IMM(data)
-#define out slots[I_OUT(data)]
+#define lhs slots[I_LHS(&d)]
+#define rhs slots[I_RHS(&d)]
+#define imm IMM(&d)
+#define out slots[I_OUT(&d)]
 
             case GPU_OP_SQUARE_LHS: out = make_float2(lhs.x * lhs.x, lhs.y * lhs.y); break;
             case GPU_OP_SQRT_LHS: out = make_float2(sqrtf(lhs.x), sqrtf(lhs.y)); break;
@@ -755,14 +763,18 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
         }
     }
 
-    while (OP(++data)) {
-        switch (OP(data)) {
-            case GPU_OP_JUMP: data += JUMP_TARGET(data); continue;
+    while (1) {
+        const uint64_t d = *++data;
+        if (!OP(&d)) {
+            break;
+        }
+        switch (OP(&d)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(&d); continue;
 
-#define lhs slots[I_LHS(data)]
-#define rhs slots[I_RHS(data)]
-#define imm Deriv(IMM(data))
-#define out slots[I_OUT(data)]
+#define lhs slots[I_LHS(&d)]
+#define rhs slots[I_RHS(&d)]
+#define imm IMM(&d)
+#define out slots[I_OUT(&d)]
 
             case GPU_OP_SQUARE_LHS: out = lhs * lhs; break;
             case GPU_OP_SQRT_LHS: out = sqrt(lhs); break;
