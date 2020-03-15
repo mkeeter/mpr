@@ -431,29 +431,29 @@ void v3_subdivide_active_tiles(
         const int32_t tiles_per_side,
         v3_tile_node_t* const __restrict__ out_tiles)
 {
-    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t subtile_index = index % 64;
+    const int32_t tile_index = index / 64;
     if (tile_index >= in_tile_count || in_tiles[tile_index].next == -1) {
         return;
     }
 
-    const int t = in_tiles[tile_index].next * 64;
     const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
     const int32_t subtiles_per_side = tiles_per_side * 4;
 
-    for (int i=0; i < 64; ++i) {
-        const int4 sub = unpack(i, 4);
-        const int32_t sx = pos.x * 4 + sub.x;
-        const int32_t sy = pos.y * 4 + sub.y;
-        const int32_t sz = pos.z * 4 + sub.z;
-        const int32_t next_tile =
-            sx +
-            sy * subtiles_per_side +
-            sz * subtiles_per_side * subtiles_per_side;
+    const int4 sub = unpack(subtile_index, 4);
+    const int32_t sx = pos.x * 4 + sub.x;
+    const int32_t sy = pos.y * 4 + sub.y;
+    const int32_t sz = pos.z * 4 + sub.z;
+    const int32_t next_tile =
+        sx +
+        sy * subtiles_per_side +
+        sz * subtiles_per_side * subtiles_per_side;
 
-        out_tiles[t + i].position = next_tile;
-        out_tiles[t + i].tape = in_tiles[tile_index].tape;
-        out_tiles[t + i].next = -1;
-    }
+    const int t = in_tiles[tile_index].next * 64 + subtile_index;
+    out_tiles[t].position = next_tile;
+    out_tiles[t].tape = in_tiles[tile_index].tape;
+    out_tiles[t].next = -1;
 }
 
 // Copies each active tile into the out_tiles list, clearing its `next` value.
@@ -1174,7 +1174,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
         if (i < 2) {
             // Build the new tile list from active tiles in the previous list
-            v3_subdivide_active_tiles<<<num_blocks, NUM_THREADS>>>(
+            v3_subdivide_active_tiles<<<num_blocks*64, NUM_THREADS>>>(
                 blob.stages[i].tiles,
                 count,
                 blob.image_size_px / tile_size_px,
