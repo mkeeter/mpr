@@ -1165,6 +1165,8 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
         }
 
         // Make sure that the subtiles buffer has enough room
+        // This wastes a small amount of data for the per-pixel evaluation,
+        // where the `next` indexes aren't used, but it's relatively small.
         if (num_active_tiles > blob.stages[i + 1].tile_array_size) {
             blob.stages[i + 1].tile_array_size = num_active_tiles;
             CUDA_FREE(blob.stages[i + 1].tiles);
