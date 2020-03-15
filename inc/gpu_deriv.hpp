@@ -4,7 +4,7 @@
 
 struct Deriv {
     __device__ inline Deriv() : v(make_float4(0.0f, 0.0f, 0.0f, 0.0f)) {}
-    __device__ inline Deriv(float f) : v(make_float4(0.0f, 0.0f, 0.0f, f)) {}
+    __device__ inline explicit Deriv(float f) : v(make_float4(0.0f, 0.0f, 0.0f, f)) {}
     __device__ inline Deriv(float v, float dx, float dy, float dz)
         : v(make_float4(dx, dy, dz, v)) {}
     __device__ inline float value() const { return v.w; }
@@ -78,6 +78,11 @@ __device__ inline Deriv operator/(const Deriv& a, const Deriv& b) {
 
 __device__ inline Deriv operator/(const Deriv& a, const float& b) {
     return {a.value() / b, a.dx() / b, a.dy() / b, a.dz() / b};
+}
+
+__device__ inline Deriv operator/(const float& a, const Deriv& b) {
+    // TODO
+    return Deriv(a) / b;
 }
 
 

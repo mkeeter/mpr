@@ -716,10 +716,10 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
                           mat(3, 1) * fy +
                           mat(3, 2) * fz + mat(3, 3);
         for (unsigned i=0; i < 3; ++i) {
-            slots[((const uint8_t*)tape_data)[i + 1]] =
+            slots[((const uint8_t*)tape_data)[i + 1]] = Deriv(
                 (mat(i, 0) * fx +
                  mat(i, 1) * fy +
-                 mat(i, 2) * fz + mat(0, 3)) / fw_;
+                 mat(i, 2) * fz + mat(0, 3)) / fw_);
         }
         slots[((const uint8_t*)tape_data)[1]].v.x = 1.0f;
         slots[((const uint8_t*)tape_data)[2]].v.y = 1.0f;
@@ -807,7 +807,7 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
             case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
             case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
 
-            case GPU_OP_COPY_IMM: out = imm; break;
+            case GPU_OP_COPY_IMM: out = Deriv(imm); break;
             case GPU_OP_COPY_LHS: out = lhs; break;
             case GPU_OP_COPY_RHS: out = rhs; break;
 

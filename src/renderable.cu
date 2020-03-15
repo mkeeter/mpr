@@ -110,26 +110,26 @@ __device__ inline Deriv derivOp(uint8_t op, A lhs, B rhs)
 {
     using namespace libfive::Opcode;
     switch (op) {
-        case OP_SQUARE: return lhs * lhs;
-        case OP_SQRT: return sqrt(lhs);
-        case OP_NEG: return -lhs;
-        case OP_ABS: return abs(lhs);
+        case OP_SQUARE: return Deriv(lhs * lhs);
+        case OP_SQRT: return Deriv(sqrt(lhs));
+        case OP_NEG: return Deriv(-lhs);
+        case OP_ABS: return Deriv(abs(lhs));
 
-        case OP_ASIN: return asin(lhs);
-        case OP_ACOS: return acos(lhs);
-        case OP_ATAN: return atan(lhs);
-        case OP_EXP: return exp(lhs);
-        case OP_SIN: return sin(lhs);
-        case OP_COS: return cos(lhs);
-        case OP_LOG: return log(lhs);
+        case OP_ASIN: return Deriv(asin(lhs));
+        case OP_ACOS: return Deriv(acos(lhs));
+        case OP_ATAN: return Deriv(atan(lhs));
+        case OP_EXP: return Deriv(exp(lhs));
+        case OP_SIN: return Deriv(sin(lhs));
+        case OP_COS: return Deriv(cos(lhs));
+        case OP_LOG: return Deriv(log(lhs));
         // Skipping other transcendental functions for now
 
-        case OP_ADD: return lhs + rhs;
-        case OP_MUL: return lhs * rhs;
-        case OP_DIV: return lhs / rhs;
-        case OP_MIN: return min(lhs, rhs);
-        case OP_MAX: return max(lhs, rhs);
-        case OP_SUB: return lhs - rhs;
+        case OP_ADD: return Deriv(lhs + rhs);
+        case OP_MUL: return Deriv(lhs * rhs);
+        case OP_DIV: return Deriv(lhs / rhs);
+        case OP_MIN: return Deriv(min(lhs, rhs));
+        case OP_MAX: return Deriv(max(lhs, rhs));
+        case OP_SUB: return Deriv(lhs - rhs);
 
         // Skipping various hard functions here
         default: break;
