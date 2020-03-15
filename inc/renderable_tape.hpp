@@ -2,7 +2,7 @@
 
 #include <cuda_runtime.h>
 #include <libfive/tree/tree.hpp>
-#include "clause.hpp"
+#include "renderable_clause.hpp"
 
 // The Tape is an on-device representation, so the pointers
 // are returned from cudaMalloc.

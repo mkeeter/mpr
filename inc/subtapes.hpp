@@ -1,7 +1,7 @@
 #include <cstdint>
 
-#include "clause.hpp"
-#include "parameters.hpp"
+#include "renderable_clause.hpp"
+#include "renderable_parameters.hpp"
 
 struct Subtapes {
     /*  Each subtape is an array of LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE clauses.

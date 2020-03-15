@@ -3,10 +3,10 @@
 #include <cuda_runtime.h>
 #include <libfive/tree/tree.hpp>
 
-#include "check.hpp"
+#include "util.hpp"
 #include "filled.hpp"
 #include "image.hpp"
-#include "parameters.hpp"
+#include "renderable_parameters.hpp"
 #include "queue.hpp"
 #include "subtapes.hpp"
 #include "renderable_tape.hpp"
@@ -56,7 +56,7 @@ public:
         return TILE_SIZE_PX / SUBTILE_SIZE_PX;
     }
     constexpr static unsigned __host__ __device__ subtilesPerTile() {
-        return pow(subtilesPerTileSide(), DIMENSION);
+        return libfive::cuda::pow(subtilesPerTileSide(), DIMENSION);
     }
 
     // Same functions as in TileRenderer, but these take a subtape because
@@ -90,7 +90,7 @@ public:
                   const Tiles<SUBTILE_SIZE_PX, DIMENSION>& prev);
 
     constexpr static unsigned __host__ __device__ pixelsPerSubtile() {
-        return pow(SUBTILE_SIZE_PX, DIMENSION);
+        return libfive::cuda::pow(SUBTILE_SIZE_PX, DIMENSION);
     }
 
     // Draws the given tile, starting from the given subtape

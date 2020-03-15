@@ -1104,7 +1104,7 @@ uint32_t Renderable3D::subtapeHeadAt(const uint3 v) const
 
     const uint32_t tile = tx
         + ty * tile_renderer.tiles.per_side
-        + tz * pow(tile_renderer.tiles.per_side, 2);
+        + tz * libfive::cuda::pow(tile_renderer.tiles.per_side, 2);
     if (auto h = tile_renderer.tiles.head(tile)) {
         // Map the subtile within the tile
         constexpr auto subsize = decltype(subtile_renderer.subtiles)::sizePx();
@@ -1116,7 +1116,7 @@ uint32_t Renderable3D::subtapeHeadAt(const uint3 v) const
         const uint32_t subtile = index * subtile_renderer.subtilesPerTile()
             + sx
             + sy * subtile_renderer.subtilesPerTileSide()
-            + sz * pow(subtile_renderer.subtilesPerTileSide(), 2);
+            + sz * libfive::cuda::pow(subtile_renderer.subtilesPerTileSide(), 2);
 
         if (auto sub_h = subtile_renderer.subtiles.head(subtile)) {
             // Map the microtile within the subtile
@@ -1130,7 +1130,7 @@ uint32_t Renderable3D::subtapeHeadAt(const uint3 v) const
                 index * microtile_renderer.subtilesPerTile()
                 + mx
                 + my * microtile_renderer.subtilesPerTileSide()
-                + mz * pow(microtile_renderer.subtilesPerTileSide(), 2);
+                + mz * libfive::cuda::pow(microtile_renderer.subtilesPerTileSide(), 2);
 
             if (auto micro_h = microtile_renderer.subtiles.head(microtile)) {
                 return micro_h;
@@ -1622,7 +1622,7 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
         const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
                                 LIBFIVE_CUDA_TILE_BLOCKS;
 
-        const uint32_t total_tiles = pow(
+        const uint32_t total_tiles = libfive::cuda::pow(
                 image.size_px / decltype(tile_renderer->tiles)::sizePx(),
                 decltype(tile_renderer->tiles)::dimension());
         tile_renderer->tiles.resizeToFit(total_tiles);
@@ -1735,13 +1735,13 @@ void Renderable3D::run(const View& view, Renderable::Mode mode)
     CUDA_CHECK(cudaDeviceSynchronize());
 
     if (mode >= MODE_NORMALS) {
-        const uint32_t active = pow(image.size_px / 8, 2);
+        const uint32_t active = libfive::cuda::pow(image.size_px / 8, 2);
         const uint32_t stride = LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS *
                                 LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK;
         for (unsigned i=0; i < active; i += stride) {
             Renderable3D_drawNormals<<<
                 LIBFIVE_CUDA_NORMAL_RENDER_BLOCKS,
-                pow(8, 2) * LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK,
+                libfive::cuda::pow(8, 2) * LIBFIVE_CUDA_NORMAL_RENDER_TILES_PER_BLOCK,
                 0, streams[(i / stride) % LIBFIVE_CUDA_NUM_STREAMS]>>>(
                     this, i, view);
             CUDA_CHECK(cudaGetLastError());
@@ -1795,7 +1795,7 @@ void Renderable2D::run(const View& view, Renderable::Mode mode)
         const uint32_t stride = LIBFIVE_CUDA_TILE_THREADS *
                                 LIBFIVE_CUDA_TILE_BLOCKS;
 
-        const uint32_t total_tiles = pow(
+        const uint32_t total_tiles = libfive::cuda::pow(
                 image.size_px / decltype(tile_renderer->tiles)::sizePx(),
                 decltype(tile_renderer->tiles)::dimension());
         tile_renderer->tiles.resizeToFit(total_tiles);

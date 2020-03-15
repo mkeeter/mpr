@@ -3,8 +3,8 @@
 #include "libfive/tree/cache.hpp"
 
 #include "renderable_tape.hpp"
-#include "check.hpp"
-#include "parameters.hpp"
+#include "util.hpp"
+#include "renderable_parameters.hpp"
 
 Tape Tape::build(libfive::Tree tree) {
     // Hold a single cache lock to avoid needing mutex locks everywhere

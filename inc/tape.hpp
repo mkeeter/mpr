@@ -3,8 +3,12 @@
 
 #include "util.hpp"
 
+// Forward declaration
 namespace libfive {
 class Tree;
+}
+
+namespace libfive {
 namespace cuda {
 
 struct Tape {

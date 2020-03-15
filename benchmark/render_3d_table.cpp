@@ -11,6 +11,9 @@
 #include "renderable.hpp"
 #include "v3.hpp"
 
+#include "tape.hpp"
+#include "context.hpp"
+
 void get_stats(std::function<void()> f) {
     // Warm up
     for (unsigned i=0; i < 20; ++i) {
@@ -82,6 +85,23 @@ int main(int argc, char **argv)
         }
         out.savePNG("out_gpu_depth_v3_" + std::to_string(size) + ".png");
         free_v3_blob(r);
+    }
+    std::cout << "Rendering with context architecture:" << std::endl;
+    for (auto size: sizes) {
+        auto tape = libfive::cuda::Tape(t);
+        auto c = libfive::cuda::Context(size);
+
+        std::cout << size << " ";
+        get_stats([&](){ c.render(tape, Eigen::Matrix4f::Identity()); });
+
+        libfive::Heightmap out(size, size);
+        uint32_t i = 0;
+        for (int x=0; x < size; ++x) {
+            for (int y=0; y < size; ++y) {
+                out.depth(y, x) = c.stages[3].filled.get()[i++];
+            }
+        }
+        out.savePNG("out_gpu_depth_ctx_" + std::to_string(size) + ".png");
     }
     std::cout << "Rendering with original architecture:" << std::endl;
     for (auto size: sizes) {

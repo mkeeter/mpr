@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #include "libfive/tree/tree.hpp"
+#include "tape.hpp"
 
 struct v3_tile_node_t {
     int32_t position;

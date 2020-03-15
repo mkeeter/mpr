@@ -3,28 +3,13 @@
 #include "libfive/tree/cache.hpp"
 
 #include "v3.hpp"
-#include "check.hpp"
+#include "util.hpp"
+#include "clause.hpp"
+#include "parameters.hpp"
+
 #include "gpu_deriv.hpp"
 #include "gpu_interval.hpp"
 #include "gpu_opcode.hpp"
-
-////////////////////////////////////////////////////////////////////////////////
-
-// No need for parameters.hpp, we want to compile faster
-// (without rebuilding everything else)
-#define NUM_TILES (4)
-#define NUM_THREADS (64 * NUM_TILES)
-#define SUBTAPE_CHUNK_SIZE 64
-#define NUM_SUBTAPES 320000
-
-////////////////////////////////////////////////////////////////////////////////
-// COPYPASTA
-#define OP(d) (((uint8_t*)d)[0])
-#define I_OUT(d) (((uint8_t*)d)[1])
-#define I_LHS(d) (((uint8_t*)d)[2])
-#define I_RHS(d) (((uint8_t*)d)[3])
-#define IMM(d) (((float*)d)[1])
-#define JUMP_TARGET(d) (((int32_t*)d)[1])
 
 ////////////////////////////////////////////////////////////////////////////////
 static inline __device__

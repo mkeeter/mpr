@@ -1,6 +1,9 @@
 #pragma once
 #include <cstdio>
+#include <cstdlib>
 #include <cuda_runtime.h>
+
+#include <memory>
 
 #define CUDA_CHECK(f) { gpuCheck((f), __FILE__, __LINE__); }
 inline void gpuCheck(cudaError_t code, const char *file, int line) {
@@ -24,3 +27,22 @@ inline void cudaFreeChecked(void* ptr, const char *file, int line) {
     //printf("%p freed [%s:%i]\n", ptr, file, line);
     gpuCheck(cudaFree(ptr), file, line);
 }
+
+namespace libfive {
+namespace cuda {
+
+template <typename T>
+struct Deleter {
+  void operator()(T* ptr) { CUDA_FREE(ptr); }
+};
+
+template <typename T>
+using Ptr = std::unique_ptr<T, Deleter<T>>;
+
+// Helper function to do constexpr integer powers
+inline constexpr unsigned __host__ __device__ pow(unsigned p, unsigned n) {
+    return n ? p * pow(p, n - 1) : 1;
+}
+
+}   // namespace libfive
+}   // namespace cuda

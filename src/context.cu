@@ -818,7 +818,7 @@ void Context::render(const Tape& tape, const Eigen::Matrix4f mat) {
     // Reset the tape index and copy the tape to the beginning of the
     // context's tape buffer area.
     *tape_index = tape.length;
-    cudaMemcpy(tape.data.get(), tape_data.get(),
+    cudaMemcpy(tape_data.get(), tape.data.get(),
                sizeof(uint64_t) * tape.length,
                cudaMemcpyDeviceToDevice);
 
