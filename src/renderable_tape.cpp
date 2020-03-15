@@ -2,7 +2,7 @@
 
 #include "libfive/tree/cache.hpp"
 
-#include "tape.hpp"
+#include "renderable_tape.hpp"
 #include "check.hpp"
 #include "parameters.hpp"
 

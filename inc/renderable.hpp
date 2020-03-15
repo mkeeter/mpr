@@ -9,7 +9,7 @@
 #include "parameters.hpp"
 #include "queue.hpp"
 #include "subtapes.hpp"
-#include "tape.hpp"
+#include "renderable_tape.hpp"
 #include "tiles.hpp"
 #include "view.hpp"
 
