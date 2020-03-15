@@ -29,7 +29,7 @@
 
 /*  This is the number of subtapes allocated, where each subtape is a
  *  chunk with some number of clauses. */
-#define LIBFIVE_CUDA_NUM_SUBTAPES 3200000
+#define LIBFIVE_CUDA_NUM_SUBTAPES 320000
 #define LIBFIVE_CUDA_SUBTAPE_CHUNK_SIZE 64
 
 /*  Depending on compute capabilities, you'll have more or less

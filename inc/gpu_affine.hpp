@@ -251,7 +251,7 @@ __device__ inline Affine operator/(const float& a, const Affine& b) {
     return Affine(a) * reciprocal(b);
 }
 
-__device__ inline Affine min(const Affine& a, const Affine& b, uint8_t& choice) {
+__device__ inline Affine min(const Affine& a, const Affine& b, int& choice) {
     const Interval ia = a.as_interval();
     const Interval ib = b.as_interval();
     if (ia.upper() < ib.lower()) {
@@ -297,7 +297,7 @@ __device__ inline Affine min(const Affine& a, const Affine& b, uint8_t& choice) 
     return Affine(min(ia, ib, choice));
 }
 
-__device__ inline Affine min(const Affine& a, const float& b, uint8_t& choice) {
+__device__ inline Affine min(const Affine& a, const float& b, int& choice) {
     const Interval ia = a.as_interval();
     if (ia.upper() < b) {
         choice = 1;
@@ -309,7 +309,7 @@ __device__ inline Affine min(const Affine& a, const float& b, uint8_t& choice) {
     return Affine(ia);
 }
 
-__device__ inline Affine min(const float& a, const Affine& b, uint8_t& choice) {
+__device__ inline Affine min(const float& a, const Affine& b, int& choice) {
     const Interval ib = b.as_interval();
     if (a < ib.lower()) {
         choice = 1;
@@ -321,7 +321,7 @@ __device__ inline Affine min(const float& a, const Affine& b, uint8_t& choice) {
     return Affine(ib);
 }
 
-__device__ inline Affine max(const Affine& a, const Affine& b, uint8_t& choice) {
+__device__ inline Affine max(const Affine& a, const Affine& b, int& choice) {
     const Interval ia = a.as_interval();
     const Interval ib = b.as_interval();
     if (ia.lower() > ib.upper()) {
@@ -367,7 +367,7 @@ __device__ inline Affine max(const Affine& a, const Affine& b, uint8_t& choice) 
     return Affine(max(ia, ib, choice));
 }
 
-__device__ inline Affine max(const Affine& a, const float& b, uint8_t& choice) {
+__device__ inline Affine max(const Affine& a, const float& b, int& choice) {
     const Interval ia = a.as_interval();
     if (ia.lower() > b) {
         choice = 1;
@@ -379,7 +379,7 @@ __device__ inline Affine max(const Affine& a, const float& b, uint8_t& choice) {
     return Affine(ia);
 }
 
-__device__ inline Affine max(const float& a, const Affine& b, uint8_t& choice) {
+__device__ inline Affine max(const float& a, const Affine& b, int& choice) {
     const Interval ib = b.as_interval();
     if (a > ib.upper()) {
         choice = 1;
