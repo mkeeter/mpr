@@ -9,7 +9,6 @@
 #include <libfive/render/discrete/heightmap.hpp>
 
 #include "renderable.hpp"
-#include "v2.hpp"
 #include "v3.hpp"
 
 void get_stats(std::function<void()> f) {
@@ -83,23 +82,6 @@ int main(int argc, char **argv)
         }
         out.savePNG("out_gpu_depth_v3_" + std::to_string(size) + ".png");
         free_v3_blob(r);
-    }
-    std::cout << "Rendering with v2 architecture:" << std::endl;
-    for (auto size: sizes) {
-        auto r = build_v2_blob(t, size);
-
-        std::cout << size << " ";
-        get_stats([&](){ render_v2_blob(r, Eigen::Matrix4f::Identity()); });
-
-        libfive::Heightmap out(size, size);
-        uint32_t i = 0;
-        for (int x=0; x < size; ++x) {
-            for (int y=0; y < size; ++y) {
-                out.depth(y, x) = r.image[i++];
-            }
-        }
-        out.savePNG("out_gpu_depth_v2_" + std::to_string(size) + ".png");
-        free_v2_blob(r);
     }
     std::cout << "Rendering with original architecture:" << std::endl;
     for (auto size: sizes) {
