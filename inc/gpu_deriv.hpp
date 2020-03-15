@@ -81,10 +81,12 @@ __device__ inline Deriv operator/(const Deriv& a, const float& b) {
 }
 
 __device__ inline Deriv operator/(const float& a, const Deriv& b) {
-    // TODO
-    return Deriv(a) / b;
+    const float d = powf(b.value(), 2);
+    return {a / b.value(),
+            -a * b.dx() / d,
+            -a * b.dy() / d,
+            -a * b.dz() / d};
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 
