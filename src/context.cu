@@ -34,7 +34,7 @@ void preload_tiles(TileNode* const __restrict__ in_tiles,
     in_tiles[tile_index].next = -1;
 }
 
-__global__
+static __global__
 void calculate_intervals(const TileNode* const __restrict__ in_tiles,
                          const uint32_t in_tile_count,
                          const uint32_t tiles_per_side,
@@ -78,7 +78,7 @@ void calculate_intervals(const TileNode* const __restrict__ in_tiles,
     values[tile_index * 3 + 2] = iz_;
 }
 
-__global__
+static __global__
 void eval_tiles_i(uint64_t* const __restrict__ tape_data,
                   int32_t* const __restrict__ tape_index,
                   int32_t* const __restrict__ image,
@@ -335,7 +335,7 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__
+static __global__
 void mask_filled_tiles(int32_t* const __restrict__ image,
                        const uint32_t tiles_per_side,
 
@@ -365,7 +365,7 @@ void mask_filled_tiles(int32_t* const __restrict__ image,
 
 // Sets the tile.next to an index in the upcoming tile list, without
 // actually doing any work (since that list may not be allocated yet)
-__global__
+static __global__
 void assign_next_nodes(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
 
@@ -407,7 +407,7 @@ void assign_next_nodes(TileNode* const __restrict__ in_tiles,
 }
 
 // Copies each active tile into 64 subtiles
-__global__
+static __global__
 void subdivide_active_tiles(
         const TileNode* const __restrict__ in_tiles,
         const int32_t in_tile_count,
@@ -442,7 +442,7 @@ void subdivide_active_tiles(
 // Copies each active tile into the out_tiles list, clearing its `next` value.
 // This is used right before per-pixel evaluation, which wants a compact list
 // of active tiles, but doesn't need to subdivide them by 64 itself.
-__global__
+static __global__
 void copy_active_tiles(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
                        const int32_t tiles_per_side,
@@ -461,7 +461,7 @@ void copy_active_tiles(TileNode* const __restrict__ in_tiles,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__
+static __global__
 void copy_filled(const int32_t* __restrict__ prev,
                  int32_t* __restrict__ image,
                  const int32_t image_size_px)
@@ -479,7 +479,7 @@ void copy_filled(const int32_t* __restrict__ prev,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__
+static __global__
 void calculate_voxels(const TileNode* const __restrict__ in_tiles,
                       const uint32_t in_tile_count,
                       const uint32_t tiles_per_side,
@@ -536,7 +536,7 @@ void calculate_voxels(const TileNode* const __restrict__ in_tiles,
     }
 }
 
-__global__
+static __global__
 void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
                    int32_t* const __restrict__ image,
                    const uint32_t tiles_per_side,
@@ -660,7 +660,7 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-__global__
+static __global__
 void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
                    const int32_t* const __restrict__ image,
                    uint32_t* const __restrict__ output,
