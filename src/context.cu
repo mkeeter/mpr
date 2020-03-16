@@ -20,6 +20,18 @@ int4 unpack(int32_t pos, int32_t tiles_per_side)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+
+/*
+ *  preload_tiles
+ *
+ *  Fills the array at `in_tiles` with the values 0 through `in_tile_count`
+ *  For each TileNode, sets its position to the appropriate value, its tape
+ *  to 0 (for the default tape), and its `next` pointer to -1 (indicating
+ *  that there is no following node, yet).
+ *
+ *  This function should be called before the first stage of per-tile
+ *  evaluation, when we want to evaluate every single top-level tile.
+ */
 static __global__
 void preload_tiles(TileNode* const __restrict__ in_tiles,
                    const int32_t in_tile_count)
@@ -34,6 +46,25 @@ void preload_tiles(TileNode* const __restrict__ in_tiles,
     in_tiles[tile_index].next = -1;
 }
 
+/*
+ *  calculate_intervals
+ *
+ *  For tiles 0 through `in_tile_count` in the `in_tiles` array, calculates
+ *  their position in render space (+/-1 on each axis, orthographic,
+ *  screen-aligned), then applies the transform specified by `mat` and writes
+ *  the results to the `values` array.
+ *
+ *  The values array is packed as triples, i.e. [X0 Y0 Z0 X1 Y1 Z1 ...]
+ *
+ *  This function could theoretically take place at the beginning of
+ *  eval_tiles_i, but making it a separate kernel reduces register usage
+ *  below the magic value of 32, which is needed to keep 100% occupancy.
+ *
+ *  One would be tempted to make this a __device__ __noinline__ function,
+ *  then call it in eval_tiles_i (making it __noinline__ fixes the issue of
+ *  register bloat).  Unfortunately, this reduces performance, at least on
+ *  my laptop.
+ */
 static __global__
 void calculate_intervals(const TileNode* const __restrict__ in_tiles,
                          const uint32_t in_tile_count,
@@ -78,6 +109,33 @@ void calculate_intervals(const TileNode* const __restrict__ in_tiles,
     values[tile_index * 3 + 2] = iz_;
 }
 
+/*
+ *  eval_tiles_i
+ *
+ *  This is the important one!
+ *
+ *  We take a bunch (`in_tile_count`) of tiles in the `in_tiles` array.  Their
+ *  values must already be stored in `values` by `calculate_intervals`.
+ *
+ *  Each tile in the array specifies which tape to use, where tapes are stored
+ *  as chunked linked lists in `tape_data`.  By construction, tiles evaluated
+ *  by the same warp should have the same tape, which prevents divergence.
+ *
+ *  Each thread walks the tape for its tile values.  If the resulting interval
+ *  is filled, then it records that result in the `image` output, using an
+ *  `atomicMax` operation to prevent memory issues.  If the interval is empty,
+ *  then it returns immediately.  In both of these cases, the tile's `position`
+ *  is set to -1, to indicate that it does not require further processing.
+ *
+ *  Otherwise, it walks *backwards* through the tile's tape, creating a new
+ *  tape which only contains active clauses.  This is done with an algorithm
+ *  similiar to the "mark" phase of "mark-and-sweep": each clause marks its
+ *  children as active, except for min/max clauses, which have the option to
+ *  only mark one branch.
+ *
+ *  The new tape is written to the tile's `tape` variable, because it is valid
+ *  for any evaluation which takes place within the tile.
+ */
 static __global__
 void eval_tiles_i(uint64_t* const __restrict__ tape_data,
                   int32_t* const __restrict__ tape_index,
@@ -335,6 +393,14 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/*
+ *  mask_filled_tiles
+ *
+ *  For every tile in the `in_tiles` array, compares its z position against
+ *  the image's z value at the tile's xy position.  If the tile is below the
+ *  image, then it will never contribute, so its position is set to -1 to mark
+ *  it as inactive.
+ */
 static __global__
 void mask_filled_tiles(int32_t* const __restrict__ image,
                        const uint32_t tiles_per_side,
@@ -363,8 +429,19 @@ void mask_filled_tiles(int32_t* const __restrict__ image,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Sets the tile.next to an index in the upcoming tile list, without
-// actually doing any work (since that list may not be allocated yet)
+/*
+ *  assign_next_nodes
+ *
+ *  For every tile in `in_tiles`, which is active (i.e. has a position that
+ *  has not been set to -1), set its `next` value to a unique value.
+ *
+ *  The total number of active tiles is stored in `num_active_tiles`; `next`
+ *  values range from 0 to `num_active_tiles - 1`.
+ *
+ *  Philosophically, this function packs sparse items (active tiles in
+ *  `in_tiles`) tightly.  It could also be implemented as a scan, but this is
+ *  far from the limiting factor.
+ */
 static __global__
 void assign_next_nodes(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
@@ -406,7 +483,17 @@ void assign_next_nodes(TileNode* const __restrict__ in_tiles,
     }
 }
 
-// Copies each active tile into 64 subtiles
+/*
+ *  subdivide_active_tiles
+ *
+ *  For each active tile in `in_tiles`, unpack it into 64 subtiles in
+ *  `out_tiles`.  Subtiles are tightly packed using `next` indices assigned
+ *  in `assign_next_nodes`.
+ *
+ *  Subtiles inherit the `tape` value from their parent tiles, since they're
+ *  contained within the parent and can reuse its tape.  They are assigned
+ *  `next` = -1, because we don't yet know whether they have children.
+ */
 static __global__
 void subdivide_active_tiles(
         const TileNode* const __restrict__ in_tiles,
@@ -439,9 +526,18 @@ void subdivide_active_tiles(
     out_tiles[t].next = -1;
 }
 
-// Copies each active tile into the out_tiles list, clearing its `next` value.
-// This is used right before per-pixel evaluation, which wants a compact list
-// of active tiles, but doesn't need to subdivide them by 64 itself.
+/*
+ *  copy_active_tiles
+ *
+ *  For each active tile in `in_tiles`, copy it into `out_tiles`.  This
+ *  operation turns a sparse array of active tiles into a tightly packed array.
+ *
+ *  This is used right before per-pixel evaluation, which wants a compact list
+ *  of active tiles, but doesn't want them to be subdivided by 64.
+ *
+ *  Tiles keep the `tape` value when copied, but `next` is assigned to -1
+ *  (since we're at the bottom of the evaluation stack).
+ */
 static __global__
 void copy_active_tiles(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
@@ -461,6 +557,15 @@ void copy_active_tiles(TileNode* const __restrict__ in_tiles,
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/*
+ *  copy_filled
+ *
+ *  Copies a lower-resolution (4x undersampled) image into a higher-resolution
+ *  image, expanding every active (non-zero) "pixel" by 4x.
+ *
+ *  The higher-resolution image must be empty (all 0) when this is called;
+ *  no comparison of Z values is done.
+ */
 static __global__
 void copy_filled(const int32_t* __restrict__ prev,
                  int32_t* __restrict__ image,
