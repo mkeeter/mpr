@@ -642,21 +642,33 @@ void copy_active_tiles(TileNode* const __restrict__ in_tiles,
  *  The higher-resolution image must be empty (all 0) when this is called;
  *  no comparison of Z values is done.
  */
-template <int SUBDIVISION>
 static __global__
-void copy_filled(const int32_t* __restrict__ prev,
-                 int32_t* __restrict__ image,
-                 const int32_t image_size_px)
+void copy_filled_3d(const int32_t* __restrict__ prev,
+                    int32_t* __restrict__ image,
+                    const int32_t image_size_px)
 {
     const int32_t x = threadIdx.x + blockIdx.x * blockDim.x;
     const int32_t y = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (x < image_size_px && y < image_size_px) {
-        int32_t t = prev[x / SUBDIVISION +
-                         y / SUBDIVISION * (image_size_px / SUBDIVISION)];
+        int32_t t = prev[x / 4 + y / 4 * (image_size_px / 4)];
         if (t) {
-            image[x + y * image_size_px] = t * SUBDIVISION + SUBDIVISION - 1;
+            image[x + y * image_size_px] = t * 4 + 3;
         }
+    }
+}
+static __global__
+void copy_filled_2d(const int32_t* __restrict__ prev,
+                    int32_t* __restrict__ image,
+                    const int32_t image_size_px)
+{
+    const int32_t x = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < image_size_px && y < image_size_px &&
+        prev[x / 8 + y / 8 * (image_size_px / 8)])
+    {
+        image[x + y * image_size_px] = 1;
     }
 }
 
@@ -754,7 +766,7 @@ void calculate_pixels(const TileNode* const __restrict__ in_tiles,
     const int32_t px = pos.x * 8 + sub.x;
     const int32_t py_a = pos.y * 8 + sub.y;
 
-    const float size_recip = 1.0f / (tiles_per_side * 4);
+    const float size_recip = 1.0f / (tiles_per_side * 8);
 
     const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
     const float fy_a = ((py_a + 0.5f) * size_recip - 0.5f) * 2.0f;
@@ -897,8 +909,8 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     const uint8_t i_out = I_OUT(data);
 
     const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-    const int4 sub = unpack(threadIdx.x % 32, 4);
     if (DIMENSION == 3) {
+        const int4 sub = unpack(threadIdx.x % 32, 4);
         // The second voxel is always higher in Z, so it masks the lower voxel
         if (slots[i_out].y < 0.0f) {
             const int32_t px = pos.x * 4 + sub.x;
@@ -907,8 +919,6 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
 
             atomicMax(&image[px + py * tiles_per_side * 4], pz);
         } else if (slots[i_out].x < 0.0f) {
-            const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-            const int4 sub = unpack(threadIdx.x % 32, 4);
             const int32_t px = pos.x * 4 + sub.x;
             const int32_t py = pos.y * 4 + sub.y;
             const int32_t pz = pos.z * 4 + sub.z;
@@ -916,6 +926,7 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
             atomicMax(&image[px + py * tiles_per_side * 4], pz);
         }
     } else if (DIMENSION == 2) {
+        const int4 sub = unpack(threadIdx.x % 32, 8);
         if (slots[i_out].y < 0.0f) {
             const int32_t px = pos.x * 8 + sub.x;
             const int32_t py = pos.y * 8 + sub.y + 4;
@@ -1209,7 +1220,7 @@ void Context::render2D(const Tape& tape, const Eigen::Matrix3f& mat, const float
             // fully occluded tiles.
             const unsigned next_tile_size = tile_size_px / 8;
             const uint32_t u = ((image_size_px / next_tile_size) / 32);
-            copy_filled<8><<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+            copy_filled_2d<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
                     stages[i].filled.get(),
                     stages[next].filled.get(),
                     image_size_px / next_tile_size);
@@ -1375,7 +1386,7 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
             // fully occluded tiles.
             const unsigned next_tile_size = tile_size_px / 4;
             const uint32_t u = ((image_size_px / next_tile_size) / 32);
-            copy_filled<4><<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+            copy_filled_3d<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
                     stages[i].filled.get(),
                     stages[i + 1].filled.get(),
                     image_size_px / next_tile_size);
