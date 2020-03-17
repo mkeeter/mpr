@@ -27,7 +27,8 @@ struct Tiles {
 
 struct Context {
     Context(int32_t image_size_px);
-    void render(const Tape& tape, const Eigen::Matrix4f mat);
+    void render3D(const Tape& tape, const Eigen::Matrix4f& mat);
+    void render2D(const Tape& tape, const Eigen::Matrix3f& mat, const float z);
 
     const int32_t image_size_px;
 

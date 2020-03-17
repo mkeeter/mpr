@@ -92,7 +92,7 @@ int main(int argc, char **argv)
         auto c = libfive::cuda::Context(size);
 
         std::cout << size << " ";
-        get_stats([&](){ c.render(tape, Eigen::Matrix4f::Identity()); });
+        get_stats([&](){ c.render3D(tape, Eigen::Matrix4f::Identity()); });
 
         libfive::Heightmap out(size, size);
         uint32_t i = 0;

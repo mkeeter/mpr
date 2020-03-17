@@ -66,11 +66,11 @@ void preload_tiles(TileNode* const __restrict__ in_tiles,
  *  my laptop.
  */
 static __global__
-void calculate_intervals(const TileNode* const __restrict__ in_tiles,
-                         const uint32_t in_tile_count,
-                         const uint32_t tiles_per_side,
-                         const Eigen::Matrix4f mat,
-                         Interval* const __restrict__ values)
+void calculate_intervals_3d(const TileNode* const __restrict__ in_tiles,
+                            const uint32_t in_tile_count,
+                            const uint32_t tiles_per_side,
+                            const Eigen::Matrix4f mat,
+                            Interval* const __restrict__ values)
 {
     const uint32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count) {
@@ -107,6 +107,45 @@ void calculate_intervals(const TileNode* const __restrict__ in_tiles,
     values[tile_index * 3] = ix_;
     values[tile_index * 3 + 1] = iy_;
     values[tile_index * 3 + 2] = iz_;
+}
+
+static __global__
+void calculate_intervals_2d(const TileNode* const __restrict__ in_tiles,
+                            const uint32_t in_tile_count,
+                            const uint32_t tiles_per_side,
+                            const Eigen::Matrix3f mat,
+                            const float z,
+                            Interval* const __restrict__ values)
+{
+    const uint32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    const Interval ix = {(pos.x / (float)tiles_per_side - 0.5f) * 2.0f,
+                   ((pos.x + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
+    const Interval iy = {(pos.y / (float)tiles_per_side - 0.5f) * 2.0f,
+                   ((pos.y + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
+
+    Interval ix_, iy_, iw_;
+    ix_ = mat(0, 0) * ix +
+          mat(0, 1) * iy +
+          mat(0, 2);
+    iy_ = mat(1, 0) * ix +
+          mat(1, 1) * iy +
+          mat(1, 2);
+    iw_ = mat(2, 0) * ix +
+          mat(2, 1) * iy +
+          mat(2, 2);
+
+    // Projection!
+    ix_ = ix_ / iw_;
+    iy_ = iy_ / iw_;
+
+    values[tile_index * 3] = ix_;
+    values[tile_index * 3 + 1] = iy_;
+    values[tile_index * 3 + 2] = {z, z};
 }
 
 /*
@@ -495,7 +534,7 @@ void assign_next_nodes(TileNode* const __restrict__ in_tiles,
  *  `next` = -1, because we don't yet know whether they have children.
  */
 static __global__
-void subdivide_active_tiles(
+void subdivide_active_tiles_3d(
         const TileNode* const __restrict__ in_tiles,
         const int32_t in_tile_count,
         const int32_t tiles_per_side,
@@ -519,6 +558,35 @@ void subdivide_active_tiles(
         sx +
         sy * subtiles_per_side +
         sz * subtiles_per_side * subtiles_per_side;
+
+    const int t = in_tiles[tile_index].next * 64 + subtile_index;
+    out_tiles[t].position = next_tile;
+    out_tiles[t].tape = in_tiles[tile_index].tape;
+    out_tiles[t].next = -1;
+}
+
+static __global__
+void subdivide_active_tiles_2d(
+        const TileNode* const __restrict__ in_tiles,
+        const int32_t in_tile_count,
+        const int32_t tiles_per_side,
+        TileNode* const __restrict__ out_tiles)
+{
+    const int32_t index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t subtile_index = index % 64;
+    const int32_t tile_index = index / 64;
+    if (tile_index >= in_tile_count || in_tiles[tile_index].next == -1) {
+        return;
+    }
+
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    assert(pos.z == 0);
+    const int32_t subtiles_per_side = tiles_per_side * 8;
+
+    const int4 sub = unpack(subtile_index, 8);
+    const int32_t sx = pos.x * 8 + sub.x;
+    const int32_t sy = pos.y * 8 + sub.y;
+    const int32_t next_tile = sx + sy * subtiles_per_side;
 
     const int t = in_tiles[tile_index].next * 64 + subtile_index;
     out_tiles[t].position = next_tile;
@@ -566,6 +634,7 @@ void copy_active_tiles(TileNode* const __restrict__ in_tiles,
  *  The higher-resolution image must be empty (all 0) when this is called;
  *  no comparison of Z values is done.
  */
+template <int SUBDIVISION>
 static __global__
 void copy_filled(const int32_t* __restrict__ prev,
                  int32_t* __restrict__ image,
@@ -575,15 +644,27 @@ void copy_filled(const int32_t* __restrict__ prev,
     const int32_t y = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (x < image_size_px && y < image_size_px) {
-        int32_t t = prev[x / 4 + y / 4 * (image_size_px / 4)];
+        int32_t t = prev[x / SUBDIVISION +
+                         y / SUBDIVISION * (image_size_px / SUBDIVISION)];
         if (t) {
-            image[x + y * image_size_px] = t * 4 + 3;
+            image[x + y * image_size_px] = t * SUBDIVISION + SUBDIVISION - 1;
         }
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/*
+ *  calculate_voxels
+ *
+ *  For a given set of input tiles, each is divided into 64 voxels.  Each
+ *  voxel's position in (orthographic, screen-aligned, +/-1) render space is
+ *  transformed by `mat`, then written to the `values` array.
+ *
+ *  For efficiency, we actually calculate two voxels per thread and store them
+ *  in a float2, i.e. data is packed as
+ *  [x0 x1 | y0 y1 | z0 z1 | x2 x3 | y2 y3 | z2 z3 | ...]
+ */
 static __global__
 void calculate_voxels(const TileNode* const __restrict__ in_tiles,
                       const uint32_t in_tile_count,
@@ -642,6 +723,69 @@ void calculate_voxels(const TileNode* const __restrict__ in_tiles,
 }
 
 static __global__
+void calculate_pixels(const TileNode* const __restrict__ in_tiles,
+                      const uint32_t in_tile_count,
+                      const uint32_t tiles_per_side,
+                      const Eigen::Matrix3f mat, const float z,
+                      float2* const __restrict__ values)
+{
+    // Each tile is executed by 32 threads (one for each pair of voxels).
+    //
+    // This is different from the eval_tiles_i function, which evaluates one
+    // tile per thread, because the tiles are already expanded by 64x by the
+    // time they're stored in the in_tiles list.
+    const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = voxel_index / 32;
+
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    const int4 sub = unpack(threadIdx.x % 32, 8);
+
+    const int32_t px = pos.x * 8 + sub.x;
+    const int32_t py_a = pos.y * 8 + sub.y;
+
+    const float size_recip = 1.0f / (tiles_per_side * 4);
+
+    const float fx = ((px + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fy_a = ((py_a + 0.5f) * size_recip - 0.5f) * 2.0f;
+
+    // Otherwise, calculate the X/Y/Z values
+    const float fw_a = mat(2, 0) * fx + mat(2, 1) * fy_a + mat(2, 2);
+    for (unsigned i=0; i < 2; ++i) {
+        values[voxel_index * 3 + i].x =
+            (mat(i, 0) * fx + mat(i, 1) * fy_a + mat(i, 2)) / fw_a;
+    }
+    values[voxel_index * 3 + 2].x = z;
+
+    // Do the same calculation for the second pixel
+    const int32_t py_b = pos.y * 8 + sub.y + 4;
+    const float fy_b = ((py_b + 0.5f) * size_recip - 0.5f) * 2.0f;
+    const float fw_b = mat(2, 0) * fx + mat(2, 1) * fy_b + mat(2, 2);
+
+    for (unsigned i=0; i < 2; ++i) {
+        values[voxel_index * 3 + i].y =
+            (mat(i, 0) * fx + mat(i, 1) * fy_b + mat(i, 2)) / fw_b;
+    }
+    values[voxel_index * 3 + 2].y = z;
+}
+
+/*
+ *  eval_voxels_f
+ *
+ *  Evaluates the 64 voxels which make up every tile in `in_tiles` (of which
+ *  there should be `in_tile_count`.  This must be called after
+ *  `calculate_voxels`, which writes voxel positions to the `values` array.
+ *
+ *  For efficiency, this function calculates two voxels per thread, reading and
+ *  writing float2 data (which improves memory access patterns).
+ *
+ *  Filled voxels are written to `image`, using atomic operations to accumulate
+ *  the voxel with the tallest Z value.
+ */
+template <unsigned DIMENSION>
+static __global__
 void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
                    int32_t* const __restrict__ image,
                    const uint32_t tiles_per_side,
@@ -663,7 +807,8 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    {   // Load values into registers, subdividing by 4x on each axis
+    // Check whether this pixel is masked in the output image
+    if (DIMENSION == 3) {
         const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
         const int4 sub = unpack(threadIdx.x % 32, 4);
 
@@ -743,28 +888,53 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
     // Check the result
     const uint8_t i_out = I_OUT(data);
 
-    // The second voxel is always higher in Z, so it masks the lower voxel
-    if (slots[i_out].y < 0.0f) {
-        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-        const int4 sub = unpack(threadIdx.x % 32, 4);
-        const int32_t px = pos.x * 4 + sub.x;
-        const int32_t py = pos.y * 4 + sub.y;
-        const int32_t pz = pos.z * 4 + sub.z + 2;
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    const int4 sub = unpack(threadIdx.x % 32, 4);
+    if (DIMENSION == 3) {
+        // The second voxel is always higher in Z, so it masks the lower voxel
+        if (slots[i_out].y < 0.0f) {
+            const int32_t px = pos.x * 4 + sub.x;
+            const int32_t py = pos.y * 4 + sub.y;
+            const int32_t pz = pos.z * 4 + sub.z + 2;
 
-        atomicMax(&image[px + py * tiles_per_side * 4], pz);
-    } else if (slots[i_out].x < 0.0f) {
-        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-        const int4 sub = unpack(threadIdx.x % 32, 4);
-        const int32_t px = pos.x * 4 + sub.x;
-        const int32_t py = pos.y * 4 + sub.y;
-        const int32_t pz = pos.z * 4 + sub.z;
+            atomicMax(&image[px + py * tiles_per_side * 4], pz);
+        } else if (slots[i_out].x < 0.0f) {
+            const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+            const int4 sub = unpack(threadIdx.x % 32, 4);
+            const int32_t px = pos.x * 4 + sub.x;
+            const int32_t py = pos.y * 4 + sub.y;
+            const int32_t pz = pos.z * 4 + sub.z;
 
-        atomicMax(&image[px + py * tiles_per_side * 4], pz);
+            atomicMax(&image[px + py * tiles_per_side * 4], pz);
+        }
+    } else if (DIMENSION == 2) {
+        if (slots[i_out].y < 0.0f) {
+            const int32_t px = pos.x * 8 + sub.x;
+            const int32_t py = pos.y * 8 + sub.y + 4;
+
+            image[px + py * tiles_per_side * 8] = 1;
+        }
+        if (slots[i_out].x < 0.0f) {
+            const int32_t px = pos.x * 8 + sub.x;
+            const int32_t py = pos.y * 8 + sub.y;
+
+            image[px + py * tiles_per_side * 8] = 1;
+        }
     }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/*
+ *  eval_pixels_d
+ *
+ *  For each active pixel in `image`, renders its partial derivatives
+ *  (using automatic differentiation), interpreting the result as its normal
+ *  and saving it to the `output` image.
+ *
+ *  We search through the `tiles`, `subtiles`, `microtiles` structure to
+ *  find the shortest tape useful for each pixel, as an optimization.
+ */
 static __global__
 void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
                    const int32_t* const __restrict__ image,
@@ -919,7 +1089,154 @@ void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void Context::render(const Tape& tape, const Eigen::Matrix4f mat) {
+void Context::render2D(const Tape& tape, const Eigen::Matrix3f& mat, const float z) {
+    // Reset the tape index and copy the tape to the beginning of the
+    // context's tape buffer area.
+    *tape_index = tape.length;
+    cudaMemcpy(tape_data.get(), tape.data.get(),
+               sizeof(uint64_t) * tape.length,
+               cudaMemcpyDeviceToDevice);
+
+    // Reset all of the data arrays.  In 2D, we only use stages 0, 2, and 3
+    // for 64^2, 8^2, and per-voxel evaluation steps.
+    CUDA_CHECK(cudaMemset(stages[0].filled.get(), 0, sizeof(int32_t) *
+                          pow(image_size_px / 64, 2)));
+    CUDA_CHECK(cudaMemset(stages[2].filled.get(), 0, sizeof(int32_t) *
+                          pow(image_size_px / 8, 2)));
+    CUDA_CHECK(cudaMemset(stages[3].filled.get(), 0, sizeof(int32_t) *
+                          pow(image_size_px, 2)));
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Evaluation of 64x64 tiles
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Go the whole list of first-stage tiles, assigning each to
+    // be [position, tape = 0, next = -1]
+    unsigned count = pow(image_size_px / 64, 2);
+    unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+    preload_tiles<<<num_blocks, NUM_THREADS>>>(stages[0].tiles.get(), count);
+
+    // Iterate over 64^2, 8^2 tiles
+    for (unsigned i=0; i < 3; i += 2) {
+        const unsigned tile_size_px = i ? 8 : 64;
+        const unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+
+        if (values_size < num_blocks * NUM_THREADS * 3) {
+            values.reset(CUDA_MALLOC(Interval, num_blocks * NUM_THREADS * 3));
+            values_size = num_blocks * NUM_THREADS * 3;
+        }
+
+        // Unpack position values into interval X/Y/Z in the values array
+        // This is done in a separate kernel to avoid bloating the
+        // eval_tiles_i kernel with more registers, which is detrimental
+        // to occupancy.
+        calculate_intervals_2d<<<num_blocks, NUM_THREADS>>>(
+            stages[i].tiles.get(),
+            count,
+            image_size_px / tile_size_px,
+            mat, z,
+            reinterpret_cast<Interval*>(values.get()));
+
+        // Do the actual tape evaluation, which is the expensive step
+        eval_tiles_i<<<num_blocks, NUM_THREADS>>>(
+            tape_data.get(),
+            tape_index.get(),
+            stages[i].filled.get(),
+            image_size_px / tile_size_px,
+
+            stages[i].tiles.get(),
+            count,
+
+            reinterpret_cast<Interval*>(values.get()));
+
+        // Mark the total number of active tiles (from this stage) to 0
+        cudaMemsetAsync(num_active_tiles.get(), 0, sizeof(int32_t));
+
+        // Count up active tiles, to figure out how much memory needs to be
+        // allocated in the next stage.
+        assign_next_nodes<<<num_blocks, NUM_THREADS>>>(
+            stages[i].tiles.get(),
+            count,
+            num_active_tiles.get());
+
+        // Count the number of active tiles, which have been accumulated
+        // through repeated calls to assign_next_nodes
+        int32_t active_tile_count;
+        cudaMemcpy(&active_tile_count, num_active_tiles.get(), sizeof(int32_t),
+                   cudaMemcpyDeviceToHost);
+        if (i == 0) {
+            active_tile_count *= 64;
+        }
+
+        // Make sure that the subtiles buffer has enough room
+        // This wastes a small amount of data for the per-pixel evaluation,
+        // where the `next` indexes aren't used, but it's relatively small.
+        const int next = i ? 3 : 2;
+        if (active_tile_count > stages[next].tile_array_size) {
+            stages[next].tile_array_size = active_tile_count;
+            stages[next].tiles.reset(CUDA_MALLOC(TileNode, active_tile_count));
+        }
+
+        if (i < 2) {
+            // Build the new tile list from active tiles in the previous list
+            subdivide_active_tiles_2d<<<num_blocks*64, NUM_THREADS>>>(
+                stages[i].tiles.get(),
+                count,
+                image_size_px / tile_size_px,
+                stages[next].tiles.get());
+        } else {
+            // Special case for per-pixel evaluation, which
+            // doesn't unpack every single pixel (since that would take up
+            // 64x extra space).
+            copy_active_tiles<<<num_blocks, NUM_THREADS>>>(
+                stages[i].tiles.get(),
+                count,
+                image_size_px / tile_size_px,
+                stages[next].tiles.get());
+        }
+
+        {   // Copy filled tiles into the next level's image (expanding them
+            // by 64x).  This is cleaner that accumulating all of the levels
+            // in a single pass, and could (possibly?) help with skipping
+            // fully occluded tiles.
+            const unsigned next_tile_size = tile_size_px / 8;
+            const uint32_t u = ((image_size_px / next_tile_size) / 32);
+            copy_filled<8><<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+                    stages[i].filled.get(),
+                    stages[next].filled.get(),
+                    image_size_px / next_tile_size);
+        }
+
+        // Assign the next number of tiles to evaluate
+        count = active_tile_count;
+    }
+
+    // Time to render individual pixels!
+    num_blocks = (count + NUM_TILES - 1) / NUM_TILES;
+    const size_t num_values = num_blocks * NUM_TILES * 32 * 3;
+    if (values_size < num_values) {
+        values.reset(CUDA_MALLOC(float2, num_values));
+        values_size = num_values;
+    }
+    calculate_pixels<<<num_blocks, NUM_TILES * 32>>>(
+        stages[3].tiles.get(),
+        count,
+        image_size_px / 8,
+        mat, z,
+        reinterpret_cast<float2*>(values.get()));
+    eval_voxels_f<2><<<num_blocks, NUM_TILES * 32>>>(
+        tape_data.get(),
+        stages[3].filled.get(),
+        image_size_px / 8,
+
+        stages[3].tiles.get(),
+        count,
+
+        reinterpret_cast<float2*>(values.get()));
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
     // Reset the tape index and copy the tape to the beginning of the
     // context's tape buffer area.
     *tape_index = tape.length;
@@ -961,7 +1278,7 @@ void Context::render(const Tape& tape, const Eigen::Matrix4f mat) {
         // This is done in a separate kernel to avoid bloating the
         // eval_tiles_i kernel with more registers, which is detrimental
         // to occupancy.
-        calculate_intervals<<<num_blocks, NUM_THREADS>>>(
+        calculate_intervals_3d<<<num_blocks, NUM_THREADS>>>(
             stages[i].tiles.get(),
             count,
             image_size_px / tile_size_px,
@@ -1028,7 +1345,7 @@ void Context::render(const Tape& tape, const Eigen::Matrix4f mat) {
 
         if (i < 2) {
             // Build the new tile list from active tiles in the previous list
-            subdivide_active_tiles<<<num_blocks*64, NUM_THREADS>>>(
+            subdivide_active_tiles_3d<<<num_blocks*64, NUM_THREADS>>>(
                 stages[i].tiles.get(),
                 count,
                 image_size_px / tile_size_px,
@@ -1050,7 +1367,7 @@ void Context::render(const Tape& tape, const Eigen::Matrix4f mat) {
             // fully occluded tiles.
             const unsigned next_tile_size = tile_size_px / 4;
             const uint32_t u = ((image_size_px / next_tile_size) / 32);
-            copy_filled<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+            copy_filled<4><<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
                     stages[i].filled.get(),
                     stages[i + 1].filled.get(),
                     image_size_px / next_tile_size);
@@ -1073,7 +1390,7 @@ void Context::render(const Tape& tape, const Eigen::Matrix4f mat) {
         image_size_px / 4,
         mat,
         reinterpret_cast<float2*>(values.get()));
-    eval_voxels_f<<<num_blocks, NUM_TILES * 32>>>(
+    eval_voxels_f<3><<<num_blocks, NUM_TILES * 32>>>(
         tape_data.get(),
         stages[3].filled.get(),
         image_size_px / 4,
