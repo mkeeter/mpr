@@ -5,6 +5,8 @@
 #include "gpu_deriv.hpp"
 #include "gpu_interval.hpp"
 
+using namespace libfive::cuda;
+
 #ifdef USE_AFFINE
 #define IntervalType Affine
 #else

@@ -19,23 +19,23 @@ struct Affine {
         : v0(v0), d1(d1), d2(d2), d3(d3), err(err)
     {}
 
-    __device__ inline explicit Affine(const Interval& i)
+    __device__ inline explicit Affine(const libfive::cuda::Interval& i)
         : v0(i.mid()),
           d1(0.0f), d2(0.0f), d3(0.0f),
           err(i.rad())
     {}
 
-    __device__ inline static Affine X(const Interval& x)
+    __device__ inline static Affine X(const libfive::cuda::Interval& x)
     { return Affine(x.mid(), x.rad(), 0.0f, 0.0f, 0.0f); }
 
-    __device__ inline static Affine Y(const Interval& y)
+    __device__ inline static Affine Y(const libfive::cuda::Interval& y)
     { return Affine(y.mid(), 0.0f, y.rad(), 0.0f, 0.0f); }
 
-    __device__ inline static Affine Z(const Interval& z)
+    __device__ inline static Affine Z(const libfive::cuda::Interval& z)
     { return Affine(z.mid(), 0.0f, 0.0f, z.rad(), 0.0f); }
 
 #ifdef __CUDACC__
-    __device__ Interval as_interval() const {
+    __device__ libfive::cuda::Interval as_interval() const {
         float lower = v0;
         float upper = v0;
 #define CHECK(d) do {  \
@@ -112,13 +112,13 @@ __device__ inline Affine unary_op(const Affine& x,
 // Min-range reciprocal
 __device__ inline Affine reciprocal(const Affine& input) {
     // Stolfi, p. 70
-    const Interval i = input.as_interval();
+    const libfive::cuda::Interval i = input.as_interval();
     const float a = fminf(fabsf(i.lower()), fabsf(i.upper()));
     const float b = fmaxf(fabsf(i.lower()), fabsf(i.upper()));
     const float alpha = -__fdiv_rd(1.0f, __fmul_ru(b, b));
     const float d_max = __fsub_ru(__fdiv_ru(1.0f, a), __fmul_ru(alpha, a));
     const float d_min = __fsub_rd(__fdiv_rd(1.0f, b), __fmul_rd(alpha, b));
-    Interval d { d_min, d_max};
+    libfive::cuda::Interval d { d_min, d_max};
     float zeta = d.mid();
     if (i.lower() < 0.0f) {
         zeta = -zeta;
@@ -130,7 +130,7 @@ __device__ inline Affine reciprocal(const Affine& input) {
 // Optimal sqrt
 __device__ inline Affine sqrt(const Affine& input) {
     // Fryazinov, p. 9
-    Interval i = input.as_interval();
+    libfive::cuda::Interval i = input.as_interval();
     if (i.upper() < 0.0f) {
         return {CUDART_NAN_F, 0.0f, 0.0f, 0.0f, 0.0f};
     }
@@ -147,7 +147,7 @@ __device__ inline Affine sqrt(const Affine& input) {
 }
 
 __device__ inline Affine abs(const Affine& input) {
-    const Interval i = input.as_interval();
+    const libfive::cuda::Interval i = input.as_interval();
     if (i.upper() <= 0.0f) {
         return -input;
     } else if (i.lower() >= 0.0f) {
@@ -252,8 +252,8 @@ __device__ inline Affine operator/(const float& a, const Affine& b) {
 }
 
 __device__ inline Affine min(const Affine& a, const Affine& b, int& choice) {
-    const Interval ia = a.as_interval();
-    const Interval ib = b.as_interval();
+    const libfive::cuda::Interval ia = a.as_interval();
+    const libfive::cuda::Interval ib = b.as_interval();
     if (ia.upper() < ib.lower()) {
         choice = 1;
         return a;
@@ -298,7 +298,7 @@ __device__ inline Affine min(const Affine& a, const Affine& b, int& choice) {
 }
 
 __device__ inline Affine min(const Affine& a, const float& b, int& choice) {
-    const Interval ia = a.as_interval();
+    const libfive::cuda::Interval ia = a.as_interval();
     if (ia.upper() < b) {
         choice = 1;
         return a;
@@ -310,7 +310,7 @@ __device__ inline Affine min(const Affine& a, const float& b, int& choice) {
 }
 
 __device__ inline Affine min(const float& a, const Affine& b, int& choice) {
-    const Interval ib = b.as_interval();
+    const libfive::cuda::Interval ib = b.as_interval();
     if (a < ib.lower()) {
         choice = 1;
         return Affine(a);
@@ -322,8 +322,8 @@ __device__ inline Affine min(const float& a, const Affine& b, int& choice) {
 }
 
 __device__ inline Affine max(const Affine& a, const Affine& b, int& choice) {
-    const Interval ia = a.as_interval();
-    const Interval ib = b.as_interval();
+    const libfive::cuda::Interval ia = a.as_interval();
+    const libfive::cuda::Interval ib = b.as_interval();
     if (ia.lower() > ib.upper()) {
         choice = 1;
         return a;
@@ -368,7 +368,7 @@ __device__ inline Affine max(const Affine& a, const Affine& b, int& choice) {
 }
 
 __device__ inline Affine max(const Affine& a, const float& b, int& choice) {
-    const Interval ia = a.as_interval();
+    const libfive::cuda::Interval ia = a.as_interval();
     if (ia.lower() > b) {
         choice = 1;
         return a;
@@ -380,7 +380,7 @@ __device__ inline Affine max(const Affine& a, const float& b, int& choice) {
 }
 
 __device__ inline Affine max(const float& a, const Affine& b, int& choice) {
-    const Interval ib = b.as_interval();
+    const libfive::cuda::Interval ib = b.as_interval();
     if (a > ib.upper()) {
         choice = 1;
         return Affine(a);

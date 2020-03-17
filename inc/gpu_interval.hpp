@@ -2,6 +2,9 @@
 
 #include <math_constants.h>
 
+namespace libfive {
+namespace cuda {
+
 struct Interval {
     __device__ inline Interval() { /* YOLO */ }
     __device__ inline explicit Interval(float f) : v(make_float2(f, f)) {}
@@ -339,7 +342,8 @@ __device__ inline Interval acos(const Interval& x) {
         return {CUDART_NAN_F, CUDART_NAN_F};
     } else {
         // Use double precision, since there aren't _ru / _rd primitives
-        return {acos(x.upper()), acos(x.lower())};
+        return {__double2float_rd(::acos(x.upper())),
+                __double2float_ru(::acos(x.lower()))};
     }
 }
 
@@ -348,18 +352,21 @@ __device__ inline Interval asin(const Interval& x) {
         return {CUDART_NAN_F, CUDART_NAN_F};
     } else {
         // Use double precision, since there aren't _ru / _rd primitives
-        return {asin(x.lower()), asin(x.upper())};
+        return {__double2float_rd(::asin(x.lower())),
+                __double2float_ru(::asin(x.upper()))};
     }
 }
 
 __device__ inline Interval atan(const Interval& x) {
     // Use double precision, since there aren't _ru / _rd primitives
-    return {atan(x.lower()), atan(x.upper())};
+    return {__double2float_rd(::atan(x.lower())),
+            __double2float_ru(::atan(x.upper()))};
 }
 
 __device__ inline Interval exp(const Interval& x) {
     // Use double precision, since there aren't _ru / _rd primitives
-    return {exp(x.lower()), exp(x.upper())};
+    return {__double2float_rd(::exp(x.lower())),
+            __double2float_ru(::exp(x.upper()))};
 }
 
 __device__ inline Interval fmod(const Interval& x, const Interval& y) {
@@ -394,9 +401,9 @@ __device__ inline Interval cos(const Interval& x) {
     const float l = tmp.lower();
     const float u = tmp.lower();
     if (u <= pi.lower()) {
-        return {cos(u), cos(l)};
+        return {__double2float_rd(::cos(u)), __double2float_ru(::cos(l))};
     } else if (u <= pi2.lower()) {
-        return {-1.0f, cos(fminf(__fsub_rd(pi2.lower(), u), l))};
+        return {-1.0f, __double2float_ru(::cos(fminf(__fsub_rd(pi2.lower(), u), l)))};
     } else {
         return {-1.0f, 1.0f};
     }
@@ -410,10 +417,13 @@ __device__ inline Interval log(const Interval& x) {
     if (x.upper() < 0.0f) {
         return {CUDART_NAN_F, CUDART_NAN_F};
     } else if (x.lower() <= 0.0f) {
-        return {0.0f, log(x.upper())};
+        return {0.0f, __double2float_ru(::log(x.upper()))};
     } else {
-        return {log(x.lower()), log(x.upper())};
+        return {__double2float_rd(::log(x.lower())),
+                __double2float_ru(::log(x.upper()))};
     }
 }
-
 #endif
+
+}   // namespace cuda
+}   // namespace libfive

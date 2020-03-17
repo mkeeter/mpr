@@ -41,7 +41,7 @@ void v3_calculate_intervals(const v3_tile_node_t* const __restrict__ in_tiles,
                             const uint32_t in_tile_count,
                             const uint32_t tiles_per_side,
                             const Eigen::Matrix4f mat,
-                            Interval* const __restrict__ values)
+                            libfive::cuda::Interval* const __restrict__ values)
 {
     const uint32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count) {
@@ -49,14 +49,14 @@ void v3_calculate_intervals(const v3_tile_node_t* const __restrict__ in_tiles,
     }
 
     const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-    const Interval ix = {(pos.x / (float)tiles_per_side - 0.5f) * 2.0f,
+    const libfive::cuda::Interval ix = {(pos.x / (float)tiles_per_side - 0.5f) * 2.0f,
                    ((pos.x + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
-    const Interval iy = {(pos.y / (float)tiles_per_side - 0.5f) * 2.0f,
+    const libfive::cuda::Interval iy = {(pos.y / (float)tiles_per_side - 0.5f) * 2.0f,
                    ((pos.y + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
-    const Interval iz = {(pos.z / (float)tiles_per_side - 0.5f) * 2.0f,
+    const libfive::cuda::Interval iz = {(pos.z / (float)tiles_per_side - 0.5f) * 2.0f,
                    ((pos.z + 1) / (float)tiles_per_side - 0.5f) * 2.0f};
 
-    Interval ix_, iy_, iz_, iw_;
+    libfive::cuda::Interval ix_, iy_, iz_, iw_;
     ix_ = mat(0, 0) * ix +
           mat(0, 1) * iy +
           mat(0, 2) * iz + mat(0, 3);
@@ -89,7 +89,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
                      v3_tile_node_t* const __restrict__ in_tiles,
                      const int32_t in_tile_count,
 
-                     const Interval* __restrict__ values)
+                     const libfive::cuda::Interval* __restrict__ values)
 {
     const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
     if (tile_index >= in_tile_count) {
@@ -101,7 +101,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
         return;
     }
 
-    Interval slots[128];
+    libfive::cuda::Interval slots[128];
     slots[((const uint8_t*)tape_data)[1]] = values[tile_index * 3];
     slots[((const uint8_t*)tape_data)[2]] = values[tile_index * 3 + 1];
     slots[((const uint8_t*)tape_data)[3]] = values[tile_index * 3 + 2];
@@ -165,7 +165,7 @@ void v3_eval_tiles_i(uint64_t* const __restrict__ tape_data,
             case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
             case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
 
-            case GPU_OP_COPY_IMM: out = Interval(imm); break;
+            case GPU_OP_COPY_IMM: out = libfive::cuda::Interval(imm); break;
             case GPU_OP_COPY_LHS: out = lhs; break;
             case GPU_OP_COPY_RHS: out = rhs; break;
 
@@ -1084,7 +1084,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
 
         if (blob.values_size < num_blocks * NUM_THREADS * 3) {
             CUDA_FREE(blob.values);
-            blob.values = CUDA_MALLOC(Interval, num_blocks * NUM_THREADS * 3);
+            blob.values = CUDA_MALLOC(libfive::cuda::Interval, num_blocks * NUM_THREADS * 3);
             blob.values_size = num_blocks * NUM_THREADS * 3;
         }
 
@@ -1097,7 +1097,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
             count,
             blob.image_size_px / tile_size_px,
             mat,
-            (Interval*)blob.values);
+            (libfive::cuda::Interval*)blob.values);
 
         // Mark every tile which is covered in the image as masked,
         // which means it will be skipped later on.  We do this again below,
@@ -1119,7 +1119,7 @@ void render_v3_blob(v3_blob_t& blob, Eigen::Matrix4f mat) {
             blob.stages[i].tiles,
             count,
 
-            (Interval*)blob.values);
+            (libfive::cuda::Interval*)blob.values);
 
         // Mark the total number of active tiles (from this stage) to 0
         cudaMemsetAsync(blob.num_active_tiles, 0, sizeof(int32_t));
