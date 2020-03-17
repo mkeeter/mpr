@@ -8,8 +8,6 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
-
 int main(int argc, char **argv)
 {
     libfive::Tree t = libfive::Tree::X();

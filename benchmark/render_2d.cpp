@@ -14,7 +14,7 @@
 int main(int argc, char **argv)
 {
     libfive::Tree t = libfive::Tree::X();
-    if (argc == 2) {
+    if (argc >= 2) {
         std::ifstream ifs;
         ifs.open(argv[1]);
         if (ifs.is_open()) {
@@ -31,17 +31,20 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    auto tape = libfive::cuda::Tape(t);
-    auto c = libfive::cuda::Context(2048);
-
-    auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 1; ++i) {
-        c.render2D(tape, Eigen::Matrix3f::Identity(), 0.0f);
+    int resolution = 2048;
+    if (argc >= 3) {
+        resolution = strtol(argv[2], NULL, 10);
+        if (errno || resolution == 0) {
+            fprintf(stderr, "Could not parse resolution '%s'\n",
+                    argv[2]);
+            exit(1);
+        }
     }
-    auto end_gpu = std::chrono::steady_clock::now();
-    std::cout << "GPU rendering took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() <<
-        " ms\n";
+
+    auto tape = libfive::cuda::Tape(t);
+    auto c = libfive::cuda::Context(resolution);
+
+    c.render2D(tape, Eigen::Matrix3f::Identity(), 0.0f);
 
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(c.image_size_px, c.image_size_px);
@@ -55,14 +58,7 @@ int main(int argc, char **argv)
 
     std::atomic_bool abort(false);
     libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, c.image_size_px / 2);
-    auto start_cpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 10; ++i) {
-        auto h = libfive::Heightmap::render(t, vox, abort);
-    }
-    auto end_cpu = std::chrono::steady_clock::now();
-    std::cout << "CPU rendering took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu).count() <<
-        " ms\n";
+    auto h = libfive::Heightmap::render(t, vox, abort);
     libfive::Heightmap::render(t, vox, abort)->savePNG("out_cpu.png");
 
     return 0;
