@@ -175,6 +175,7 @@ void calculate_intervals_2d(const TileNode* const __restrict__ in_tiles,
  *  The new tape is written to the tile's `tape` variable, because it is valid
  *  for any evaluation which takes place within the tile.
  */
+template <int DIMENSION>
 static __global__
 void eval_tiles_i(uint64_t* const __restrict__ tape_data,
                   int32_t* const __restrict__ tape_index,
@@ -287,23 +288,30 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
             slots[i_out].upper());
 #endif
 
+    // Empty
     if (slots[i_out].lower() > 0.0f) {
         in_tiles[tile_index].position = -1;
         return;
     }
 
     // Masked
-    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
-    if (image[pos.w] > pos.z) {
-        in_tiles[tile_index].position = -1;
-        return;
+    if (DIMENSION == 3) {
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        if (image[pos.w] > pos.z) {
+            in_tiles[tile_index].position = -1;
+            return;
+        }
     }
 
     // Filled
     if (slots[i_out].upper() < 0.0f) {
         const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
         in_tiles[tile_index].position = -1;
-        atomicMax(&image[pos.w], pos.z);
+        if (DIMENSION == 3) {
+            atomicMax(&image[pos.w], pos.z);
+        } else {
+            image[pos.w] = 1;
+        }
         return;
     }
 
@@ -1138,7 +1146,7 @@ void Context::render2D(const Tape& tape, const Eigen::Matrix3f& mat, const float
             reinterpret_cast<Interval*>(values.get()));
 
         // Do the actual tape evaluation, which is the expensive step
-        eval_tiles_i<<<num_blocks, NUM_THREADS>>>(
+        eval_tiles_i<2><<<num_blocks, NUM_THREADS>>>(
             tape_data.get(),
             tape_index.get(),
             stages[i].filled.get(),
@@ -1296,7 +1304,7 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
             count);
 
         // Do the actual tape evaluation, which is the expensive step
-        eval_tiles_i<<<num_blocks, NUM_THREADS>>>(
+        eval_tiles_i<3><<<num_blocks, NUM_THREADS>>>(
             tape_data.get(),
             tape_index.get(),
             stages[i].filled.get(),
