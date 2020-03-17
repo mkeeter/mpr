@@ -687,7 +687,7 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
     }
     pz += 1; // Move slightly in front of the surface
 
-    Deriv slots[128];
+    libfive::cuda::Deriv slots[128];
 
     {   // Calculate size and load into initial slots
         const float size_recip = 1.0f / image_size_px;
@@ -701,7 +701,7 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
                           mat(3, 1) * fy +
                           mat(3, 2) * fz + mat(3, 3);
         for (unsigned i=0; i < 3; ++i) {
-            slots[((const uint8_t*)tape_data)[i + 1]] = Deriv(
+            slots[((const uint8_t*)tape_data)[i + 1]] = libfive::cuda::Deriv(
                 (mat(i, 0) * fx +
                  mat(i, 1) * fy +
                  mat(i, 2) * fz + mat(0, 3)) / fw_);
@@ -792,7 +792,7 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
             case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
             case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
 
-            case GPU_OP_COPY_IMM: out = Deriv(imm); break;
+            case GPU_OP_COPY_IMM: out = libfive::cuda::Deriv(imm); break;
             case GPU_OP_COPY_LHS: out = lhs; break;
             case GPU_OP_COPY_RHS: out = rhs; break;
 
@@ -804,7 +804,7 @@ void v3_eval_pixels_d(const uint64_t* const __restrict__ tape_data,
     }
 
     const uint8_t i_out = I_OUT(data);
-    const Deriv result = slots[i_out];
+    const libfive::cuda::Deriv result = slots[i_out];
     float norm = sqrtf(powf(result.dx(), 2) +
                        powf(result.dy(), 2) +
                        powf(result.dz(), 2));

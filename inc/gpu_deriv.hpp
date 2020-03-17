@@ -2,6 +2,9 @@
 
 #include <math_constants.h>
 
+namespace libfive {
+namespace cuda {
+
 struct Deriv {
     __device__ inline Deriv() : v(make_float4(0.0f, 0.0f, 0.0f, 0.0f)) {}
     __device__ inline explicit Deriv(float f) : v(make_float4(0.0f, 0.0f, 0.0f, f)) {}
@@ -190,3 +193,6 @@ __device__ inline Deriv log(const Deriv& a) {
     return {logf(v), a.dx() / v, a.dy() / v, a.dz() / v};
 }
 #endif
+
+}   // namespace cuda
+}   // namespace libfive
