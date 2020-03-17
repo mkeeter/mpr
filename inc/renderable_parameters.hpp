@@ -36,5 +36,3 @@
  *  shared memory to work with (either 48K or 96K per SM / block).
  *  Set this to apply a global scale to the size of shared caches. */
 #define LIBFIVE_CUDA_SM_SCALE 1
-
-//#define USE_AFFINE

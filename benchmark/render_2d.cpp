@@ -8,7 +8,8 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
+#include "context.hpp"
+#include "tape.hpp"
 
 int main(int argc, char **argv)
 {
@@ -30,12 +31,12 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    auto r = Renderable::build(t, 2048, 2);
-    r->tape.print();
+    auto tape = libfive::cuda::Tape(t);
+    auto c = libfive::cuda::Context(2048);
 
     auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 100; ++i) {
-        r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
+    for (unsigned i=0; i < 1; ++i) {
+        c.render2D(tape, Eigen::Matrix3f::Identity(), 0.0f);
     }
     auto end_gpu = std::chrono::steady_clock::now();
     std::cout << "GPU rendering took " <<
@@ -43,16 +44,17 @@ int main(int argc, char **argv)
         " ms\n";
 
     // Save the image using libfive::Heightmap
-    libfive::Heightmap out(r->image.size_px, r->image.size_px);
-    for (unsigned x=0; x < r->image.size_px; ++x) {
-        for (unsigned y=0; y < r->image.size_px; ++y) {
-            out.depth(y, x) = r->heightAt(x, y);
+    libfive::Heightmap out(c.image_size_px, c.image_size_px);
+    unsigned i=0;
+    for (int x=0; x < c.image_size_px; ++x) {
+        for (int y=0; y < c.image_size_px; ++y) {
+            out.depth(x, y) = c.stages[3].filled.get()[i++];
         }
     }
     out.savePNG("out_gpu_depth.png");
 
     std::atomic_bool abort(false);
-    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->image.size_px / 2);
+    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, c.image_size_px / 2);
     auto start_cpu = std::chrono::steady_clock::now();
     for (unsigned i=0; i < 10; ++i) {
         auto h = libfive::Heightmap::render(t, vox, abort);

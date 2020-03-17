@@ -9,7 +9,6 @@
 #include <libfive/render/discrete/heightmap.hpp>
 
 #include "renderable.hpp"
-#include "v3.hpp"
 
 #include "tape.hpp"
 #include "context.hpp"
@@ -69,23 +68,6 @@ int main(int argc, char **argv)
     T(3,2) = 0.3f;
 
     const std::vector<int> sizes = {256, 512};//, 1024, 1536, 2048};
-    std::cout << "Rendering with v3 architecture:" << std::endl;
-    for (auto size: sizes) {
-        auto r = build_v3_blob(t, size);
-
-        std::cout << size << " ";
-        get_stats([&](){ render_v3_blob(r, Eigen::Matrix4f::Identity()); });
-
-        libfive::Heightmap out(size, size);
-        uint32_t i = 0;
-        for (int x=0; x < size; ++x) {
-            for (int y=0; y < size; ++y) {
-                out.depth(y, x) = r.stages[3].filled[i++];
-            }
-        }
-        out.savePNG("out_gpu_depth_v3_" + std::to_string(size) + ".png");
-        free_v3_blob(r);
-    }
     std::cout << "Rendering with context architecture:" << std::endl;
     for (auto size: sizes) {
         auto tape = libfive::cuda::Tape(t);

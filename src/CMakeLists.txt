@@ -6,8 +6,7 @@ add_library(five-cuda
     gpu_opcode.cu
     tape.cpp
     context.cpp
-    context.cu
-    v3.cu)
+    context.cu)
 target_include_directories(five-cuda PUBLIC
     ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
     ${CMAKE_CURRENT_SOURCE_DIR}/../inc
