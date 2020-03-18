@@ -7,8 +7,7 @@
 #include "gpu_interval.hpp"
 #include "gpu_opcode.hpp"
 
-namespace libfive {
-namespace cuda {
+using namespace libfive::cuda;
 
 static inline __device__
 int4 unpack(int32_t pos, int32_t tiles_per_side)
@@ -32,7 +31,7 @@ int4 unpack(int32_t pos, int32_t tiles_per_side)
  *  This function should be called before the first stage of per-tile
  *  evaluation, when we want to evaluate every single top-level tile.
  */
-static __global__
+__global__
 void preload_tiles(TileNode* const __restrict__ in_tiles,
                    const int32_t in_tile_count)
 {
@@ -65,7 +64,7 @@ void preload_tiles(TileNode* const __restrict__ in_tiles,
  *  register bloat).  Unfortunately, this reduces performance, at least on
  *  my laptop.
  */
-static __global__
+__global__
 void calculate_intervals_3d(const TileNode* const __restrict__ in_tiles,
                             const uint32_t in_tile_count,
                             const uint32_t tiles_per_side,
@@ -109,7 +108,7 @@ void calculate_intervals_3d(const TileNode* const __restrict__ in_tiles,
     values[tile_index * 3 + 2] = iz_;
 }
 
-static __global__
+__global__
 void calculate_intervals_2d(const TileNode* const __restrict__ in_tiles,
                             const uint32_t in_tile_count,
                             const uint32_t tiles_per_side,
@@ -176,7 +175,7 @@ void calculate_intervals_2d(const TileNode* const __restrict__ in_tiles,
  *  for any evaluation which takes place within the tile.
  */
 template <int DIMENSION>
-static __global__
+__global__
 void eval_tiles_i(uint64_t* const __restrict__ tape_data,
                   int32_t* const __restrict__ tape_index,
                   int32_t* const __restrict__ image,
@@ -438,7 +437,7 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
  *  image, then it will never contribute, so its position is set to -1 to mark
  *  it as inactive.
  */
-static __global__
+__global__
 void mask_filled_tiles(int32_t* const __restrict__ image,
                        const uint32_t tiles_per_side,
 
@@ -479,7 +478,7 @@ void mask_filled_tiles(int32_t* const __restrict__ image,
  *  `in_tiles`) tightly.  It could also be implemented as a scan, but this is
  *  far from the limiting factor.
  */
-static __global__
+__global__
 void assign_next_nodes(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
 
@@ -531,7 +530,7 @@ void assign_next_nodes(TileNode* const __restrict__ in_tiles,
  *  contained within the parent and can reuse its tape.  They are assigned
  *  `next` = -1, because we don't yet know whether they have children.
  */
-static __global__
+__global__
 void subdivide_active_tiles_3d(
         const TileNode* const __restrict__ in_tiles,
         const int32_t in_tile_count,
@@ -563,7 +562,7 @@ void subdivide_active_tiles_3d(
     out_tiles[t].next = -1;
 }
 
-static __global__
+__global__
 void subdivide_active_tiles_2d(
         const TileNode* const __restrict__ in_tiles,
         const int32_t in_tile_count,
@@ -604,7 +603,7 @@ void subdivide_active_tiles_2d(
  *  Tiles keep the `tape` value when copied, but `next` is assigned to -1
  *  (since we're at the bottom of the evaluation stack).
  */
-static __global__
+__global__
 void copy_active_tiles(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
                        const int32_t tiles_per_side,
@@ -632,7 +631,7 @@ void copy_active_tiles(TileNode* const __restrict__ in_tiles,
  *  The higher-resolution image must be empty (all 0) when this is called;
  *  no comparison of Z values is done.
  */
-static __global__
+__global__
 void copy_filled_3d(const int32_t* __restrict__ prev,
                     int32_t* __restrict__ image,
                     const int32_t image_size_px)
@@ -647,7 +646,7 @@ void copy_filled_3d(const int32_t* __restrict__ prev,
         }
     }
 }
-static __global__
+__global__
 void copy_filled_2d(const int32_t* __restrict__ prev,
                     int32_t* __restrict__ image,
                     const int32_t image_size_px)
@@ -675,7 +674,7 @@ void copy_filled_2d(const int32_t* __restrict__ prev,
  *  in a float2, i.e. data is packed as
  *  [x0 x1 | y0 y1 | z0 z1 | x2 x3 | y2 y3 | z2 z3 | ...]
  */
-static __global__
+__global__
 void calculate_voxels(const TileNode* const __restrict__ in_tiles,
                       const uint32_t in_tile_count,
                       const uint32_t tiles_per_side,
@@ -732,7 +731,7 @@ void calculate_voxels(const TileNode* const __restrict__ in_tiles,
     }
 }
 
-static __global__
+__global__
 void calculate_pixels(const TileNode* const __restrict__ in_tiles,
                       const uint32_t in_tile_count,
                       const uint32_t tiles_per_side,
@@ -797,7 +796,7 @@ void calculate_pixels(const TileNode* const __restrict__ in_tiles,
  *  the voxel with the tallest Z value.
  */
 template <unsigned DIMENSION>
-static __global__
+__global__
 void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
                    int32_t* const __restrict__ image,
                    const uint32_t tiles_per_side,
@@ -946,7 +945,7 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
  *  We search through the `tiles`, `subtiles`, `microtiles` structure to
  *  find the shortest tape useful for each pixel, as an optimization.
  */
-static __global__
+__global__
 void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
                    const int32_t* const __restrict__ image,
                    uint32_t* const __restrict__ output,
@@ -1425,6 +1424,3 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
     }
     CUDA_CHECK(cudaDeviceSynchronize());
 }
-
-} // namespace cuda
-} // namespace libfive
