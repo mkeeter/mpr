@@ -240,13 +240,15 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
             case GPU_OP_MUL_LHS_IMM: out = lhs * imm; break;
             case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
 
-#define CHOICE(f, a, b) {                                           \
-    int c = 0;                                                      \
-    out = f(a, b, c);                                               \
-    choices[choice_index / 16] |= (c << ((choice_index % 16) * 2)); \
-    choice_index++;                                                 \
-    has_any_choice |= (c != 0);                                     \
-    break;                                                          \
+#define CHOICE(f, a, b) {                                               \
+    int c = 0;                                                          \
+    out = f(a, b, c);                                                   \
+    if (choice_index < 128 * 16) {                                      \
+        choices[choice_index / 16] |= (c << ((choice_index % 16) * 2)); \
+    }                                                                   \
+    choice_index++;                                                     \
+    has_any_choice |= (c != 0);                                         \
+    break;                                                              \
 }
             case GPU_OP_MIN_LHS_IMM: CHOICE(min, lhs, imm);
             case GPU_OP_MIN_LHS_RHS: CHOICE(min, lhs, rhs);
@@ -275,18 +277,6 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
     // Check the result
     const uint8_t i_out = I_OUT(data);
-#if 0
-    printf("%u:%u: [%f %f] [%f %f] [%f %f] => [%f %f]\n",
-            blockIdx.x, threadIdx.x,
-            values[tile_index * 3].lower(),
-            values[tile_index * 3].upper(),
-            values[tile_index * 3 + 1].lower(),
-            values[tile_index * 3 + 1].upper(),
-            values[tile_index * 3 + 2].lower(),
-            values[tile_index * 3 + 2].upper(),
-            slots[i_out].lower(),
-            slots[i_out].upper());
-#endif
 
     // Empty
     if (slots[i_out].lower() > 0.0f) {
@@ -361,7 +351,7 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
         assert(!has_choice || choice_index >= 0);
 
-        const int choice = has_choice
+        const int choice = (has_choice && choice_index < 128 * 16)
             ? ((choices[choice_index / 16] >>
               ((choice_index % 16) * 2)) & 3)
             : 0;
@@ -728,7 +718,7 @@ void calculate_voxels(const TileNode* const __restrict__ in_tiles,
     }
 
     // Do the same calculation for the second pixel
-    const int32_t pz_b = pos.z * 4 + sub.z + 2;
+    const int32_t pz_b = pz_a + 2;
     const float fz_b = ((pz_b + 0.5f) * size_recip - 0.5f) * 2.0f;
     const float fw_b = mat(3, 0) * fx +
                        mat(3, 1) * fy +
@@ -765,6 +755,8 @@ void calculate_pixels(const TileNode* const __restrict__ in_tiles,
 
     const int32_t px = pos.x * 8 + sub.x;
     const int32_t py_a = pos.y * 8 + sub.y;
+    assert(sub.y < 4);
+    assert(sub.z == 0);
 
     const float size_recip = 1.0f / (tiles_per_side * 8);
 
@@ -777,10 +769,9 @@ void calculate_pixels(const TileNode* const __restrict__ in_tiles,
         values[voxel_index * 3 + i].x =
             (mat(i, 0) * fx + mat(i, 1) * fy_a + mat(i, 2)) / fw_a;
     }
-    values[voxel_index * 3 + 2].x = z;
 
     // Do the same calculation for the second pixel
-    const int32_t py_b = pos.y * 8 + sub.y + 4;
+    const int32_t py_b = py_a + 4;
     const float fy_b = ((py_b + 0.5f) * size_recip - 0.5f) * 2.0f;
     const float fw_b = mat(2, 0) * fx + mat(2, 1) * fy_b + mat(2, 2);
 
@@ -788,7 +779,8 @@ void calculate_pixels(const TileNode* const __restrict__ in_tiles,
         values[voxel_index * 3 + i].y =
             (mat(i, 0) * fx + mat(i, 1) * fy_b + mat(i, 2)) / fw_b;
     }
-    values[voxel_index * 3 + 2].y = z;
+
+    values[voxel_index * 3 + 2] = make_float2(z, z);
 }
 
 /*
