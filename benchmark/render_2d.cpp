@@ -33,6 +33,7 @@ int main(int argc, char **argv)
     }
     int resolution = 2048;
     if (argc >= 3) {
+        errno = 0;
         resolution = strtol(argv[2], NULL, 10);
         if (errno || resolution == 0) {
             fprintf(stderr, "Could not parse resolution '%s'\n",
