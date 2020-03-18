@@ -8,7 +8,8 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
+#include "context.hpp"
+#include "tape.hpp"
 
 int main(int argc, char **argv)
 {
@@ -30,55 +31,46 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    auto r_ = Renderable::build(t, 512, 3);
-    auto r = dynamic_cast<Renderable3D*>(r_.get());
-    r->tape.print();
+
+    int resolution = 512;
+    if (argc >= 3) {
+        errno = 0;
+        resolution = strtol(argv[2], NULL, 10);
+        if (errno || resolution == 0) {
+            fprintf(stderr, "Could not parse resolution '%s'\n",
+                    argv[2]);
+            exit(1);
+        }
+    }
+
+    auto tape = libfive::cuda::Tape(t);
+    auto c = libfive::cuda::Context(resolution);
 
     Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
     T(3,2) = 0.3f;
 
     // Warm-up runs
-    for (unsigned i=0; i < 0; ++i) {
-        r->run({T}, Renderable::MODE_SHADED);
-    }
-    auto start_gpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 1; ++i) {
-        r->run({T}, Renderable::MODE_SHADED);
-    }
-    auto end_gpu = std::chrono::steady_clock::now();
-    std::cout << "GPU rendering took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() <<
-        " ms\n";
+    c.render3D(tape, T);
 
     // Save the image using libfive::Heightmap
-    libfive::Heightmap out(r->image.size_px, r->image.size_px);
-    libfive::Heightmap shaded(r->image.size_px, r->image.size_px);
-    for (unsigned x=0; x < r->image.size_px; ++x) {
-        for (unsigned y=0; y < r->image.size_px; ++y) {
-            out.depth(y, x) = r->heightAt(x, y);
-            if (r->heightAt(x, y)) {
-                out.norm(y, x) = r->norm(x, y);
-                shaded.norm(y, x) = r->temp(x, y);
-            } else {
-                out.norm(y, x) = 0;
-                shaded.norm(y, x) = 0;
+    libfive::Heightmap out(c.image_size_px, c.image_size_px);
+    unsigned i=0;
+    for (int x=0; x < c.image_size_px; ++x) {
+        for (int y=0; y < c.image_size_px; ++y) {
+            const auto p = c.stages[3].filled.get()[i];
+            out.depth(x, y) = p;
+            if (p) {
+                out.norm(x, y) = c.normals.get()[i];
             }
+            ++i;
         }
     }
     out.savePNG("out_gpu_depth.png");
     out.saveNormalPNG("out_gpu_norm.png");
-    shaded.saveNormalPNG("out_gpu_shaded.png");
 
     std::atomic_bool abort(false);
-    libfive::Voxels vox({-1, -1, -1}, {1, 1, 1}, r->image.size_px / 2);
-    auto start_cpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 10; ++i) {
-        auto h = libfive::Heightmap::render(t, vox, abort);
-    }
-    auto end_cpu = std::chrono::steady_clock::now();
-    std::cout << "CPU rendering took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu).count() <<
-        " ms\n";
+    libfive::Voxels vox({-1, -1, -1}, {1, 1, 1}, c.image_size_px / 2);
+    auto h = libfive::Heightmap::render(t, vox, abort);
     libfive::Heightmap::render(t, vox, abort)->savePNG("out_cpu.png");
 
     return 0;
