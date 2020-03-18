@@ -8,7 +8,7 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
+#include "tape.hpp"
 
 int main(int argc, char **argv)
 {
@@ -30,16 +30,17 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
+    // Warm-up
     for (unsigned i=0; i < 100; ++i) {
-        auto r = Tape::build(t);
+        auto r = libfive::cuda::Tape(t);
     }
     auto start_gpu = std::chrono::steady_clock::now();
     for (unsigned i=0; i < 100; ++i) {
-        auto r = Tape::build(t);
+        auto r = libfive::cuda::Tape(t);
     }
     auto end_gpu = std::chrono::steady_clock::now();
     std::cout << "Building tape took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() <<
+        std::chrono::duration_cast<std::chrono::milliseconds>(end_gpu - start_gpu).count() / 100 <<
         " ms\n";
 
     return 0;
