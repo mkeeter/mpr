@@ -13,19 +13,46 @@ Tape::Tape(const libfive::Tree& tree) {
     auto lock = libfive::Cache::instance();
 
     auto ordered = tree.orderedDfs();
+    std::vector<libfive::Tree::Id> ordered_fast;
+    ordered_fast.reserve(ordered.size());
 
     std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
-    bool axes_used[3] = {false, false, false};
+    libfive::Tree::Id axes_used[3] = {nullptr};
     for (auto& c : ordered) {
-        if (c->op != libfive::Opcode::CONSTANT) {
-            // Very simple tracking of active spans, without clause reordering
-            // or any other cleverness.
-            last_used[c.lhs().id()] = c.id();
-            last_used[c.rhs().id()] = c.id();
+        using namespace libfive::Opcode;
+        // Very simple tracking of active spans, without clause reordering
+        // or any other cleverness.
+        switch (c->op) {
+            case CONSTANT: continue;
+            case VAR_X: axes_used[0] = c.id(); break;
+            case VAR_Y: axes_used[1] = c.id(); break;
+            case VAR_Z: axes_used[2] = c.id(); break;
+
+            // Opcodes which take two arguments store their RHS
+            case OP_ADD:
+            case OP_MUL:
+            case OP_MIN:
+            case OP_MAX:
+            case OP_SUB:
+            case OP_DIV:    last_used[c.rhs().id()] = c.id();
+                            // FALLTHROUGH
+
+            // Unary opcodes (and fallthrough) store their LHS)
+            case OP_SQUARE:
+            case OP_SQRT:
+            case OP_NEG:
+            case OP_SIN:
+            case OP_COS:
+            case OP_ASIN:
+            case OP_ACOS:
+            case OP_ATAN:
+            case OP_EXP:
+            case OP_ABS:
+            case OP_LOG:    last_used[c.lhs().id()] = c.id();
+                            ordered_fast.push_back(c.id());
+                            break;
+            default:    break;
         }
-        axes_used[0] |= c == libfive::Tree::X();
-        axes_used[1] |= c == libfive::Tree::Y();
-        axes_used[2] |= c == libfive::Tree::Z();
     }
 
     std::vector<uint8_t> free_slots;
@@ -34,14 +61,15 @@ Tape::Tape(const libfive::Tree& tree) {
 
     auto getSlot = [&](libfive::Tree::Id id) {
         // Pick a slot for the output of this opcode
-        uint8_t out;
+        uint8_t out = 0;
         if (free_slots.size()) {
             out = free_slots.back();
             free_slots.pop_back();
         } else {
-            out = num_slots++;
             if (num_slots == UINT8_MAX) {
                 fprintf(stderr, "Ran out of slots!\n");
+            } else {
+                out = num_slots++;
             }
         }
         bound_slots[id] = out;
@@ -50,14 +78,10 @@ Tape::Tape(const libfive::Tree& tree) {
 
     // Bind the axes to known slots, so that we can store their values
     // before beginning an evaluation.
-    const libfive::Tree axis_trees[3] = {
-        libfive::Tree::X(),
-        libfive::Tree::Y(),
-        libfive::Tree::Z()};
     uint64_t start = 0;
     for (unsigned i=0; i < 3; ++i) {
-        if (axes_used[i]) {
-            ((uint8_t*)&start)[i + 1] = getSlot(axis_trees[i].id());
+        if (axes_used[i] != nullptr) {
+            ((uint8_t*)&start)[i + 1] = getSlot(axes_used[i]);
         }
     }
     std::vector<uint64_t> flat;
@@ -69,12 +93,12 @@ Tape::Tape(const libfive::Tree& tree) {
         if (itr != bound_slots.end()) {
             return itr->second;
         } else {
-            fprintf(stderr, "Could not find bound slots");
+            fprintf(stderr, "Could not find bound slots %i\n", tree->op);
             return static_cast<uint8_t>(0);
         }
     };
 
-    for (auto& c : ordered) {
+    for (auto& c : ordered_fast) {
         uint64_t clause = 0;
         switch (c->op) {
             using namespace libfive::Opcode;
@@ -164,10 +188,10 @@ Tape::Tape(const libfive::Tree& tree) {
 
         // Release slots if this was their last use.  We do this now so
         // that one of them can be reused for the output slots below.
-        for (auto& h : {c.lhs().id(), c.rhs().id()}) {
+        for (auto& h : {c->lhs.get(), c->rhs.get()}) {
             if (h != nullptr &&
                 h->op != libfive::Opcode::CONSTANT &&
-                last_used[h] == c.id())
+                last_used[h] == c)
             {
                 auto itr = bound_slots.find(h);
                 free_slots.push_back(itr->second);
@@ -175,7 +199,7 @@ Tape::Tape(const libfive::Tree& tree) {
             }
         }
 
-        I_OUT(&clause) = getSlot(c.id());
+        I_OUT(&clause) = getSlot(c);
         flat.push_back(clause);
     }
 
