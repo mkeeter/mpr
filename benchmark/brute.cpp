@@ -64,7 +64,7 @@ int main(int argc, char **argv)
     auto tape = libfive::cuda::Tape(t);
 
     std::cout << "Rendering brute-force with interpreter\n";
-    for (int size=256; size <= 300; size += 64) {
+    for (int size=256; size <= 2048; size += 64) {
         auto ctx = libfive::cuda::Context(size);
         std::cout << size << " ";
         get_stats([&](){ ctx.render2D_brute(tape, Eigen::Matrix3f::Identity()); });
