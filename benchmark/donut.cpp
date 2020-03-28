@@ -6,7 +6,9 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
+#include "clause.hpp"
+#include "tape.hpp"
+#include "gpu_opcode.hpp"
 
 // Not actually a benchmark, used to generate data for the paper
 int main(int argc, char** argv)
@@ -26,18 +28,14 @@ int main(int argc, char** argv)
             exit(1);
         }
     }
-    auto r = Renderable::build(t, 128, 2);
+    auto r = libfive::cuda::Tape(t);
 
-    for (unsigned i=0; i < r->tape.num_clauses; ++i) {
-        const auto c = r->tape[i];
-        std::cout << libfive::Opcode::toString((libfive::Opcode::Opcode)c.opcode) << " & "
-                  << ((c.banks & 1) ? "constant " : "slot ") << c.lhs << " & "
-                  << ((c.banks & 2) ? "constant " : "slot ") << c.rhs << " & "
-                  << c.out << "\\\\\n";
-    }
-    std::cout << "\n\n";
-    for (unsigned i=0; i < r->tape.num_constants; ++i) {
-        const float f = r->tape.constant(i);
-        std::cout << i << " & " << f << "\\\\\n";
+    for (int i=1; i < r.length - 1; ++i) {
+        const auto c = r.data.get()[i];
+        std::cout << gpu_op_str(OP(&c)) << " & "
+                  << (int)I_LHS(&c) << " & "
+                  << (int)I_RHS(&c) << " & "
+                  << IMM(&c) << " & "
+                  << (int)I_OUT(&c) << "\\\\\n";
     }
 }
