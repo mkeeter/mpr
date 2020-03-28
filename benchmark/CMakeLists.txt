@@ -26,15 +26,3 @@ benchmark(dump_tape)
 benchmark(tape_shortening)
 benchmark(ssao)
 benchmark(tape_building_time)
-
-################################################################################
-
-add_executable(tape_size tape_size.cpp ../gui/interpreter.cpp)
-set_target_properties(tape_size PROPERTIES CXX_STANDARD 11)
-target_include_directories(tape_size PUBLIC ../lib)
-target_link_libraries(tape_size five-cuda five-guile)
-
-if(APPLE)
-  # Add the rpath to the lib
-  set_property(TARGET tape_size PROPERTY BUILD_RPATH ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES})
-endif()
