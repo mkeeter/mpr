@@ -606,7 +606,6 @@ void subdivide_active_tiles_2d(
 __global__
 void copy_active_tiles(TileNode* const __restrict__ in_tiles,
                        const int32_t in_tile_count,
-                       const int32_t tiles_per_side,
                        TileNode* const __restrict__ out_tiles)
 {
     const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -1201,7 +1200,6 @@ void Context::render2D(const Tape& tape, const Eigen::Matrix3f& mat, const float
             copy_active_tiles<<<num_blocks, NUM_THREADS>>>(
                 stages[i].tiles.get(),
                 count,
-                image_size_px / tile_size_px,
                 stages[next].tiles.get());
         }
 
@@ -1367,7 +1365,6 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
             copy_active_tiles<<<num_blocks, NUM_THREADS>>>(
                 stages[i].tiles.get(),
                 count,
-                image_size_px / tile_size_px,
                 stages[i + 1].tiles.get());
         }
 
@@ -1422,5 +1419,55 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
                 stages[1].tiles.get(),
                 stages[2].tiles.get());
     }
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
+
+void Context::render2D_brute(const Tape& tape,
+                             const Eigen::Matrix3f& mat,
+                             const float z)
+{
+    // Reset the tape index and copy the tape to the beginning of the
+    // context's tape buffer area.
+    *tape_index = tape.length;
+    cudaMemcpy(tape_data.get(), tape.data.get(),
+               sizeof(uint64_t) * tape.length,
+               cudaMemcpyDeviceToDevice);
+
+    // Reset the final image array, since we'll be rendering directly to it
+    CUDA_CHECK(cudaMemset(stages[3].filled.get(), 0, sizeof(int32_t) *
+                          pow(image_size_px, 2)));
+
+    // We'll only be evaluating 8x8 tiles, so preload all of them
+    unsigned count = pow(image_size_px / 8, 2);
+    if (count > stages[3].tile_array_size) {
+        stages[3].tile_array_size = count;
+        stages[3].tiles.reset(CUDA_MALLOC(TileNode, count));
+    }
+    unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+    preload_tiles<<<num_blocks, NUM_THREADS>>>(stages[3].tiles.get(), count);
+
+    // Time to render individual pixels!
+    num_blocks = (count + NUM_TILES - 1) / NUM_TILES;
+    const size_t num_values = num_blocks * NUM_TILES * 32 * 3;
+    if (values_size < num_values) {
+        values.reset(CUDA_MALLOC(float2, num_values));
+        values_size = num_values;
+    }
+    calculate_pixels<<<num_blocks, NUM_TILES * 32>>>(
+        stages[3].tiles.get(),
+        count,
+        image_size_px / 8,
+        mat, z,
+        reinterpret_cast<float2*>(values.get()));
+    eval_voxels_f<2><<<num_blocks, NUM_TILES * 32>>>(
+        tape_data.get(),
+        stages[3].filled.get(),
+        image_size_px / 8,
+
+        stages[3].tiles.get(),
+        count,
+
+        reinterpret_cast<float2*>(values.get()));
     CUDA_CHECK(cudaDeviceSynchronize());
 }

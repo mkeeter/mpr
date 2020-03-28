@@ -8,7 +8,38 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
+#include "context.hpp"
+#include "tape.hpp"
+
+void get_stats(std::function<void()> f) {
+    // Warm up
+    for (unsigned i=0; i < 10; ++i) {
+        f();
+    }
+    std::vector<double> times_ms;
+    const auto count = 50;
+    for (unsigned i=0; i < count; ++i) {
+        using std::chrono::steady_clock;
+        using std::chrono::duration_cast;
+        using std::chrono::nanoseconds;
+        auto start_gpu = steady_clock::now();
+        f();
+        auto end_gpu = steady_clock::now();
+        times_ms.push_back(
+                duration_cast<nanoseconds>(end_gpu - start_gpu).count() / 1e6);
+    }
+    double mean = 0;
+    for (auto& b : times_ms) {
+        mean += b;
+    }
+    mean /= times_ms.size();
+    double stdev = 0;
+    for (auto& b : times_ms) {
+        stdev += std::pow(b - mean, 2);
+    }
+    stdev = sqrt(stdev / (times_ms.size() - 1));
+    std::cout << mean << " " << stdev << "\n";
+}
 
 int main(int argc, char **argv)
 {
@@ -30,50 +61,26 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
+    auto tape = libfive::cuda::Tape(t);
 
     std::cout << "Rendering brute-force with interpreter\n";
-    for (unsigned i=256; i <= 2048; i += 64)
-    {
-        auto r_ = Renderable::build(t, i, 2);
-        auto r = dynamic_cast<Renderable2D*>(r_.get());
-        // Warm up
-        for (unsigned i=0; i < 10; ++i) {
-            r->runBrute({Eigen::Matrix4f::Identity()});
-        }
-        // Benchmark
-        std::vector<double> times_ms;
-        for (unsigned i=0; i < 50; ++i) {
-            auto start_gpu = std::chrono::steady_clock::now();
-            r->runBrute({Eigen::Matrix4f::Identity()});
-            auto end_gpu = std::chrono::steady_clock::now();
-            times_ms.push_back(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(end_gpu - start_gpu).count()
-                    / 1e6
-                    );
-        }
-        double mean = 0;
-        for (auto& b : times_ms) {
-            mean += b;
-        }
-        mean /= times_ms.size();
-        double stdev = 0;
-        for (auto& b : times_ms) {
-            stdev += std::pow(b - mean, 2);
-        }
-        stdev = sqrt(stdev / (times_ms.size() - 1));
-        std::cout << i << " " << mean << " " << stdev << "\n";
+    for (int size=256; size <= 300; size += 64) {
+        auto ctx = libfive::cuda::Context(size);
+        std::cout << size << " ";
+        get_stats([&](){ ctx.render2D_brute(tape, Eigen::Matrix3f::Identity()); });
 
         // Save the image using libfive::Heightmap
-        libfive::Heightmap out(r->image.size_px, r->image.size_px);
-        for (unsigned x=0; x < r->image.size_px; ++x) {
-            for (unsigned y=0; y < r->image.size_px; ++y) {
-                out.depth(y, x) = r->heightAt(x, y);
+        libfive::Heightmap out(size, size);
+        uint32_t i = 0;
+        for (int x=0; x < size; ++x) {
+            for (int y=0; y < size; ++y) {
+                out.depth(x, y) = ctx.stages[3].filled.get()[i++];
             }
         }
-        out.savePNG("out_brute_" + std::to_string(i) + ".png");
+        out.savePNG("out_brute_" + std::to_string(size) + ".png");
     }
-    return 0;
 
+#if 0
     std::cout << "Rendering hard-compiled kernel\n";
     for (unsigned i=256; i <= 4096; i += 64)
     {
@@ -115,45 +122,22 @@ int main(int argc, char **argv)
         }
         out.savePNG("out_kernel_" + std::to_string(i) + ".png");
     }
+#endif
 
     std::cout << "Rendering fancy algorithm with interpreter\n";
-    for (unsigned i=256; i <= 4096; i += 64)
-    {
-        auto r_ = Renderable::build(t, i, 2);
-        auto r = dynamic_cast<Renderable2D*>(r_.get());
-        for (unsigned i=0; i < 10; ++i) {
-            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
-        }
-        // Benchmark
-        std::vector<double> times_ms;
-        for (unsigned i=0; i < 100; ++i) {
-            auto start_gpu = std::chrono::steady_clock::now();
-            r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_HEIGHTMAP);
-            auto end_gpu = std::chrono::steady_clock::now();
-            times_ms.push_back(
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(end_gpu - start_gpu).count()
-                    / 1e6
-                    );
-        }
-        double mean = 0;
-        for (auto& b : times_ms) {
-            mean += b;
-        }
-        mean /= times_ms.size();
-        double stdev = 0;
-        for (auto& b : times_ms) {
-            stdev += std::pow(b - mean, 2);
-        }
-        stdev = sqrt(stdev / (times_ms.size() - 1));
-        std::cout << i << " " << mean << " " << stdev << "\n";
+    for (int size=256; size <= 4096; size += 64) {
+        auto ctx = libfive::cuda::Context(size);
+        std::cout << size << " ";
+        get_stats([&](){ ctx.render2D(tape, Eigen::Matrix3f::Identity()); });
 
         // Save the image using libfive::Heightmap
-        libfive::Heightmap out(r->image.size_px, r->image.size_px);
-        for (unsigned x=0; x < r->image.size_px; ++x) {
-            for (unsigned y=0; y < r->image.size_px; ++y) {
-                out.depth(y, x) = r->heightAt(x, y);
+        libfive::Heightmap out(size, size);
+        uint32_t i = 0;
+        for (int x=0; x < size; ++x) {
+            for (int y=0; y < size; ++y) {
+                out.depth(x, y) = ctx.stages[3].filled.get()[i++];
             }
         }
-        out.savePNG("out_alg_" + std::to_string(i) + ".png");
+        out.savePNG("out_alg_" + std::to_string(size) + ".png");
     }
 }

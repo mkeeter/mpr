@@ -31,6 +31,14 @@ struct Context {
     void render2D(const Tape& tape, const Eigen::Matrix3f& mat,
                   const float z=0.0f);
 
+    /*  Renders a 2D image using a brute-force approach, without subdivision
+     *  or tape pruning.  This is only useful for benchmarking, and is not
+     *  recommended for regular use. */
+    void render2D_brute(const Tape& tape,
+                        const Eigen::Matrix3f& mat,
+                        const float z=0.0f);
+
+
     const int32_t image_size_px;
 
     Ptr<uint64_t> tape_data;    // original tape is copied to index 0
