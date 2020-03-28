@@ -204,7 +204,8 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
     // Pick out the tape based on the pointer stored in the tiles list
     const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
 
-    uint32_t choices[128] = {0};
+    constexpr static int CHOICE_ARRAY_SIZE = 256;
+    uint32_t choices[CHOICE_ARRAY_SIZE] = {0};
     int choice_index = 0;
     bool has_any_choice = false;
 
@@ -242,7 +243,7 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
 #define CHOICE(f, a, b) {                                               \
     int c = 0;                                                          \
     out = f(a, b, c);                                                   \
-    if (choice_index < 128 * 16) {                                      \
+    if (choice_index < CHOICE_ARRAY_SIZE * 16) {                        \
         choices[choice_index / 16] |= (c << ((choice_index % 16) * 2)); \
     }                                                                   \
     choice_index++;                                                     \
@@ -350,7 +351,7 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
 
         assert(!has_choice || choice_index >= 0);
 
-        const int choice = (has_choice && choice_index < 128 * 16)
+        const int choice = (has_choice && choice_index < CHOICE_ARRAY_SIZE * 16)
             ? ((choices[choice_index / 16] >>
               ((choice_index % 16) * 2)) & 3)
             : 0;
