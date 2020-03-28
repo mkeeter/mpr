@@ -80,10 +80,16 @@ int main(int argc, char **argv)
         uint32_t i = 0;
         for (int x=0; x < size; ++x) {
             for (int y=0; y < size; ++y) {
-                out.depth(y, x) = c.stages[3].filled.get()[i++];
+                const auto p = c.stages[3].filled.get()[i];
+                out.depth(x, y) = p;
+                if (p) {
+                    out.norm(x, y) = c.normals.get()[i];
+                }
+                ++i;
             }
         }
         out.savePNG("out_gpu_depth_ctx_" + std::to_string(size) + ".png");
+        out.saveNormalPNG("out_gpu_norm_ctx_" + std::to_string(size) + ".png");
     }
     std::cout << "Rendering with original architecture:" << std::endl;
     for (auto size: sizes) {
