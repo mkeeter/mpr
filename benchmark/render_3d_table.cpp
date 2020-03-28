@@ -80,11 +80,8 @@ int main(int argc, char **argv)
         uint32_t i = 0;
         for (int x=0; x < size; ++x) {
             for (int y=0; y < size; ++y) {
-                const auto p = c.stages[3].filled.get()[i];
-                out.depth(x, y) = p;
-                if (p) {
-                    out.norm(x, y) = c.normals.get()[i];
-                }
+                out.depth(x, y) = c.stages[3].filled.get()[i];
+                out.norm(x, y) = c.normals.get()[i];
                 ++i;
             }
         }
