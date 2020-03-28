@@ -968,7 +968,11 @@ void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
     if (pz == 0) {
         return;
     }
-    pz += 1; // Move slightly in front of the surface
+    // Move slightly in front of the surface, unless we're at the top of the
+    // region (in which case moving would put us in an invalid tile)
+    if (pz < image_size_px - 1) {
+        pz += 1;
+    }
 
     Deriv slots[128];
 

@@ -39,7 +39,7 @@ struct Context {
                         const float z=0.0f);
 
 
-    const int32_t image_size_px;
+    int32_t image_size_px;
 
     Ptr<uint64_t> tape_data;    // original tape is copied to index 0
     Ptr<int32_t> tape_index;    // single value
