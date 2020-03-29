@@ -31,13 +31,13 @@ inline void cudaFreeChecked(void* ptr, const char *file, int line) {
 namespace libfive {
 namespace cuda {
 
-template <typename T>
 struct Deleter {
-  void operator()(T* ptr) { CUDA_FREE(ptr); }
+    template <typename T>
+    void operator()(T* ptr) { CUDA_FREE(ptr); }
 };
 
 template <typename T>
-using Ptr = std::unique_ptr<T, Deleter<T>>;
+using Ptr = std::unique_ptr<T, Deleter>;
 
 // Helper function to do constexpr integer powers
 inline constexpr unsigned __host__ __device__ pow(unsigned p, unsigned n) {

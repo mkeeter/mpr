@@ -46,7 +46,7 @@ int main(int argc, char **argv)
         uint32_t i = 0;
         for (int x=0; x < size; ++x) {
             for (int y=0; y < size; ++y) {
-                out.depth(x, y) = ctx.stages[3].filled.get()[i++];
+                out.depth(x, y) = ctx.stages[3].filled[i++];
             }
         }
         out.savePNG("out_brute_" + std::to_string(size) + ".png");
@@ -107,7 +107,7 @@ int main(int argc, char **argv)
         uint32_t i = 0;
         for (int x=0; x < size; ++x) {
             for (int y=0; y < size; ++y) {
-                out.depth(x, y) = ctx.stages[3].filled.get()[i++];
+                out.depth(x, y) = ctx.stages[3].filled[i++];
             }
         }
         out.savePNG("out_alg_" + std::to_string(size) + ".png");

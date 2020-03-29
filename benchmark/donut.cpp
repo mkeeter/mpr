@@ -31,7 +31,7 @@ int main(int argc, char** argv)
     auto r = libfive::cuda::Tape(t);
 
     for (int i=1; i < r.length - 1; ++i) {
-        const auto c = r.data.get()[i];
+        const auto c = r.data[i];
         std::cout << gpu_op_str(OP(&c)) << " & "
                   << (int)I_LHS(&c) << " & "
                   << (int)I_RHS(&c) << " & "

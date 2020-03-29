@@ -52,7 +52,7 @@ int main(int argc, char **argv)
     unsigned i=0;
     for (int x=0; x < c.image_size_px; ++x) {
         for (int y=0; y < c.image_size_px; ++y) {
-            out.depth(x, y) = c.stages[3].filled.get()[i++];
+            out.depth(x, y) = c.stages[3].filled[i++];
         }
     }
     out.savePNG("out_gpu_depth.png");

@@ -18,10 +18,10 @@ struct TileNode {
 
 struct Tiles {
     /* 2D array of filled Z values (or 0) */
-    Ptr<int32_t> filled;
+    Ptr<int32_t[]> filled;
 
     /*  1D list of active tiles */
-    Ptr<TileNode> tiles;
+    Ptr<TileNode[]> tiles;
     size_t tile_array_size=0;
 };
 
@@ -41,7 +41,7 @@ struct Context {
 
     int32_t image_size_px;
 
-    Ptr<uint64_t> tape_data;    // original tape is copied to index 0
+    Ptr<uint64_t[]> tape_data;    // original tape is copied to index 0
     Ptr<int32_t> tape_index;    // single value
 
     Tiles stages[4];        // 64^3, 16^3, 4^3, voxels
@@ -51,7 +51,7 @@ struct Context {
     Ptr<void> values; // Used to pass data around
     size_t values_size=0;
 
-    Ptr<uint32_t> normals;
+    Ptr<uint32_t[]> normals;
 };
 
 } // cuda
