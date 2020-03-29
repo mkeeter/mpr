@@ -1,6 +1,7 @@
 add_executable(demo MACOSX_BUNDLE
     main.cpp
     interpreter.cpp
+    tex.cu
 
     imgui/imgui.cpp
     imgui/imgui_demo.cpp
@@ -10,7 +11,10 @@ add_executable(demo MACOSX_BUNDLE
     imgui/imgui_widgets.cpp
     imgui-color-text-edit/TextEditor.cpp)
 
-set_target_properties(demo PROPERTIES CXX_STANDARD 11)
+set_target_properties(demo PROPERTIES
+    CUDA_STANDARD 11
+    CXX_STANDARD 11
+    CUDA_SEPARABLE_COMPILATION ON)
 target_include_directories(demo PRIVATE
     common/inc
     imgui

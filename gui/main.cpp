@@ -13,8 +13,11 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
-#include "renderable.hpp"
+#include "context.hpp"
+#include "tape.hpp"
 #include "interpreter.hpp"
+
+#include "tex.hpp"
 
 #define TEXTURE_SIZE 2048
 
@@ -23,9 +26,8 @@ static void glfw_error_callback(int error, const char* description)
     fprintf(stderr, "glfw Error %d: %s\n", error, description);
 }
 
-
 struct Shape {
-    Renderable::Handle handle;
+    libfive::cuda::Tape tape;
     libfive::Tree tree;
 };
 
@@ -139,14 +141,16 @@ int main(int argc, char** argv)
                  TEXTURE_SIZE, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
-    auto cuda_tex = Renderable::registerTexture(gl_tex);
+    auto cuda_tex = register_texture(gl_tex);
 
     bool just_saved = false;
 
     // Main loop
     int render_size = 256;
     int render_dimension = 3;
-    int render_mode = 2;
+    int render_mode = RENDER_MODE_NORMALS;
+
+    libfive::cuda::Context ctx(render_size);
 
     while (!glfwWindowShouldClose(window))
     {
@@ -261,11 +265,7 @@ int main(int argc, char** argv)
                 // Create new shapes from the script
                 for (auto& t : interpreter.shapes) {
                     if (shapes.find(t.first) == shapes.end()) {
-                        Shape s = { Renderable::build(
-                                        t.second,
-                                        render_size,
-                                        render_dimension),
-                                    t.second };
+                        Shape s = { libfive::cuda::Tape(t.second), t.second };
                         shapes.emplace(t.first, std::move(s));
                     }
                 }
@@ -300,6 +300,12 @@ int main(int argc, char** argv)
             ImGui::SameLine();
             ImGui::RadioButton("2048", &render_size, 2048);
 
+            // Update the render context if size has changed
+            if (render_size != ctx.image_size_px)
+            {
+                ctx = libfive::cuda::Context(render_size);
+            }
+
             ImGui::Text("Dimension:");
             ImGui::RadioButton("2D", &render_dimension, 2);
             ImGui::SameLine();
@@ -307,13 +313,15 @@ int main(int argc, char** argv)
 
             if (render_dimension == 3) {
                 ImGui::Text("Render mode:");
-                ImGui::RadioButton("Heightmap", &render_mode, Renderable::MODE_HEIGHTMAP);
+                ImGui::RadioButton("Heightmap", &render_mode, RENDER_MODE_DEPTH);
                 ImGui::SameLine();
-                ImGui::RadioButton("Normals", &render_mode, Renderable::MODE_NORMALS);
+                ImGui::RadioButton("Normals", &render_mode, RENDER_MODE_NORMALS);
                 ImGui::SameLine();
-                ImGui::RadioButton("SSAO", &render_mode, Renderable::MODE_SSAO);
+                //ImGui::RadioButton("SSAO", &render_mode, Renderable::MODE_SSAO);
                 ImGui::SameLine();
-                ImGui::RadioButton("Shaded", &render_mode, Renderable::MODE_SHADED);
+                //ImGui::RadioButton("Shaded", &render_mode, Renderable::MODE_SHADED);
+            } else {
+                render_mode = RENDER_MODE_2D;
             }
         ImGui::End();
 
@@ -326,39 +334,39 @@ int main(int argc, char** argv)
             for (auto& s : shapes) {
                 ImGui::Text("Shape at %p", (void*)s.first);
                 ImGui::Columns(2);
-                ImGui::Text("%u clauses", s.second.handle->tape.num_clauses);
-                ImGui::Text("%u registers", s.second.handle->tape.num_regs);
+                //ImGui::Text("%u clauses", s.second.handle->tape.num_clauses);
+                //ImGui::Text("%u slots", s.second.handle->tape.num_regs);
                 ImGui::NextColumn();
-                ImGui::Text("%u constants", s.second.handle->tape.num_constants);
-                ImGui::Text("%u CSG nodes", s.second.handle->tape.num_csg_choices);
+                //ImGui::Text("%u constants", s.second.handle->tape.num_constants);
+                //ImGui::Text("%u CSG nodes", s.second.handle->tape.num_csg_choices);
                 ImGui::Columns(1);
 
                 {   // Timed rendering pass
                     using namespace std::chrono;
-                    const auto m = static_cast<Renderable::Mode>(render_mode);
                     auto start = high_resolution_clock::now();
-                        s.second.handle->run({model.matrix()}, m);
+                    if (render_dimension == 2) {
+                        Eigen::Matrix4f mat = model.matrix();
+                        Eigen::Matrix3f mat2d;
+                        mat2d.block<2, 2>(0, 0) = mat.block<2, 2>(0, 0);
+                        mat2d.block<2, 1>(0, 2) = mat.block<2, 1>(0, 3);
+                        mat2d.block<1, 2>(2, 0) = mat.block<1, 2>(3, 0);
+                        mat2d.block<1, 1>(2, 2) = mat.block<1, 1>(3, 3);
+                        ctx.render2D(s.second.tape, mat2d);
+                    } else {
+                        ctx.render3D(s.second.tape, model.matrix());
+                    }
                     auto end = high_resolution_clock::now();
                     auto dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
                     start = high_resolution_clock::now();
-                        s.second.handle->copyToTexture(cuda_tex, TEXTURE_SIZE,
-                                                       append, m);
+                    copy_to_texture(ctx, cuda_tex, TEXTURE_SIZE,
+                                    append, (Mode)render_mode);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Texture load time: %f s", dt.count() / 1e6);
                 }
 
-                if (render_size != (int)s.second.handle->image.size_px ||
-                    render_dimension != (int)s.second.handle->dimension())
-                {
-                    s.second.handle.reset();
-                    auto h = Renderable::build(s.second.tree,
-                                               render_size,
-                                               render_dimension);
-                    s.second.handle = std::move(h);
-                }
                 if (ImGui::Button("Save shape.frep")) {
                     auto a = libfive::Archive();
                     a.addShape(s.second.tree);
@@ -380,9 +388,9 @@ int main(int argc, char** argv)
             const float max_pixels = fmax(io.DisplaySize.x, io.DisplaySize.y);
             background->AddImage((void*)(intptr_t)gl_tex,
                     {io.DisplaySize.x / 2.0f - max_pixels / 2.0f,
-                     io.DisplaySize.y / 2.0f - max_pixels / 2.0f},
+                     io.DisplaySize.y / 2.0f + max_pixels / 2.0f},
                     {io.DisplaySize.x / 2.0f + max_pixels / 2.0f,
-                     io.DisplaySize.y / 2.0f + max_pixels / 2.0f});
+                     io.DisplaySize.y / 2.0f - max_pixels / 2.0f});
 
 
             // Draw XY axes based on current position

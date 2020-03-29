@@ -991,7 +991,7 @@ void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
             slots[((const uint8_t*)tape_data)[i + 1]] = Deriv(
                 (mat(i, 0) * fx +
                  mat(i, 1) * fy +
-                 mat(i, 2) * fz + mat(0, 3)) / fw_);
+                 mat(i, 2) * fz + mat(i, 3)) / fw_);
         }
         slots[((const uint8_t*)tape_data)[1]].v.x = 1.0f;
         slots[((const uint8_t*)tape_data)[2]].v.y = 1.0f;
