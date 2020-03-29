@@ -44,7 +44,7 @@ int main(int argc, char** argv)
         std::cout << libfive::cuda::gpu_op_str(OP(&c)) << " & "
                   << (int)I_LHS(&c) << " & "
                   << (int)I_RHS(&c) << " & "
-                  << IMM(&c) << " & "
+                  << IMM(&c) << (IMM(&c) == int(IMM(&c)) ? ".0f" : "f") << " & "
                   << (int)I_OUT(&c) << "\\\\\n";
     }
 }
