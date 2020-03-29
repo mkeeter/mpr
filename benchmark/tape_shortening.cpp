@@ -40,7 +40,7 @@ int main(int, char**)
         }
     }
     out.savePNG("hello_world.png");
-    //std::cout << "Initial clauses: " << tape.length << "\n";
+    std::cout << "Initial clauses: " << tape.length << "\n";
 
     for (unsigned i=0; i < pow(size / 64, 2); ++i) {
         const auto tile = ctx.stages[0].tiles[i];
