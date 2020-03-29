@@ -1107,18 +1107,18 @@ void Context::render2D(const Tape& tape, const Eigen::Matrix3f& mat, const float
     // Reset the tape index and copy the tape to the beginning of the
     // context's tape buffer area.
     *tape_index = tape.length;
-    cudaMemcpy(tape_data.get(), tape.data.get(),
-               sizeof(uint64_t) * tape.length,
-               cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(tape_data.get(), tape.data.get(),
+                    sizeof(uint64_t) * tape.length,
+                    cudaMemcpyDeviceToDevice);
 
     // Reset all of the data arrays.  In 2D, we only use stages 0, 2, and 3
     // for 64^2, 8^2, and per-voxel evaluation steps.
-    CUDA_CHECK(cudaMemset(stages[0].filled.get(), 0, sizeof(int32_t) *
-                          pow(image_size_px / 64, 2)));
-    CUDA_CHECK(cudaMemset(stages[2].filled.get(), 0, sizeof(int32_t) *
-                          pow(image_size_px / 8, 2)));
-    CUDA_CHECK(cudaMemset(stages[3].filled.get(), 0, sizeof(int32_t) *
-                          pow(image_size_px, 2)));
+    CUDA_CHECK(cudaMemsetAsync(stages[0].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px / 64, 2)));
+    CUDA_CHECK(cudaMemsetAsync(stages[2].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px / 8, 2)));
+    CUDA_CHECK(cudaMemsetAsync(stages[3].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px, 2)));
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 64x64 tiles
@@ -1253,9 +1253,9 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
     // Reset the tape index and copy the tape to the beginning of the
     // context's tape buffer area.
     *tape_index = tape.length;
-    cudaMemcpy(tape_data.get(), tape.data.get(),
-               sizeof(uint64_t) * tape.length,
-               cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(tape_data.get(), tape.data.get(),
+                    sizeof(uint64_t) * tape.length,
+                    cudaMemcpyDeviceToDevice);
 
     ////////////////////////////////////////////////////////////////////////////
     // Evaluation of 64x64x64 tiles
@@ -1264,11 +1264,11 @@ void Context::render3D(const Tape& tape, const Eigen::Matrix4f& mat) {
     // Reset all of the data arrays
     for (unsigned i=0; i < 4; ++i) {
         const unsigned tile_size_px = 64 / (1 << (i * 2));
-        CUDA_CHECK(cudaMemset(stages[i].filled.get(), 0, sizeof(int32_t) *
-                              pow(image_size_px / tile_size_px, 2)));
+        CUDA_CHECK(cudaMemsetAsync(stages[i].filled.get(), 0, sizeof(int32_t) *
+                                   pow(image_size_px / tile_size_px, 2)));
     }
-    CUDA_CHECK(cudaMemset(normals.get(), 0, sizeof(uint32_t) *
-                          pow(image_size_px, 2)));
+    CUDA_CHECK(cudaMemsetAsync(normals.get(), 0, sizeof(uint32_t) *
+                               pow(image_size_px, 2)));
 
     // Go the whole list of first-stage tiles, assigning each to
     // be [position, tape = 0, next = -1]
@@ -1435,13 +1435,13 @@ void Context::render2D_brute(const Tape& tape,
     // Reset the tape index and copy the tape to the beginning of the
     // context's tape buffer area.
     *tape_index = tape.length;
-    cudaMemcpy(tape_data.get(), tape.data.get(),
-               sizeof(uint64_t) * tape.length,
-               cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(tape_data.get(), tape.data.get(),
+                    sizeof(uint64_t) * tape.length,
+                    cudaMemcpyDeviceToDevice);
 
     // Reset the final image array, since we'll be rendering directly to it
-    CUDA_CHECK(cudaMemset(stages[3].filled.get(), 0, sizeof(int32_t) *
-                          pow(image_size_px, 2)));
+    CUDA_CHECK(cudaMemsetAsync(stages[3].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px, 2)));
 
     // We'll only be evaluating 8x8 tiles, so preload all of them
     unsigned count = pow(image_size_px / 8, 2);

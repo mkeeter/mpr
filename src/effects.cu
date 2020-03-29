@@ -251,7 +251,10 @@ void Effects::drawSSAO(const Context& ctx)
 {
     resizeTo(ctx);
 
-    CUDA_CHECK(cudaMemset(image.get(), 0, sizeof(int32_t) * pow(image_size_px, 2)));
+    const auto bytes = sizeof(int32_t) * pow(image_size_px, 2);
+    CUDA_CHECK(cudaMemsetAsync(tmp.get(), 0, bytes));
+    CUDA_CHECK(cudaMemsetAsync(image.get(), 0, bytes));
+
     const unsigned u = (image_size_px + 15) / 16;
     draw_ssao<<<dim3(u, u), dim3(16, 16)>>>(
             ctx.stages[3].filled.get(), ctx.normals.get(),
@@ -266,7 +269,10 @@ void Effects::drawShaded(const Context& ctx)
 {
     resizeTo(ctx);
 
-    CUDA_CHECK(cudaMemset(image.get(), 0, sizeof(int32_t) * pow(image_size_px, 2)));
+    const auto bytes = sizeof(int32_t) * pow(image_size_px, 2);
+    CUDA_CHECK(cudaMemsetAsync(tmp.get(), 0, bytes));
+    CUDA_CHECK(cudaMemsetAsync(image.get(), 0, bytes));
+
     const unsigned u = (image_size_px + 15) / 16;
     draw_ssao<<<dim3(u, u), dim3(16, 16)>>>(
             ctx.stages[3].filled.get(), ctx.normals.get(),
