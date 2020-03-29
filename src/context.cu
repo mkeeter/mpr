@@ -327,11 +327,22 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
     }
     active[i_out] = true;
 
+    // Check to make sure the tape isn't full
+    // This doesn't mean that we'll successfully claim a chunk, because
+    // other threads could claim chunks before us, but it's a way to check
+    // quickly (and prevents tape_index from getting absurdly large).
+    if (*tape_index >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+        return;
+    }
+
     // Claim a chunk of tape
     int32_t out_index = atomicAdd(tape_index, SUBTAPE_CHUNK_SIZE);
     int32_t out_offset = SUBTAPE_CHUNK_SIZE;
-    assert(out_index + out_offset < NUM_SUBTAPES *
-                                    SUBTAPE_CHUNK_SIZE);
+
+    // If we've run out of tape, then immediately return
+    if (out_index + out_offset >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+        return;
+    }
 
     // Write out the end of the tape, which is the same as the ending
     // of the previous tape (0 opcode, with i_out as the last slot)
@@ -371,10 +382,18 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
         --out_offset;
         if (out_offset == 0) {
             const int32_t prev_index = out_index;
+
+            // Early exit if we can't finish writing out this tape
+            if (*tape_index >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+                return;
+            }
             out_index = atomicAdd(tape_index, SUBTAPE_CHUNK_SIZE);
             out_offset = SUBTAPE_CHUNK_SIZE;
-            assert(out_index + out_offset < NUM_SUBTAPES *
-                                            SUBTAPE_CHUNK_SIZE);
+
+            // Later exit if we claimed a chunk that exceeds the tape array
+            if (out_index + out_offset >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+                return;
+            }
             --out_offset;
 
             // Forward-pointing link
