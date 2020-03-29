@@ -21,9 +21,10 @@ benchmark(brute.cu stats.cpp)
 
 benchmark(render_2d.cpp)
 benchmark(render_3d.cpp)
+benchmark(render_effects.cpp)
+
 benchmark(circle.cpp)
 benchmark(donut.cpp)
 benchmark(dump_tape.cpp)
 benchmark(tape_shortening.cpp)
-benchmark(ssao.cpp)
 benchmark(tape_building_time.cpp)

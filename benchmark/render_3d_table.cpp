@@ -8,8 +8,6 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
-
 #include "tape.hpp"
 #include "context.hpp"
 
@@ -40,7 +38,7 @@ int main(int argc, char **argv)
     T(3,2) = 0.3f;
 
     const std::vector<int> sizes = {256, 512};//, 1024, 1536, 2048};
-    std::cout << "Rendering with context architecture:" << std::endl;
+    std::cout << "Rendering..." << std::endl;
     for (auto size: sizes) {
         auto tape = libfive::cuda::Tape(t);
         auto c = libfive::cuda::Context(size);
@@ -59,20 +57,6 @@ int main(int argc, char **argv)
         }
         out.savePNG("out_gpu_depth_ctx_" + std::to_string(size) + ".png");
         out.saveNormalPNG("out_gpu_norm_ctx_" + std::to_string(size) + ".png");
-    }
-    std::cout << "Rendering with original architecture:" << std::endl;
-    for (auto size: sizes) {
-        auto r = Renderable::build(t, size, 3);
-        std::cout << size << " ";
-        get_stats([&](){r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_SHADED);});
-
-        libfive::Heightmap out(size, size);
-        for (int x=0; x < size; ++x) {
-            for (int y=0; y < size; ++y) {
-                out.depth(y, x) = r->heightAt(y, x);
-            }
-        }
-        out.savePNG("out_gpu_depth_orig_" + std::to_string(size) + ".png");
     }
     return 0;
 }
