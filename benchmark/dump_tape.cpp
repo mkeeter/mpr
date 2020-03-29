@@ -29,26 +29,19 @@ int main(int argc, char **argv)
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
 
-    std::cout << R"(__global__ void evalRawTape(Image* image, View v)
+    std::cout << R"(__global__ void evalRawTape(int image_size_px, int32_t* image)
 {
 
     uint32_t px = threadIdx.x + blockIdx.x * blockDim.x;
     uint32_t py = threadIdx.y + blockIdx.y * blockDim.y;
 
-    if (px >= image->size_px && py >= image->size_px) {
+    if (px >= image_size_px && py >= image_size_px) {
         return;
     }
 
-    const float3 f = image->voxelPos(make_uint3(px, py, 0));
-    const float x = v.mat(0, 0) * f.x +
-                    v.mat(0, 1) * f.y +
-                    v.mat(0, 2) * f.z + v.mat(0, 3);
-    const float y = v.mat(1, 0) * f.x +
-                    v.mat(1, 1) * f.y +
-                    v.mat(1, 2) * f.z + v.mat(1, 3);
-    const float z = v.mat(2, 0) * f.x +
-                    v.mat(2, 1) * f.y +
-                    v.mat(2, 2) * f.z + v.mat(2, 3);
+    const float x = 2.0f * ((px + 0.5f) / image_size_px - 0.5f);
+    const float y = 2.0f * ((py + 0.5f) / image_size_px - 0.5f);
+    const float z = 0.0f;
 
 )";
 
@@ -159,7 +152,9 @@ int main(int argc, char **argv)
     }
 
     std::cout << "    if (v" << (unsigned long)ordered.rbegin()->id() << R"( < 0.0f) {
-        (*image)(px, py) = 255;
+        image[px + py * image_size_px] = 255;
+    } else {
+        image[px + py * image_size_px] = 0;
     }
 }
 )";
