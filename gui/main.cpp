@@ -14,9 +14,10 @@
 #include <GLFW/glfw3.h>
 
 #include "context.hpp"
+#include "effects.hpp"
 #include "tape.hpp"
-#include "interpreter.hpp"
 
+#include "interpreter.hpp"
 #include "tex.hpp"
 
 #define TEXTURE_SIZE 2048
@@ -151,6 +152,7 @@ int main(int argc, char** argv)
     int render_mode = RENDER_MODE_NORMALS;
 
     libfive::cuda::Context ctx(render_size);
+    libfive::cuda::Effects effects(render_size);
 
     while (!glfwWindowShouldClose(window))
     {
@@ -304,6 +306,7 @@ int main(int argc, char** argv)
             if (render_size != ctx.image_size_px)
             {
                 ctx = libfive::cuda::Context(render_size);
+                effects = libfive::cuda::Effects(render_size);
             }
 
             ImGui::Text("Dimension:");
@@ -317,7 +320,7 @@ int main(int argc, char** argv)
                 ImGui::SameLine();
                 ImGui::RadioButton("Normals", &render_mode, RENDER_MODE_NORMALS);
                 ImGui::SameLine();
-                //ImGui::RadioButton("SSAO", &render_mode, Renderable::MODE_SSAO);
+                ImGui::RadioButton("SSAO", &render_mode, RENDER_MODE_SSAO);
                 ImGui::SameLine();
                 //ImGui::RadioButton("Shaded", &render_mode, Renderable::MODE_SHADED);
             } else {
@@ -359,8 +362,16 @@ int main(int argc, char** argv)
                     auto dt = duration_cast<microseconds>(end - start);
                     ImGui::Text("Render time: %f s", dt.count() / 1e6);
 
+                    if (render_mode == RENDER_MODE_SSAO) {
+                        start = high_resolution_clock::now();
+                        effects.drawSSAO(ctx.stages[3].filled.get(), ctx.normals.get());
+                        end = high_resolution_clock::now();
+                        auto dt = duration_cast<microseconds>(end - start);
+                        ImGui::Text("SSAO time: %f s", dt.count() / 1e6);
+                    }
+
                     start = high_resolution_clock::now();
-                    copy_to_texture(ctx, cuda_tex, TEXTURE_SIZE,
+                    copy_to_texture(ctx, effects, cuda_tex, TEXTURE_SIZE,
                                     append, (Mode)render_mode);
                     end = high_resolution_clock::now();
                     dt = duration_cast<microseconds>(end - start);

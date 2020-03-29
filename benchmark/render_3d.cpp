@@ -49,7 +49,6 @@ int main(int argc, char **argv)
     Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
     T(3,2) = 0.3f;
 
-    // Warm-up runs
     c.render3D(tape, T);
 
     // Save the image using libfive::Heightmap

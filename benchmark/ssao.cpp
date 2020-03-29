@@ -8,9 +8,11 @@
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
-#include "renderable.hpp"
+#include "context.hpp"
+#include "tape.hpp"
+#include "effects.hpp"
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
     auto X = libfive::Tree::X();
     auto Y = libfive::Tree::Y();
@@ -23,44 +25,43 @@ int main(int, char**)
     t = t.remap(X, cos(angle) * Y + sin(angle) * Z,
                   -sin(angle) * Y + cos(angle) * Z);
 
-    auto r = Renderable::build(t, 1024, 3);
-    r->tape.print();
-
-    r->run({Eigen::Matrix4f::Identity()}, Renderable::MODE_SSAO);
-
-    libfive::Heightmap out(r->image.size_px, r->image.size_px);
-    out.norm = 0;
-    for (unsigned x=0; x < r->image.size_px; ++x) {
-        for (unsigned y=0; y < r->image.size_px; ++y) {
-            if (r->heightAt(x, y)) {
-                const auto o = static_cast<Renderable3D*>(r.get())->temp(x, y);
-                out.norm(y, x) = (0xFF << 24) | (o << 16) | (o << 8) | o;
-            }
+    if (argc >= 2) {
+        std::ifstream ifs;
+        ifs.open(argv[1]);
+        if (ifs.is_open()) {
+            auto a = libfive::Archive::deserialize(ifs);
+            t = a.shapes.front().tree;
+        } else {
+            fprintf(stderr, "Could not open file %s\n", argv[1]);
+            exit(1);
         }
     }
-    out.saveNormalPNG("out_gpu_ssao.png");
-    /*
-    // Save the image using libfive::Heightmap
-    libfive::Heightmap out(r->image.size_px, r->image.size_px);
-    for (unsigned x=0; x < r->image.size_px; ++x) {
-        for (unsigned y=0; y < r->image.size_px; ++y) {
-            out.depth(y, x) = r->heightAt(x, y);
+    int resolution = 512;
+    if (argc >= 3) {
+        errno = 0;
+        resolution = strtol(argv[2], NULL, 10);
+        if (errno || resolution == 0) {
+            fprintf(stderr, "Could not parse resolution '%s'\n",
+                    argv[2]);
+            exit(1);
         }
     }
-    out.savePNG("out_gpu_depth.png");
 
-    std::atomic_bool abort(false);
-    libfive::Voxels vox({-1, -1, 0}, {1, 1, 0}, r->image.size_px / 2);
-    auto start_cpu = std::chrono::steady_clock::now();
-    for (unsigned i=0; i < 10; ++i) {
-        auto h = libfive::Heightmap::render(t, vox, abort);
+    auto ctx = libfive::cuda::Context(resolution);
+    auto tape = libfive::cuda::Tape(t);
+    auto effects = libfive::cuda::Effects(resolution);
+
+    ctx.render3D(tape, Eigen::Matrix4f::Identity());
+    effects.drawSSAO(ctx.stages[3].filled.get(), ctx.normals.get());
+
+    libfive::Heightmap out(resolution, resolution);
+    unsigned i=0;
+    for (int x=0; x < resolution; ++x) {
+        for (int y=0; y < resolution; ++y) {
+            out.depth(x, y) = effects.image[i++];
+        }
     }
-    auto end_cpu = std::chrono::steady_clock::now();
-    std::cout << "CPU rendering took " <<
-        std::chrono::duration_cast<std::chrono::milliseconds>(end_cpu - start_cpu).count() <<
-        " ms\n";
-    libfive::Heightmap::render(t, vox, abort)->savePNG("out_cpu.png");
-    */
+    out.savePNG("out_gpu_ssao.png");
 
     return 0;
 }

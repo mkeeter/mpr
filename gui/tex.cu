@@ -1,3 +1,6 @@
+#include "context.hpp"
+#include "effects.hpp"
+
 #include "tex.hpp"
 
 cudaGraphicsResource* register_texture(GLuint t)
@@ -77,7 +80,32 @@ void copy_normals_to_surface(int32_t* const __restrict__ image,
     }
 }
 
+__global__
+void copy_ssao_to_surface(int32_t* const __restrict__ image,
+                          int32_t* const __restrict__ ssao,
+                          int image_size_px,
+                          cudaSurfaceObject_t surf,
+                          int texture_size_px, bool append)
+{
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < texture_size_px && y < texture_size_px) {
+        const uint32_t px = x * image_size_px / texture_size_px;
+        const uint32_t py = y * image_size_px / texture_size_px;
+        const auto h = image[px + py * image_size_px];
+        if (h) {
+            auto s = ssao[px + py * image_size_px];
+            surf2Dwrite(0xFF000000 | s | (s << 8) | (s << 16),
+                        surf, x*4, y);
+        } else if (!append) {
+            surf2Dwrite(0, surf, x*4, y);
+        }
+    }
+}
+
 void copy_to_texture(const libfive::cuda::Context& ctx,
+                     const libfive::cuda::Effects& effects,
                      cudaGraphicsResource* gl_tex,
                      int texture_size_px,
                      bool append,
@@ -116,6 +144,13 @@ void copy_to_texture(const libfive::cuda::Context& ctx,
             copy_normals_to_surface<<<dim3(u, u), dim3(16, 16)>>>(
                     ctx.stages[3].filled.get(),
                     ctx.normals.get(),
+                    ctx.image_size_px,
+                    surf, texture_size_px, append);
+            break;
+        case RENDER_MODE_SSAO:
+            copy_ssao_to_surface<<<dim3(u, u), dim3(16, 16)>>>(
+                    ctx.stages[3].filled.get(),
+                    effects.image.get(),
                     ctx.image_size_px,
                     surf, texture_size_px, append);
             break;
