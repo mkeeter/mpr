@@ -37,14 +37,14 @@ int main(int argc, char **argv)
     Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
     T(3,2) = 0.3f;
 
-    const std::vector<int> sizes = {256, 512};//, 1024, 1536, 2048};
+    const std::vector<int> sizes = {256, 512, 1024, 1536, 2048};
     std::cout << "Rendering..." << std::endl;
     for (auto size: sizes) {
         auto tape = libfive::cuda::Tape(t);
         auto c = libfive::cuda::Context(size);
 
         std::cout << size << " ";
-        get_stats([&](){ c.render3D(tape, Eigen::Matrix4f::Identity()); });
+        get_stats([&](){ c.render3D(tape, T); });
 
         libfive::Heightmap out(size, size);
         uint32_t i = 0;

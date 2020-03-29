@@ -51,7 +51,10 @@ int main(int argc, char** argv)
     auto tape = libfive::cuda::Tape(t);
     libfive::cuda::Effects effects;
 
-    ctx.render3D(tape, Eigen::Matrix4f::Identity());
+    Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
+    T(3,2) = 0.3f;
+
+    ctx.render3D(tape, T);
     effects.drawSSAO(ctx);
 
     libfive::Heightmap out(resolution, resolution);
