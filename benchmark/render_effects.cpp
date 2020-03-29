@@ -49,10 +49,10 @@ int main(int argc, char** argv)
 
     auto ctx = libfive::cuda::Context(resolution);
     auto tape = libfive::cuda::Tape(t);
-    auto effects = libfive::cuda::Effects(resolution);
+    libfive::cuda::Effects effects;
 
     ctx.render3D(tape, Eigen::Matrix4f::Identity());
-    effects.drawSSAO(ctx.stages[3].filled.get(), ctx.normals.get());
+    effects.drawSSAO(ctx);
 
     libfive::Heightmap out(resolution, resolution);
     unsigned i=0;
@@ -63,7 +63,7 @@ int main(int argc, char** argv)
     }
     out.savePNG("out_gpu_ssao.png");
 
-    effects.drawShaded(ctx.stages[3].filled.get(), ctx.normals.get());
+    effects.drawShaded(ctx);
     i=0;
     for (int x=0; x < resolution; ++x) {
         for (int y=0; y < resolution; ++y) {

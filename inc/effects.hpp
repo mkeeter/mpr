@@ -6,16 +6,20 @@
 namespace libfive {
 namespace cuda {
 
+struct Context;
+
 struct Effects {
-    Effects(int32_t image_size_px);
+    Effects();
 
     Ptr<int32_t[]> tmp;
     Ptr<int32_t[]> image;
 
-    void drawSSAO(const int32_t* depth, const uint32_t* norm);
-    void drawShaded(const int32_t* depth, const uint32_t* norm);
+    void drawSSAO(const Context& ctx);
+    void drawShaded(const Context& ctx);
 
 protected:
+    void resizeTo(const Context& ctx);
+
     int32_t image_size_px;
 
     Eigen::Matrix<float, 64, 3> ssao_kernel;

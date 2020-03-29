@@ -1,3 +1,4 @@
+#include "context.hpp"
 #include "effects.hpp"
 
 namespace libfive {
@@ -211,10 +212,10 @@ __global__ void draw_shaded(const int32_t* const __restrict__ depth,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-Effects::Effects(int32_t image_size_px)
-    : image_size_px(image_size_px),
-      tmp(CUDA_MALLOC(int32_t, pow(image_size_px, 2))),
-      image(CUDA_MALLOC(int32_t, pow(image_size_px, 2)))
+Effects::Effects()
+    : image_size_px(0),
+      tmp(nullptr),
+      image(nullptr)
 {
     // Based on http://john-chapman-graphics.blogspot.com/2013/01/ssao-tutorial.html
     for (unsigned i = 0; i < ssao_kernel.rows(); ++i) {
@@ -238,33 +239,44 @@ Effects::Effects(int32_t image_size_px)
     }
 }
 
-void Effects::drawSSAO(const int32_t* depth,
-                       const uint32_t* norm)
+void Effects::resizeTo(const Context& ctx) {
+    if (ctx.image_size_px != image_size_px) {
+        image_size_px = ctx.image_size_px;
+        tmp.reset(CUDA_MALLOC(int32_t, pow(image_size_px, 2)));
+        image.reset(CUDA_MALLOC(int32_t, pow(image_size_px, 2)));
+    }
+}
+
+void Effects::drawSSAO(const Context& ctx)
 {
+    resizeTo(ctx);
+
     CUDA_CHECK(cudaMemset(image.get(), 0, sizeof(int32_t) * pow(image_size_px, 2)));
     const unsigned u = (image_size_px + 15) / 16;
     draw_ssao<<<dim3(u, u), dim3(16, 16)>>>(
-            depth, norm,
+            ctx.stages[3].filled.get(), ctx.normals.get(),
             ssao_kernel, ssao_rvecs, image_size_px,
             tmp.get());
     blur_ssao<<<dim3(u, u), dim3(16, 16)>>>(
-            depth, tmp.get(), image_size_px, image.get());
+            ctx.stages[3].filled.get(), tmp.get(), image_size_px, image.get());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-void Effects::drawShaded(const int32_t* depth,
-                         const uint32_t* norm)
+void Effects::drawShaded(const Context& ctx)
 {
+    resizeTo(ctx);
+
     CUDA_CHECK(cudaMemset(image.get(), 0, sizeof(int32_t) * pow(image_size_px, 2)));
     const unsigned u = (image_size_px + 15) / 16;
     draw_ssao<<<dim3(u, u), dim3(16, 16)>>>(
-            depth, norm,
+            ctx.stages[3].filled.get(), ctx.normals.get(),
             ssao_kernel, ssao_rvecs, image_size_px,
             image.get());
     blur_ssao<<<dim3(u, u), dim3(16, 16)>>>(
-            depth, image.get(), image_size_px, tmp.get());
+            ctx.stages[3].filled.get(), image.get(), image_size_px, tmp.get());
     draw_shaded<<<dim3(u, u), dim3(16, 16)>>>(
-            depth, norm, tmp.get(), image_size_px, image.get());
+            ctx.stages[3].filled.get(), ctx.normals.get(),
+            tmp.get(), image_size_px, image.get());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
 

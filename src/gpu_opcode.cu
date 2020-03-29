@@ -1,5 +1,8 @@
 #include "gpu_opcode.hpp"
 
+namespace libfive {
+namespace cuda {
+
 __host__ __device__
 const char* gpu_op_str(uint8_t op) {
     switch (op) {
@@ -43,3 +46,6 @@ const char* gpu_op_str(uint8_t op) {
         default: return "UNKNOWN";
     }
 }
+
+}   // namespace cuda
+}   // namespace libfive

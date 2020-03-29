@@ -152,7 +152,7 @@ int main(int argc, char** argv)
     int render_mode = RENDER_MODE_NORMALS;
 
     libfive::cuda::Context ctx(render_size);
-    libfive::cuda::Effects effects(render_size);
+    libfive::cuda::Effects effects;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -303,10 +303,8 @@ int main(int argc, char** argv)
             ImGui::RadioButton("2048", &render_size, 2048);
 
             // Update the render context if size has changed
-            if (render_size != ctx.image_size_px)
-            {
+            if (render_size != ctx.image_size_px) {
                 ctx = libfive::cuda::Context(render_size);
-                effects = libfive::cuda::Effects(render_size);
             }
 
             ImGui::Text("Dimension:");
@@ -364,13 +362,13 @@ int main(int argc, char** argv)
 
                     if (render_mode == RENDER_MODE_SSAO) {
                         start = high_resolution_clock::now();
-                        effects.drawSSAO(ctx.stages[3].filled.get(), ctx.normals.get());
+                        effects.drawSSAO(ctx);
                         end = high_resolution_clock::now();
                         auto dt = duration_cast<microseconds>(end - start);
                         ImGui::Text("SSAO time: %f s", dt.count() / 1e6);
                     } else if (render_mode == RENDER_MODE_SHADED) {
                         start = high_resolution_clock::now();
-                        effects.drawShaded(ctx.stages[3].filled.get(), ctx.normals.get());
+                        effects.drawShaded(ctx);
                         end = high_resolution_clock::now();
                         auto dt = duration_cast<microseconds>(end - start);
                         ImGui::Text("SSAO + shading time: %f s", dt.count() / 1e6);

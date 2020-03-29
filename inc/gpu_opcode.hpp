@@ -2,7 +2,10 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
-enum GPUOp {
+namespace libfive {
+namespace cuda {
+
+enum Opcode {
     GPU_OP_INVALID = 0,
     GPU_OP_JUMP, // meta-op to jump to a new point in the tape
 
@@ -44,3 +47,6 @@ enum GPUOp {
 
 __host__ __device__
 const char* gpu_op_str(uint8_t op);
+
+}   // namespace cuda
+}   // namespace libfive

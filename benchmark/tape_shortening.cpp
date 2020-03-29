@@ -53,7 +53,7 @@ int main(int, char**)
         unsigned len = 0;
         for (auto j = tile.tape + 1; OP(&ctx.tape_data[j]); ++j) {
             auto d = ctx.tape_data[j];
-            if (OP(&d) == GPU_OP_JUMP) {
+            if (OP(&d) == libfive::cuda::GPU_OP_JUMP) {
                 j += JUMP_TARGET(&d);
             } else {
                 len++;
@@ -85,7 +85,7 @@ int main(int, char**)
         unsigned len = 0;
         for (auto j = tile.tape + 1; OP(&ctx.tape_data[j]); ++j) {
             auto d = ctx.tape_data[j];
-            if (OP(&d) == GPU_OP_JUMP) {
+            if (OP(&d) == libfive::cuda::GPU_OP_JUMP) {
                 j += JUMP_TARGET(&d);
             } else {
                 len++;
