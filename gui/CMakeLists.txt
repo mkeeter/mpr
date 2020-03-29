@@ -1,3 +1,5 @@
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -src-in-ptx -keep --ptxas-options=-v -g -lineinfo")
+
 add_executable(demo MACOSX_BUNDLE
     main.cpp
     interpreter.cpp

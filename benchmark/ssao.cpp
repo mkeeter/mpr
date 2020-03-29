@@ -63,6 +63,14 @@ int main(int argc, char** argv)
     }
     out.savePNG("out_gpu_ssao.png");
 
+    effects.drawShaded(ctx.stages[3].filled.get(), ctx.normals.get());
+    i=0;
+    for (int x=0; x < resolution; ++x) {
+        for (int y=0; y < resolution; ++y) {
+            out.depth(x, y) = effects.image[i++];
+        }
+    }
+    out.savePNG("out_gpu_shaded.png");
+
     return 0;
 }
-

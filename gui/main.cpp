@@ -322,7 +322,7 @@ int main(int argc, char** argv)
                 ImGui::SameLine();
                 ImGui::RadioButton("SSAO", &render_mode, RENDER_MODE_SSAO);
                 ImGui::SameLine();
-                //ImGui::RadioButton("Shaded", &render_mode, Renderable::MODE_SHADED);
+                ImGui::RadioButton("Shaded", &render_mode, RENDER_MODE_SHADED);
             } else {
                 render_mode = RENDER_MODE_2D;
             }
@@ -368,6 +368,12 @@ int main(int argc, char** argv)
                         end = high_resolution_clock::now();
                         auto dt = duration_cast<microseconds>(end - start);
                         ImGui::Text("SSAO time: %f s", dt.count() / 1e6);
+                    } else if (render_mode == RENDER_MODE_SHADED) {
+                        start = high_resolution_clock::now();
+                        effects.drawShaded(ctx.stages[3].filled.get(), ctx.normals.get());
+                        end = high_resolution_clock::now();
+                        auto dt = duration_cast<microseconds>(end - start);
+                        ImGui::Text("SSAO + shading time: %f s", dt.count() / 1e6);
                     }
 
                     start = high_resolution_clock::now();

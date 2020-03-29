@@ -15,7 +15,9 @@ enum Mode {
     RENDER_MODE_2D,
     RENDER_MODE_DEPTH,
     RENDER_MODE_NORMALS,
-    RENDER_MODE_SSAO };
+    RENDER_MODE_SSAO,
+    RENDER_MODE_SHADED,
+};
 
 void copy_to_texture(const libfive::cuda::Context& ctx,
                      const libfive::cuda::Effects& effects,

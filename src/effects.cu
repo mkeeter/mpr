@@ -146,6 +146,71 @@ void blur_ssao(const int32_t* const __restrict__ image,
 
 ////////////////////////////////////////////////////////////////////////////////
 
+__global__ void draw_shaded(const int32_t* const __restrict__ depth,
+                            const uint32_t* const __restrict__ norm,
+                            const int32_t* const __restrict__ ssao,
+
+                            const int image_size_px,
+
+                            int32_t* const __restrict__ output)
+{
+    unsigned x = threadIdx.x + blockIdx.x * blockDim.x;
+    unsigned y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x >= image_size_px && y >= image_size_px) {
+        return;
+    }
+
+    const auto h = depth[x + y * image_size_px];
+    if (!h) {
+        return;
+    }
+
+    const uint8_t s = ssao[x + y * image_size_px];
+
+    // Get normal from image
+    const auto n = norm[x + y * image_size_px];
+    float dx = (float)(n & 0xFF) - 128.0f;
+    float dy = (float)((n >> 8) & 0xFF) - 128.0f;
+    float dz = (float)((n >> 16) & 0xFF) - 128.0f;
+    Eigen::Vector3f normal = Eigen::Vector3f{dx, dy, dz}.normalized();
+
+    // Apply a single light
+    const float3 pos_f3 = make_float3(
+        2.0f * ((x + 0.5f) / image_size_px - 0.5f),
+        2.0f * ((y + 0.5f) / image_size_px - 0.5f),
+        2.0f * ((h + 0.5f) / image_size_px - 0.5f));
+    const Eigen::Vector3f pos { pos_f3.x, pos_f3.y, pos_f3.z };
+
+    const Eigen::Vector3f light_pos { 5, 5, 10 };
+    const Eigen::Vector3f light_dir = (light_pos - pos).normalized();
+
+    // Apply light
+    float light = fmaxf(0.0f, light_dir.dot(normal)) * 0.8f;
+
+    // SSAO dimming
+    light *= s / 255.0f;
+
+    // Ambient
+    light += 0.2f;
+
+    // Clamp
+    if (light < 0.0f) {
+        light = 0.0f;
+    } else if (light > 1.0f) {
+        light = 1.0f;
+    }
+
+    uint8_t color = light * 255.0f;
+
+    output[x + y * image_size_px] = (0xFF << 24) |
+                                    (color << 16) |
+                                    (color << 8) |
+                                    (color << 0);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 Effects::Effects(int32_t image_size_px)
     : image_size_px(image_size_px),
       tmp(CUDA_MALLOC(int32_t, pow(image_size_px, 2))),
@@ -186,6 +251,23 @@ void Effects::drawSSAO(const int32_t* depth,
             depth, tmp.get(), image_size_px, image.get());
     CUDA_CHECK(cudaDeviceSynchronize());
 }
+
+void Effects::drawShaded(const int32_t* depth,
+                         const uint32_t* norm)
+{
+    CUDA_CHECK(cudaMemset(image.get(), 0, sizeof(int32_t) * pow(image_size_px, 2)));
+    const unsigned u = (image_size_px + 15) / 16;
+    draw_ssao<<<dim3(u, u), dim3(16, 16)>>>(
+            depth, norm,
+            ssao_kernel, ssao_rvecs, image_size_px,
+            image.get());
+    blur_ssao<<<dim3(u, u), dim3(16, 16)>>>(
+            depth, image.get(), image_size_px, tmp.get());
+    draw_shaded<<<dim3(u, u), dim3(16, 16)>>>(
+            depth, norm, tmp.get(), image_size_px, image.get());
+    CUDA_CHECK(cudaDeviceSynchronize());
+}
+
 
 }   // namespace cuda
 }   // namespace libfive

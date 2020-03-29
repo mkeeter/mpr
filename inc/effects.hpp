@@ -13,6 +13,7 @@ struct Effects {
     Ptr<int32_t[]> image;
 
     void drawSSAO(const int32_t* depth, const uint32_t* norm);
+    void drawShaded(const int32_t* depth, const uint32_t* norm);
 
 protected:
     int32_t image_size_px;
