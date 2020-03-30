@@ -1,4 +1,4 @@
-Experimental CUDA acceleration for `libfive`
+Experimental CUDA acceleration for [`libfive`](libfive.com)
 
 Not yet ready for public consumption!
 
