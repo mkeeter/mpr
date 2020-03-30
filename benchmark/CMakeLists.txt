@@ -24,7 +24,7 @@ benchmark(render_3d.cpp)
 benchmark(render_effects.cpp)
 
 benchmark(circle.cpp)
-benchmark(donut.cpp)
+benchmark(print_tape_table.cpp)
 benchmark(dump_tape.cpp)
 benchmark(tape_shortening.cpp)
 benchmark(tape_building_time.cpp)
