@@ -45,7 +45,7 @@ int main(int argc, char **argv)
 
     auto tape = libfive::cuda::Tape(t);
 
-    const std::vector<int> sizes = {256, 512, 1024, 2048, 3074, 4096};
+    const std::vector<int> sizes = {256, 512, 1024, 2048, 3072, 4096};
     std::cout << "Rendering..." << std::endl;
     for (auto size: sizes) {
         auto ctx = libfive::cuda::Context(size);
