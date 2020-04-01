@@ -58,16 +58,21 @@ int main(int argc, char **argv)
 
     // Save the image using libfive::Heightmap
     libfive::Heightmap out(c.image_size_px, c.image_size_px);
+    unsigned i=0;
     for (int x=0; x < c.image_size_px; ++x) {
         for (int y=0; y < c.image_size_px; ++y) {
-            unsigned h = heatmap[x + y * c.image_size_px] * 100000;
+            unsigned h = heatmap[i] * 100000;
             if (h > 0xFFFFFF) {
                 std::cerr << "toooo big" << h << "\n";
                 exit(1);
             }
             out.norm(x, y) = 0xFF000000 | h;
+
+            out.depth(x, y) = c.stages[3].filled[i];
+            i++;
         }
     }
+    out.savePNG("out_depth_2d.png");
     out.saveNormalPNG("out_heatmap_2d.png");
 
     return 0;
