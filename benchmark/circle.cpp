@@ -65,7 +65,7 @@ int main(int, char**)
             if (ctx.stages[0].tiles[j].position != -1) {
                 q++;
             }
-            if (q == i / 64) {
+            if (q == (int)i / 64) {
                 parent = ctx.stages[0].tiles[j].position;
                 break;
             }

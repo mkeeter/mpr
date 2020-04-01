@@ -47,6 +47,14 @@ struct Context {
                         const Eigen::Matrix3f& mat,
                         const float z=0.0f);
 
+    /*  Renders a 2D image, accumulating amortized work per pixel in a heatmap.
+     *  This is used to generate a figure in the research paper, and is not
+     *  recommended for regular use. */
+    Ptr<float[]> render2D_heatmap(const Tape& tape,
+                                  const Eigen::Matrix3f& mat,
+                                  const float z=0.0f);
+    Ptr<float[]> render3D_heatmap(const Tape& tape,
+                                  const Eigen::Matrix4f& mat);
 
     int32_t image_size_px;
 

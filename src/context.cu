@@ -1504,3 +1504,835 @@ void Context::render2D_brute(const Tape& tape,
         reinterpret_cast<float2*>(values.get()));
     CUDA_CHECK(cudaDeviceSynchronize());
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+
+template <int DIMENSION>
+__global__
+void eval_tiles_i_heatmap(uint64_t* const __restrict__ tape_data,
+                          int32_t* const __restrict__ tape_index,
+                          int32_t* const __restrict__ image,
+                          const uint32_t tiles_per_side,
+
+                          TileNode* const __restrict__ in_tiles,
+                          const int32_t in_tile_count,
+
+                          const Interval* __restrict__ values,
+
+                          const int tile_size_px,
+                          float* __restrict__ const heatmap)
+{
+    const int32_t tile_index = threadIdx.x + blockIdx.x * blockDim.x;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    // Check to see if we're masked
+    if (in_tiles[tile_index].position == -1) {
+        return;
+    }
+
+    Interval slots[128];
+    slots[((const uint8_t*)tape_data)[1]] = values[tile_index * 3];
+    slots[((const uint8_t*)tape_data)[2]] = values[tile_index * 3 + 1];
+    slots[((const uint8_t*)tape_data)[3]] = values[tile_index * 3 + 2];
+
+    // Pick out the tape based on the pointer stored in the tiles list
+    const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
+
+    constexpr static int CHOICE_ARRAY_SIZE = 256;
+    uint32_t choices[CHOICE_ARRAY_SIZE] = {0};
+    int choice_index = 0;
+    bool has_any_choice = false;
+
+    unsigned work = 0;
+    while (1) {
+        const uint64_t d = *++data;
+        if (!OP(&d)) {
+            break;
+        }
+        work++;
+        switch (OP(&d)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(&d); continue;
+
+#define lhs slots[I_LHS(&d)]
+#define rhs slots[I_RHS(&d)]
+#define imm IMM(&d)
+#define out slots[I_OUT(&d)]
+
+            case GPU_OP_SQUARE_LHS: out = square(lhs); break;
+            case GPU_OP_SQRT_LHS:   out = sqrt(lhs); break;
+            case GPU_OP_NEG_LHS:    out = -lhs; break;
+            case GPU_OP_SIN_LHS:    out = sin(lhs); break;
+            case GPU_OP_COS_LHS:    out = cos(lhs); break;
+            case GPU_OP_ASIN_LHS:   out = asin(lhs); break;
+            case GPU_OP_ACOS_LHS:   out = acos(lhs); break;
+            case GPU_OP_ATAN_LHS:   out = atan(lhs); break;
+            case GPU_OP_EXP_LHS:    out = exp(lhs); break;
+            case GPU_OP_ABS_LHS:    out = abs(lhs); break;
+            case GPU_OP_LOG_LHS:    out = log(lhs); break;
+
+            // Commutative opcodes
+            case GPU_OP_ADD_LHS_IMM: out = lhs + imm; break;
+            case GPU_OP_ADD_LHS_RHS: out = lhs + rhs; break;
+            case GPU_OP_MUL_LHS_IMM: out = lhs * imm; break;
+            case GPU_OP_MUL_LHS_RHS: out = lhs * rhs; break;
+
+#define CHOICE(f, a, b) {                                               \
+    int c = 0;                                                          \
+    out = f(a, b, c);                                                   \
+    if (choice_index < CHOICE_ARRAY_SIZE * 16) {                        \
+        choices[choice_index / 16] |= (c << ((choice_index % 16) * 2)); \
+    }                                                                   \
+    choice_index++;                                                     \
+    has_any_choice |= (c != 0);                                         \
+    break;                                                              \
+}
+            case GPU_OP_MIN_LHS_IMM: CHOICE(min, lhs, imm);
+            case GPU_OP_MIN_LHS_RHS: CHOICE(min, lhs, rhs);
+            case GPU_OP_MAX_LHS_IMM: CHOICE(max, lhs, imm);
+            case GPU_OP_MAX_LHS_RHS: CHOICE(max, lhs, rhs);
+
+            // Non-commutative opcodes
+            case GPU_OP_SUB_LHS_IMM: out = lhs - imm; break;
+            case GPU_OP_SUB_IMM_RHS: out = imm - rhs; break;
+            case GPU_OP_SUB_LHS_RHS: out = lhs - rhs; break;
+            case GPU_OP_DIV_LHS_IMM: out = lhs / imm; break;
+            case GPU_OP_DIV_IMM_RHS: out = imm / rhs; break;
+            case GPU_OP_DIV_LHS_RHS: out = lhs / rhs; break;
+
+            case GPU_OP_COPY_IMM: out = Interval(imm); break;
+            case GPU_OP_COPY_LHS: out = lhs; break;
+            case GPU_OP_COPY_RHS: out = rhs; break;
+
+            default: assert(false);
+        }
+#undef lhs
+#undef rhs
+#undef imm
+#undef out
+    }
+
+    // Check the result
+    const uint8_t i_out = I_OUT(data);
+
+    {   // Write the work to the heatmap
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        for (int x=0; x < tile_size_px; ++x) {
+            for (int y=0; y < tile_size_px; ++y) {
+                int px = x + pos.x * tile_size_px;
+                int py = y + pos.y * tile_size_px;
+                atomicAdd(&heatmap[px + py * tile_size_px * tiles_per_side],
+                          work / powf(tile_size_px, 2.0f));
+            }
+        }
+        work = 0;
+    }
+
+    // Empty
+    if (slots[i_out].lower() > 0.0f) {
+        in_tiles[tile_index].position = -1;
+        return;
+    }
+
+    // Masked
+    if (DIMENSION == 3) {
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        if (image[pos.w] > pos.z) {
+            in_tiles[tile_index].position = -1;
+            return;
+        }
+    }
+
+    // Filled
+    if (slots[i_out].upper() < 0.0f) {
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        in_tiles[tile_index].position = -1;
+        if (DIMENSION == 3) {
+            atomicMax(&image[pos.w], pos.z);
+        } else {
+            image[pos.w] = 1;
+        }
+        return;
+    }
+
+    if (!has_any_choice) {
+        return;
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Tape pushing!
+    // Use this array to track which slots are active
+    int* const __restrict__ active = (int*)slots;
+    for (unsigned i=0; i < 128; ++i) {
+        active[i] = false;
+    }
+    active[i_out] = true;
+
+    // Check to make sure the tape isn't full
+    // This doesn't mean that we'll successfully claim a chunk, because
+    // other threads could claim chunks before us, but it's a way to check
+    // quickly (and prevents tape_index from getting absurdly large).
+    if (*tape_index >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+        return;
+    }
+
+    // Claim a chunk of tape
+    int32_t out_index = atomicAdd(tape_index, SUBTAPE_CHUNK_SIZE);
+    int32_t out_offset = SUBTAPE_CHUNK_SIZE;
+
+    // If we've run out of tape, then immediately return
+    if (out_index + out_offset >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+        return;
+    }
+
+    // Write out the end of the tape, which is the same as the ending
+    // of the previous tape (0 opcode, with i_out as the last slot)
+    out_offset--;
+    tape_data[out_index + out_offset] = *data;
+
+    while (1) {
+        uint64_t d = *--data;
+        if (!OP(&d)) {
+            break;
+        }
+        work++;
+        const uint8_t op = OP(&d);
+        if (op == GPU_OP_JUMP) {
+            data += JUMP_TARGET(&d);
+            continue;
+        }
+
+        const bool has_choice = op >= GPU_OP_MIN_LHS_IMM &&
+                                op <= GPU_OP_MAX_LHS_RHS;
+        choice_index -= has_choice;
+
+        const uint8_t i_out = I_OUT(&d);
+        if (!active[i_out]) {
+            continue;
+        }
+
+        assert(!has_choice || choice_index >= 0);
+
+        const int choice = (has_choice && choice_index < CHOICE_ARRAY_SIZE * 16)
+            ? ((choices[choice_index / 16] >>
+              ((choice_index % 16) * 2)) & 3)
+            : 0;
+
+        // If we're about to write a new piece of data to the tape,
+        // (and are done with the current chunk), then we need to
+        // add another link to the linked list.
+        --out_offset;
+        if (out_offset == 0) {
+            const int32_t prev_index = out_index;
+
+            // Early exit if we can't finish writing out this tape
+            if (*tape_index >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+                const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+                for (int x=0; x < tile_size_px; ++x) {
+                    for (int y=0; y < tile_size_px; ++y) {
+                        int px = x + pos.x * tile_size_px;
+                        int py = y + pos.y * tile_size_px;
+                        atomicAdd(&heatmap[px + py * tile_size_px * tiles_per_side],
+                                  work / powf(tile_size_px, 2.0f));
+                    }
+                }
+                return;
+            }
+            out_index = atomicAdd(tape_index, SUBTAPE_CHUNK_SIZE);
+            out_offset = SUBTAPE_CHUNK_SIZE;
+
+            // Later exit if we claimed a chunk that exceeds the tape array
+            if (out_index + out_offset >= NUM_SUBTAPES * SUBTAPE_CHUNK_SIZE) {
+                const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+                for (int x=0; x < tile_size_px; ++x) {
+                    for (int y=0; y < tile_size_px; ++y) {
+                        int px = x + pos.x * tile_size_px;
+                        int py = y + pos.y * tile_size_px;
+                        atomicAdd(&heatmap[px + py * tile_size_px * tiles_per_side],
+                                  work / powf(tile_size_px, 2.0f));
+                    }
+                }
+                return;
+            }
+            --out_offset;
+
+            // Forward-pointing link
+            OP(&tape_data[out_index + out_offset]) = GPU_OP_JUMP;
+            const int32_t delta = (int32_t)prev_index -
+                                  (int32_t)(out_index + out_offset);
+            JUMP_TARGET(&tape_data[out_index + out_offset]) = delta;
+
+            // Backward-pointing link
+            OP(&tape_data[prev_index]) = GPU_OP_JUMP;
+            JUMP_TARGET(&tape_data[prev_index]) = -delta;
+
+            // We've written the jump, so adjust the offset again
+            --out_offset;
+        }
+
+        active[i_out] = false;
+        if (choice == 0) {
+            const uint8_t i_lhs = I_LHS(&d);
+            if (i_lhs) {
+                active[i_lhs] = true;
+            }
+            const uint8_t i_rhs = I_RHS(&d);
+            if (i_rhs) {
+                active[i_rhs] = true;
+            }
+        } else if (choice == 1 /* LHS */) {
+            // The non-immediate is always the LHS in commutative ops, and
+            // min/max (the only clauses that produce a choice) are commutative
+            const uint8_t i_lhs = I_LHS(&d);
+            active[i_lhs] = true;
+            if (i_lhs == i_out) {
+                ++out_offset;
+                continue;
+            } else {
+                OP(&d) = GPU_OP_COPY_LHS;
+            }
+        } else if (choice == 2 /* RHS */) {
+            const uint8_t i_rhs = I_RHS(&d);
+            if (i_rhs) {
+                active[i_rhs] = true;
+                if (i_rhs == i_out) {
+                    ++out_offset;
+                    continue;
+                } else {
+                    OP(&d) = GPU_OP_COPY_RHS;
+                }
+            } else {
+                OP(&d) = GPU_OP_COPY_IMM;
+            }
+        }
+        tape_data[out_index + out_offset] = d;
+    }
+
+    {   // Accumulate the work of walking backwards through the tape
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        for (int x=0; x < tile_size_px; ++x) {
+            for (int y=0; y < tile_size_px; ++y) {
+                int px = x + pos.x * tile_size_px;
+                int py = y + pos.y * tile_size_px;
+                atomicAdd(&heatmap[px + py * tile_size_px * tiles_per_side],
+                          work / powf(tile_size_px, 2.0f));
+            }
+        }
+    }
+
+    // Write the beginning of the tape
+    out_offset--;
+    tape_data[out_index + out_offset] = *data;
+
+    // Record the beginning of the tape in the output tile
+    in_tiles[tile_index].tape = out_index + out_offset;
+}
+
+template <unsigned DIMENSION>
+__global__
+void eval_voxels_f_heatmap(const uint64_t* const __restrict__ tape_data,
+                           int32_t* const __restrict__ image,
+                           const uint32_t tiles_per_side,
+
+                           TileNode* const __restrict__ in_tiles,
+                           const int32_t in_tile_count,
+
+                           const float2* const __restrict__ values,
+
+                           float* __restrict__ const heatmap)
+{
+    // Each tile is executed by 32 threads (one for each pair of voxels, so
+    // we can do all of our load/stores as float2s and make memory happier).
+    //
+    // This is different from the eval_tiles_i function, which evaluates one
+    // tile per thread, because the tiles are already expanded by 64x by the
+    // time they're stored in the in_tiles list.
+    const int32_t voxel_index = threadIdx.x + blockIdx.x * blockDim.x;
+    const int32_t tile_index = voxel_index / 32;
+    if (tile_index >= in_tile_count) {
+        return;
+    }
+
+    // Check whether this pixel is masked in the output image
+    if (DIMENSION == 3) {
+        const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+        const int4 sub = unpack(threadIdx.x % 32, 4);
+
+        const int32_t px = pos.x * 4 + sub.x;
+        const int32_t py = pos.y * 4 + sub.y;
+        const int32_t pz = pos.z * 4 + sub.z;
+
+        // Early return if this pixel won't ever be filled
+        if (image[px + py * tiles_per_side * 4] >= pz + 2) {
+            return;
+        }
+    }
+
+    float2 slots[128];
+
+    // Pick out the tape based on the pointer stored in the tiles list
+    const uint64_t* __restrict__ data = &tape_data[in_tiles[tile_index].tape];
+    slots[((const uint8_t*)tape_data)[1]] = values[voxel_index * 3];
+    slots[((const uint8_t*)tape_data)[2]] = values[voxel_index * 3 + 1];
+    slots[((const uint8_t*)tape_data)[3]] = values[voxel_index * 3 + 2];
+
+    unsigned work = 0;
+    while (1) {
+        const uint64_t d = *++data;
+        if (!OP(&d)) {
+            break;
+        }
+        work++;
+        switch (OP(&d)) {
+            case GPU_OP_JUMP: data += JUMP_TARGET(&d); continue;
+
+#define lhs slots[I_LHS(&d)]
+#define rhs slots[I_RHS(&d)]
+#define imm IMM(&d)
+#define out slots[I_OUT(&d)]
+
+            case GPU_OP_SQUARE_LHS: out = make_float2(lhs.x * lhs.x, lhs.y * lhs.y); break;
+            case GPU_OP_SQRT_LHS: out = make_float2(sqrtf(lhs.x), sqrtf(lhs.y)); break;
+            case GPU_OP_NEG_LHS: out = make_float2(-lhs.x, -lhs.y); break;
+            case GPU_OP_SIN_LHS: out = make_float2(sinf(lhs.x), sinf(lhs.y)); break;
+            case GPU_OP_COS_LHS: out = make_float2(cosf(lhs.x), cosf(lhs.y)); break;
+            case GPU_OP_ASIN_LHS: out = make_float2(asinf(lhs.x), asinf(lhs.y)); break;
+            case GPU_OP_ACOS_LHS: out = make_float2(acosf(lhs.x), acosf(lhs.y)); break;
+            case GPU_OP_ATAN_LHS: out = make_float2(atanf(lhs.x), atanf(lhs.y)); break;
+            case GPU_OP_EXP_LHS: out = make_float2(expf(lhs.x), expf(lhs.y)); break;
+            case GPU_OP_ABS_LHS: out = make_float2(fabsf(lhs.x), fabsf(lhs.y)); break;
+            case GPU_OP_LOG_LHS: out = make_float2(logf(lhs.x), logf(lhs.y)); break;
+
+            // Commutative opcodes
+            case GPU_OP_ADD_LHS_IMM: out = make_float2(lhs.x + imm, lhs.y + imm); break;
+            case GPU_OP_ADD_LHS_RHS: out = make_float2(lhs.x + rhs.x, lhs.y + rhs.y); break;
+            case GPU_OP_MUL_LHS_IMM: out = make_float2(lhs.x * imm, lhs.y * imm); break;
+            case GPU_OP_MUL_LHS_RHS: out = make_float2(lhs.x * rhs.x, lhs.y * rhs.y); break;
+            case GPU_OP_MIN_LHS_IMM: out = make_float2(fminf(lhs.x, imm), fminf(lhs.y, imm)); break;
+            case GPU_OP_MIN_LHS_RHS: out = make_float2(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y)); break;
+            case GPU_OP_MAX_LHS_IMM: out = make_float2(fmaxf(lhs.x, imm), fmaxf(lhs.y, imm)); break;
+            case GPU_OP_MAX_LHS_RHS: out = make_float2(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y)); break;
+
+            // Non-commutative opcodes
+            case GPU_OP_SUB_LHS_IMM: out = make_float2(lhs.x - imm, lhs.y - imm); break;
+            case GPU_OP_SUB_IMM_RHS: out = make_float2(imm - rhs.x, imm - rhs.y); break;
+            case GPU_OP_SUB_LHS_RHS: out = make_float2(lhs.x - rhs.x, lhs.y - rhs.y); break;
+
+            case GPU_OP_DIV_LHS_IMM: out = make_float2(lhs.x / imm, lhs.y / imm); break;
+            case GPU_OP_DIV_IMM_RHS: out = make_float2(imm / rhs.x, imm / rhs.y); break;
+            case GPU_OP_DIV_LHS_RHS: out = make_float2(lhs.x / rhs.x, lhs.y / rhs.y); break;
+
+            case GPU_OP_COPY_IMM: out = make_float2(imm, imm); break;
+            case GPU_OP_COPY_LHS: out = make_float2(lhs.x, lhs.y); break;
+            case GPU_OP_COPY_RHS: out = make_float2(rhs.x, rhs.y); break;
+
+#undef lhs
+#undef rhs
+#undef imm
+#undef out
+        }
+    }
+
+    // Check the result
+    const uint8_t i_out = I_OUT(data);
+
+    const int4 pos = unpack(in_tiles[tile_index].position, tiles_per_side);
+    if (DIMENSION == 3) {
+        const int4 sub = unpack(threadIdx.x % 32, 4);
+        // The second voxel is always higher in Z, so it masks the lower voxel
+        if (slots[i_out].y < 0.0f) {
+            const int32_t px = pos.x * 4 + sub.x;
+            const int32_t py = pos.y * 4 + sub.y;
+            const int32_t pz = pos.z * 4 + sub.z + 2;
+
+            atomicMax(&image[px + py * tiles_per_side * 4], pz);
+        } else if (slots[i_out].x < 0.0f) {
+            const int32_t px = pos.x * 4 + sub.x;
+            const int32_t py = pos.y * 4 + sub.y;
+            const int32_t pz = pos.z * 4 + sub.z;
+
+            atomicMax(&image[px + py * tiles_per_side * 4], pz);
+        }
+        const int px = pos.x * 4 + sub.x;
+        const int py = pos.y * 4 + sub.y;
+        atomicAdd(&heatmap[px + py * tiles_per_side * 4], work);
+    } else if (DIMENSION == 2) {
+        const int4 sub = unpack(threadIdx.x % 32, 8);
+        if (slots[i_out].y < 0.0f) {
+            const int32_t px = pos.x * 8 + sub.x;
+            const int32_t py = pos.y * 8 + sub.y + 4;
+
+            image[px + py * tiles_per_side * 8] = 1;
+        }
+        if (slots[i_out].x < 0.0f) {
+            const int32_t px = pos.x * 8 + sub.x;
+            const int32_t py = pos.y * 8 + sub.y;
+
+            image[px + py * tiles_per_side * 8] = 1;
+        }
+        const int px = pos.x * 8 + sub.x;
+        const int py = pos.y * 8 + sub.y;
+        atomicAdd(&heatmap[px + py * tiles_per_side * 8], work / 2.0f);
+        atomicAdd(&heatmap[px + (py + 4) * tiles_per_side * 8], work / 2.0f);
+    }
+}
+
+Ptr<float[]> Context::render2D_heatmap(const Tape& tape,
+                                       const Eigen::Matrix3f& mat,
+                                       const float z)
+{
+    // Build the heatmap for this render
+    Ptr<float[]> heatmap(CUDA_MALLOC(float, pow(image_size_px, 2)));
+    cudaMemset(heatmap.get(), 0, sizeof(float) * pow(image_size_px, 2));
+
+    // Reset the tape index and copy the tape to the beginning of the
+    // context's tape buffer area.
+    *tape_index = tape.length;
+    cudaMemcpyAsync(tape_data.get(), tape.data.get(),
+                    sizeof(uint64_t) * tape.length,
+                    cudaMemcpyDeviceToDevice);
+
+    // Reset all of the data arrays.  In 2D, we only use stages 0, 2, and 3
+    // for 64^2, 8^2, and per-voxel evaluation steps.
+    CUDA_CHECK(cudaMemsetAsync(stages[0].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px / 64, 2)));
+    CUDA_CHECK(cudaMemsetAsync(stages[2].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px / 8, 2)));
+    CUDA_CHECK(cudaMemsetAsync(stages[3].filled.get(), 0, sizeof(int32_t) *
+                               pow(image_size_px, 2)));
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Evaluation of 64x64 tiles
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Go the whole list of first-stage tiles, assigning each to
+    // be [position, tape = 0, next = -1]
+    unsigned count = pow(image_size_px / 64, 2);
+    unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+    preload_tiles<<<num_blocks, NUM_THREADS>>>(stages[0].tiles.get(), count);
+
+    // Iterate over 64^2, 8^2 tiles
+    for (unsigned i=0; i < 3; i += 2) {
+        const unsigned tile_size_px = i ? 8 : 64;
+        const unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+
+        if (values_size < num_blocks * NUM_THREADS * 3) {
+            values.reset(CUDA_MALLOC(Interval, num_blocks * NUM_THREADS * 3));
+            values_size = num_blocks * NUM_THREADS * 3;
+        }
+
+        // Unpack position values into interval X/Y/Z in the values array
+        // This is done in a separate kernel to avoid bloating the
+        // eval_tiles_i kernel with more registers, which is detrimental
+        // to occupancy.
+        calculate_intervals_2d<<<num_blocks, NUM_THREADS>>>(
+            stages[i].tiles.get(),
+            count,
+            image_size_px / tile_size_px,
+            mat, z,
+            reinterpret_cast<Interval*>(values.get()));
+
+        // Do the actual tape evaluation, which is the expensive step
+        eval_tiles_i_heatmap<2><<<num_blocks, NUM_THREADS>>>(
+            tape_data.get(),
+            tape_index.get(),
+            stages[i].filled.get(),
+            image_size_px / tile_size_px,
+
+            stages[i].tiles.get(),
+            count,
+
+            reinterpret_cast<Interval*>(values.get()),
+
+            tile_size_px,
+            heatmap.get());
+
+        // Mark the total number of active tiles (from this stage) to 0
+        cudaMemsetAsync(num_active_tiles.get(), 0, sizeof(int32_t));
+
+        // Count up active tiles, to figure out how much memory needs to be
+        // allocated in the next stage.
+        assign_next_nodes<<<num_blocks, NUM_THREADS>>>(
+            stages[i].tiles.get(),
+            count,
+            num_active_tiles.get());
+
+        // Count the number of active tiles, which have been accumulated
+        // through repeated calls to assign_next_nodes
+        int32_t active_tile_count;
+        cudaMemcpy(&active_tile_count, num_active_tiles.get(), sizeof(int32_t),
+                   cudaMemcpyDeviceToHost);
+        if (i == 0) {
+            active_tile_count *= 64;
+        }
+
+        // Make sure that the subtiles buffer has enough room
+        // This wastes a small amount of data for the per-pixel evaluation,
+        // where the `next` indexes aren't used, but it's relatively small.
+        const int next = i ? 3 : 2;
+        if (active_tile_count > stages[next].tile_array_size) {
+            stages[next].tile_array_size = active_tile_count;
+            stages[next].tiles.reset(CUDA_MALLOC(TileNode, active_tile_count));
+        }
+
+        if (i < 2) {
+            // Build the new tile list from active tiles in the previous list
+            subdivide_active_tiles_2d<<<num_blocks*64, NUM_THREADS>>>(
+                stages[i].tiles.get(),
+                count,
+                image_size_px / tile_size_px,
+                stages[next].tiles.get());
+        } else {
+            // Special case for per-pixel evaluation, which
+            // doesn't unpack every single pixel (since that would take up
+            // 64x extra space).
+            copy_active_tiles<<<num_blocks, NUM_THREADS>>>(
+                stages[i].tiles.get(),
+                count,
+                stages[next].tiles.get());
+        }
+
+        {   // Copy filled tiles into the next level's image (expanding them
+            // by 64x).  This is cleaner that accumulating all of the levels
+            // in a single pass, and could (possibly?) help with skipping
+            // fully occluded tiles.
+            const unsigned next_tile_size = tile_size_px / 8;
+            const uint32_t u = ((image_size_px / next_tile_size) / 32);
+            copy_filled_2d<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+                    stages[i].filled.get(),
+                    stages[next].filled.get(),
+                    image_size_px / next_tile_size);
+        }
+
+        // Assign the next number of tiles to evaluate
+        count = active_tile_count;
+    }
+
+    // Time to render individual pixels!
+    num_blocks = (count + NUM_TILES - 1) / NUM_TILES;
+    const size_t num_values = num_blocks * NUM_TILES * 32 * 3;
+    if (values_size < num_values) {
+        values.reset(CUDA_MALLOC(float2, num_values));
+        values_size = num_values;
+    }
+    calculate_pixels<<<num_blocks, NUM_TILES * 32>>>(
+        stages[3].tiles.get(),
+        count,
+        image_size_px / 8,
+        mat, z,
+        reinterpret_cast<float2*>(values.get()));
+    eval_voxels_f_heatmap<2><<<num_blocks, NUM_TILES * 32>>>(
+        tape_data.get(),
+        stages[3].filled.get(),
+        image_size_px / 8,
+
+        stages[3].tiles.get(),
+        count,
+
+        reinterpret_cast<float2*>(values.get()),
+        heatmap.get());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    for (unsigned x=0; x < image_size_px; ++x) {
+        for (unsigned y=0; y < image_size_px; ++y) {
+            heatmap[x + y * image_size_px] /= tape.length - 2;
+        }
+    }
+    return heatmap;
+}
+
+Ptr<float[]> Context::render3D_heatmap(const Tape& tape,
+                                       const Eigen::Matrix4f& mat)
+{
+    // Build the heatmap for this render
+    Ptr<float[]> heatmap(CUDA_MALLOC(float, pow(image_size_px, 2)));
+    cudaMemset(heatmap.get(), 0, sizeof(float) * pow(image_size_px, 2));
+
+    // Reset the tape index and copy the tape to the beginning of the
+    // context's tape buffer area.
+    *tape_index = tape.length;
+    cudaMemcpyAsync(tape_data.get(), tape.data.get(),
+                    sizeof(uint64_t) * tape.length,
+                    cudaMemcpyDeviceToDevice);
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Evaluation of 64x64x64 tiles
+    ////////////////////////////////////////////////////////////////////////////
+
+    // Reset all of the data arrays
+    for (unsigned i=0; i < 4; ++i) {
+        const unsigned tile_size_px = 64 / (1 << (i * 2));
+        CUDA_CHECK(cudaMemsetAsync(stages[i].filled.get(), 0, sizeof(int32_t) *
+                                   pow(image_size_px / tile_size_px, 2)));
+    }
+    CUDA_CHECK(cudaMemsetAsync(normals.get(), 0, sizeof(uint32_t) *
+                               pow(image_size_px, 2)));
+
+    // Go the whole list of first-stage tiles, assigning each to
+    // be [position, tape = 0, next = -1]
+    unsigned count = pow(image_size_px / 64, 3);
+    unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+    preload_tiles<<<num_blocks, NUM_THREADS>>>(stages[0].tiles.get(), count);
+
+    // Iterate over 64^3, 16^3, 4^3 tiles
+    for (unsigned i=0; i < 3; ++i) {
+        //printf("BEGINNING STAGE %u\n", i);
+        const unsigned tile_size_px = 64 / (1 << (i * 2));
+        const unsigned num_blocks = (count + NUM_THREADS - 1) / NUM_THREADS;
+
+        if (values_size < num_blocks * NUM_THREADS * 3) {
+            values.reset(CUDA_MALLOC(Interval, num_blocks * NUM_THREADS * 3));
+            values_size = num_blocks * NUM_THREADS * 3;
+        }
+
+        // Unpack position values into interval X/Y/Z in the values array
+        // This is done in a separate kernel to avoid bloating the
+        // eval_tiles_i kernel with more registers, which is detrimental
+        // to occupancy.
+        calculate_intervals_3d<<<num_blocks, NUM_THREADS>>>(
+            stages[i].tiles.get(),
+            count,
+            image_size_px / tile_size_px,
+            mat,
+            reinterpret_cast<Interval*>(values.get()));
+
+        // Mark every tile which is covered in the image as masked,
+        // which means it will be skipped later on.  We do this again below,
+        // but it's basically free, so we should do it here and simplify
+        // the logic in eval_tiles_i.
+        mask_filled_tiles<<<num_blocks, NUM_THREADS>>>(
+            stages[i].filled.get(),
+            image_size_px / tile_size_px,
+            stages[i].tiles.get(),
+            count);
+
+        // Do the actual tape evaluation, which is the expensive step
+        eval_tiles_i_heatmap<3><<<num_blocks, NUM_THREADS>>>(
+            tape_data.get(),
+            tape_index.get(),
+            stages[i].filled.get(),
+            image_size_px / tile_size_px,
+
+            stages[i].tiles.get(),
+            count,
+
+            reinterpret_cast<Interval*>(values.get()),
+            tile_size_px,
+            heatmap.get());
+
+        // Mark the total number of active tiles (from this stage) to 0
+        cudaMemsetAsync(num_active_tiles.get(), 0, sizeof(int32_t));
+
+        // Now that we have evaluated every tile at this level, we do one more
+        // round of occlusion culling before accumulating tiles to render at
+        // the next phase.
+        mask_filled_tiles<<<num_blocks, NUM_THREADS>>>(
+            stages[i].filled.get(),
+            image_size_px / tile_size_px,
+            stages[i].tiles.get(),
+            count);
+
+        // Count up active tiles, to figure out how much memory needs to be
+        // allocated in the next stage.
+        assign_next_nodes<<<num_blocks, NUM_THREADS>>>(
+            stages[i].tiles.get(),
+            count,
+            num_active_tiles.get());
+
+        // Count the number of active tiles, which have been accumulated
+        // through repeated calls to assign_next_nodes
+        int32_t active_tile_count;
+        cudaMemcpy(&active_tile_count, num_active_tiles.get(), sizeof(int32_t),
+                   cudaMemcpyDeviceToHost);
+        if (i < 2) {
+            active_tile_count *= 64;
+        }
+
+        // Make sure that the subtiles buffer has enough room
+        // This wastes a small amount of data for the per-pixel evaluation,
+        // where the `next` indexes aren't used, but it's relatively small.
+        if (active_tile_count > stages[i + 1].tile_array_size) {
+            stages[i + 1].tile_array_size = active_tile_count;
+            stages[i + 1].tiles.reset(CUDA_MALLOC(TileNode, active_tile_count));
+        }
+
+        if (i < 2) {
+            // Build the new tile list from active tiles in the previous list
+            subdivide_active_tiles_3d<<<num_blocks*64, NUM_THREADS>>>(
+                stages[i].tiles.get(),
+                count,
+                image_size_px / tile_size_px,
+                stages[i + 1].tiles.get());
+        } else {
+            // Special case for per-pixel evaluation, which
+            // doesn't unpack every single pixel (since that would take up
+            // 64x extra space).
+            copy_active_tiles<<<num_blocks, NUM_THREADS>>>(
+                stages[i].tiles.get(),
+                count,
+                stages[i + 1].tiles.get());
+        }
+
+        {   // Copy filled tiles into the next level's image (expanding them
+            // by 64x).  This is cleaner that accumulating all of the levels
+            // in a single pass, and could (possibly?) help with skipping
+            // fully occluded tiles.
+            const unsigned next_tile_size = tile_size_px / 4;
+            const uint32_t u = ((image_size_px / next_tile_size) / 32);
+            copy_filled_3d<<<dim3(u + 1, u + 1), dim3(32, 32)>>>(
+                    stages[i].filled.get(),
+                    stages[i + 1].filled.get(),
+                    image_size_px / next_tile_size);
+        }
+
+        // Assign the next number of tiles to evaluate
+        count = active_tile_count;
+    }
+
+    // Time to render individual pixels!
+    num_blocks = (count + NUM_TILES - 1) / NUM_TILES;
+    const size_t num_values = num_blocks * NUM_TILES * 32 * 3;
+    if (values_size < num_values) {
+        values.reset(CUDA_MALLOC(float2, num_values));
+        values_size = num_values;
+    }
+    calculate_voxels<<<num_blocks, NUM_TILES * 32>>>(
+        stages[3].tiles.get(),
+        count,
+        image_size_px / 4,
+        mat,
+        reinterpret_cast<float2*>(values.get()));
+    eval_voxels_f_heatmap<3><<<num_blocks, NUM_TILES * 32>>>(
+        tape_data.get(),
+        stages[3].filled.get(),
+        image_size_px / 4,
+
+        stages[3].tiles.get(),
+        count,
+
+        reinterpret_cast<float2*>(values.get()),
+        heatmap.get());
+
+    {   // Then render normals into those pixels
+        const uint32_t u = ((image_size_px + 15) / 16);
+        eval_pixels_d<<<dim3(u, u), dim3(16, 16)>>>(
+                tape_data.get(),
+                stages[3].filled.get(),
+                normals.get(),
+                image_size_px,
+                mat,
+                stages[0].tiles.get(),
+                stages[1].tiles.get(),
+                stages[2].tiles.get());
+    }
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    for (unsigned x=0; x < image_size_px; ++x) {
+        for (unsigned y=0; y < image_size_px; ++y) {
+            heatmap[x + y * image_size_px] /= tape.length - 2;
+        }
+    }
+    return heatmap;
+}

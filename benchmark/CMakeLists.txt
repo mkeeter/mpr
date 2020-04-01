@@ -21,6 +21,8 @@ benchmark(brute.cu stats.cpp)
 
 benchmark(render_2d.cpp)
 benchmark(render_3d.cpp)
+benchmark(render_2d_heatmap.cpp)
+benchmark(render_3d_heatmap.cpp)
 benchmark(render_effects.cpp)
 
 benchmark(circle.cpp)
