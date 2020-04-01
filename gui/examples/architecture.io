@@ -187,5 +187,6 @@
   (rotate-z -0.2)
   (rotate-x -1)
   (scale-xyz [s s s])
+  (move [0 -0.15 0])
 )
   
