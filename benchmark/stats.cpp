@@ -14,7 +14,7 @@ Copyright (C) 2019-2020  Matt Keeter
 
 #include "stats.hpp"
 
-void get_stats(std::function<void()> f, int warmup, int count) {
+double get_stats(std::function<void()> f, int warmup, int count) {
     // Warm up
     for (int i=0; i < warmup; ++i) {
         f();
@@ -41,4 +41,5 @@ void get_stats(std::function<void()> f, int warmup, int count) {
     }
     stdev = sqrt(stdev / (times_ms.size() - 1));
     std::cout << mean << " " << stdev << "\n";
+    return mean;
 }

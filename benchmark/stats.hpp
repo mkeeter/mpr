@@ -9,4 +9,4 @@ Copyright (C) 2019-2020  Matt Keeter
 */
 #include <functional>
 
-void get_stats(std::function<void()> f, int warmup=20, int count=100);
+double get_stats(std::function<void()> f, int warmup=20, int count=100);

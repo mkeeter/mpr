@@ -47,13 +47,12 @@ int main(int argc, char **argv)
     T(3,2) = 0.3f;
 
     const std::vector<int> sizes = {256, 512, 1024, 1536, 2048};
-    std::cout << "Rendering..." << std::endl;
     for (auto size: sizes) {
         auto tape = libfive::cuda::Tape(t);
         auto c = libfive::cuda::Context(size);
 
         std::cout << size << " ";
-        get_stats([&](){ c.render3D(tape, T); });
+        auto mean = get_stats([&](){ c.render3D(tape, T); });
 
         libfive::Heightmap out(size, size);
         uint32_t i = 0;
@@ -66,6 +65,10 @@ int main(int argc, char **argv)
         }
         out.savePNG("out_gpu_depth_ctx_" + std::to_string(size) + ".png");
         out.saveNormalPNG("out_gpu_norm_ctx_" + std::to_string(size) + ".png");
+
+        if (mean > 750) {
+            break;
+        }
     }
     return 0;
 }
