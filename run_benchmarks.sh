@@ -42,12 +42,12 @@ mv *.png architecture
 
 echo "------------------------------------------------------------"
 echo "Gears (3D)"
-./benchmark/render_2d_table ../benchmark/files/involute_gear_rot_3d.frep
+./benchmark/render_3d_table ../benchmark/files/involute_gear_rot_3d.frep
 mkdir -p gears_3d
 mv *.png gears_3d
 
 echo "------------------------------------------------------------"
 echo "Bear sculpt"
-./benchmark/render_2d_table ../benchmark/files/bear_rot.frep
+./benchmark/render_3d_table ../benchmark/files/bear_rot.frep
 mkdir -p bear
 mv *.png bear
