@@ -22,7 +22,7 @@ echo "============================================================"
 echo "                      2D benchmarks                         "
 echo "============================================================"
 echo "Text benchmark"
-./benchmark/render_2d_table ../benchmark/files/prospero_long.frep
+./benchmark/render_2d_table ../benchmark/files/prospero.frep
 mkdir -p prospero
 mv *.png prospero
 
@@ -36,18 +36,18 @@ echo "============================================================"
 echo "                      3D benchmarks                         "
 echo "============================================================"
 echo "Architecture model"
-./benchmark/render_3d_table ../benchmark/files/architecture_rot.frep
+./benchmark/render_3d_table ../benchmark/files/architecture.frep
 mkdir -p architecture
 mv *.png architecture
 
 echo "------------------------------------------------------------"
 echo "Gears (3D)"
-./benchmark/render_3d_table ../benchmark/files/involute_gear_rot_3d.frep
+./benchmark/render_3d_table ../benchmark/files/involute_gear_3d.frep
 mkdir -p gears_3d
 mv *.png gears_3d
 
 echo "------------------------------------------------------------"
 echo "Bear sculpt"
-./benchmark/render_3d_table ../benchmark/files/bear_rot.frep
+./benchmark/render_3d_table ../benchmark/files/bear.frep
 mkdir -p bear
 mv *.png bear
