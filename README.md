@@ -15,8 +15,8 @@ leaving it on for a month will cost you a cool **$2276**.
 
 Once you've gotten permission to create the instance,
 spin up an server with the latest version of
-`Deep Learning Base AMI (Ubuntu 18.04)`
-(I used `Version 21.0 (ami-0b98d7f73c7d1bb71)`, but you should use the most recent release).
+`Deep Learning Base AMI (Ubuntu 18.04)`.
+I used `Version 21.0 (ami-0b98d7f73c7d1bb71)`, but you should use the most recent release.
 
 SSH into the server and run a bunch of commands:
 ```
@@ -40,6 +40,7 @@ git submodule update --init --recursive
 mkdir build
 cd build
 cmake -GNinja -DBIG_SERVER=ON ..
+ninja
 ```
 
 At this point,
@@ -55,9 +56,7 @@ Text benchmark
 256 5.29331 0.261052
 512 4.21138 0.00523862
 1024 3.85596 0.00625019
-2048 3.87343 0.00534346
-3072 3.89625 0.00762643
-4096 4.14098 0.011129
+...
 ```
 The three columns are size,
 frame time (in milliseconds),
