@@ -7,7 +7,8 @@ a technical paper which will be presented at SIGGRAPH 2020.
 You can reproduce the results in the paper for about $5 on AWS!
 
 First, make sure that your AWS account has permission to create a `p3.2xlarge` instance.
-New accounts don't, so I had to email support and ask for an increase in my vCPU limits.
+New accounts don't, so I had to email support and ask for an
+[increase in my vCPU limits](https://console.aws.amazon.com/servicequotas/home?region=us-east-1#!/dashboard)
 
 Keep in mind, this instance costs $3.06/hour,
 so you'll want to be very careful about **turning it off when not benchmarking**;
