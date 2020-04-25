@@ -7,8 +7,10 @@ a technical paper which will be presented at SIGGRAPH 2020.
 ### `mpr::Tape`
 The `Tape` constructor takes a `libfive::Tree` object,
 flattens it,
-assigns registers,
+assigns slots,
 and packs it into a set of `uint64_t` clauses in GPU RAM.
+
+This is described in Section 2 of the paper.
 
 ### `mpr::Context`
 The `Context` class is responsible for actually rendering tapes on the GPU.
