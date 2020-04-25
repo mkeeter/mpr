@@ -3,6 +3,38 @@ This is the reference implementation for
 "Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces",
 a technical paper which will be presented at SIGGRAPH 2020.
 
+## Major components
+### `mpr::Tape`
+The `Tape` constructor takes a `libfive::Tree` object,
+flattens it,
+assigns registers,
+and packs it into a set of `uint64_t` clauses in GPU RAM.
+
+### `mpr::Context`
+The `Context` class is responsible for actually rendering tapes on the GPU.
+In particular `Context::render2D` implements Alg. 3 from the paper,
+and `Context::render3D` implements the 3D rendering discussed in Section 4.2
+
+The `eval_tiles_i` kernel in `context.cu`
+implements Algorithms 1 and 2 from the paper.
+
+### `mpr::Effects`
+This `struct` applies various post-processing effects
+on images rendered by a `Context`.
+Effects are limited to shading and screen-space ambient occlusion (SSAO).
+
+This part of the code isn't as well tuned as the rest,
+because it's not a core part of the algorithm.
+
+### GUI
+The GUI is an extremely basic tool for testing out the implementation.
+
+![Screenshot](gui/screenshot.png)
+
+It is based on [Dear ImGui](https://github.com/ocornut/imgui)
+and uses [ImGuiColorTextEdit](https://github.com/BalazsJako/ImGuiColorTextEdit)
+as a text editor.
+
 ## Reproducing our results on AWS
 You can reproduce the results in the paper for about $5 on AWS!
 
