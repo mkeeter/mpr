@@ -124,10 +124,13 @@ ninja
 ```
 
 ## Disclaimer
-This is research code maintained in my spare time,
+This is research code,
 without institutional or commercial backing.
-I don't have the resources to support every Linux distro,
-though I'll provide best-effort support
+
+I'll provide best-effort support
 for running on AWS in the configuration described above.
-If you're having trouble on your particular Linux distro,
-please debug it independently and open a PR rather than an issue.
+
+Otherwise, if you encounter issues,
+please consider debugging independently
+and opening a PR with your fixes;
+I can't guarantee that I'll address your issues myself.
