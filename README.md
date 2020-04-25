@@ -1,7 +1,7 @@
 # `mpr`
 This is the reference implementation for
 "Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces",
-a technical paper which will be presented at SIGGRAPH 2020.
+a technical paper which will be presented (virtually) at SIGGRAPH 2020.
 
 ## Major components
 ### `mpr::Tape`
