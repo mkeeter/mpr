@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -88,7 +90,7 @@ int main(int argc, char **argv)
         t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
                 sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
     }
-    auto tape = libfive::cuda::Tape(t);
+    auto tape = mpr::Tape(t);
 
     // Note: we deliberately leak the heightmaps!
     //
@@ -120,7 +122,7 @@ int main(int argc, char **argv)
     }
     std::cout << "Rendering brute-force with interpreter\n";
     for (int size=256; size <= 2048; size += 64) {
-        auto ctx = libfive::cuda::Context(size);
+        auto ctx = mpr::Context(size);
         std::cout << size << " ";
         get_stats([&](){ ctx.render2D_brute(tape, Eigen::Matrix3f::Identity()); });
 
@@ -137,7 +139,7 @@ int main(int argc, char **argv)
 
     std::cout << "Rendering fancy algorithm with interpreter\n";
     for (int size=256; size <= 4096; size += 64) {
-        auto ctx = libfive::cuda::Context(size);
+        auto ctx = mpr::Context(size);
         std::cout << size << " ";
         get_stats([&](){ ctx.render2D(tape, Eigen::Matrix3f::Identity()); });
 

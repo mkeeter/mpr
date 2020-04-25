@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -37,11 +39,11 @@ int main(int argc, char** argv)
             exit(1);
         }
     }
-    auto r = libfive::cuda::Tape(t);
+    auto r = mpr::Tape(t);
 
     for (int i=1; i < r.length - 1; ++i) {
         const auto c = r.data[i];
-        std::cout << libfive::cuda::gpu_op_str(OP(&c)) << " & "
+        std::cout << mpr::gpu_op_str(OP(&c)) << " & "
                   << (int)I_LHS(&c) << " & "
                   << (int)I_RHS(&c) << " & "
                   << IMM(&c) << (IMM(&c) == int(IMM(&c)) ? ".0f" : "f") << " & "

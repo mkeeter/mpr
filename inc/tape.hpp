@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -17,8 +19,7 @@ namespace libfive {
 class Tree;
 }
 
-namespace libfive {
-namespace cuda {
+namespace mpr {
 
 struct Tape {
     Tape(const libfive::Tree& tree);
@@ -28,5 +29,4 @@ struct Tape {
     int32_t length;
 };
 
-} // namespace cuda
-} // namespace libfive
+} // namespace mpr

@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -11,8 +13,7 @@ Copyright (C) 2019-2020  Matt Keeter
 #include <cstdint>
 #include <cuda_runtime.h>
 
-namespace libfive {
-namespace cuda {
+namespace mpr {
 
 enum Opcode {
     GPU_OP_INVALID = 0,
@@ -57,5 +58,4 @@ enum Opcode {
 __host__ __device__
 const char* gpu_op_str(uint8_t op);
 
-}   // namespace cuda
-}   // namespace libfive
+}   // namespace mpr

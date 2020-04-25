@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -36,8 +38,8 @@ int main(int, char**)
     }
 
     const auto size = 1024;
-    auto ctx = libfive::cuda::Context(size);
-    auto tape = libfive::cuda::Tape(t);
+    auto ctx = mpr::Context(size);
+    auto tape = mpr::Tape(t);
     ctx.render2D(tape, Eigen::Matrix3f::Identity());
 
     // Save the image using libfive::Heightmap
@@ -62,7 +64,7 @@ int main(int, char**)
         unsigned len = 0;
         for (auto j = tile.tape + 1; OP(&ctx.tape_data[j]); ++j) {
             auto d = ctx.tape_data[j];
-            if (OP(&d) == libfive::cuda::GPU_OP_JUMP) {
+            if (OP(&d) == mpr::GPU_OP_JUMP) {
                 j += JUMP_TARGET(&d);
             } else {
                 len++;
@@ -94,7 +96,7 @@ int main(int, char**)
         unsigned len = 0;
         for (auto j = tile.tape + 1; OP(&ctx.tape_data[j]); ++j) {
             auto d = ctx.tape_data[j];
-            if (OP(&d) == libfive::cuda::GPU_OP_JUMP) {
+            if (OP(&d) == mpr::GPU_OP_JUMP) {
                 j += JUMP_TARGET(&d);
             } else {
                 len++;

@@ -1,4 +1,4 @@
-# libfive-cuda
+# `mpr`
 This is the reference implementation for
 "Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces",
 a technical paper which will be presented at SIGGRAPH 2020.
@@ -33,10 +33,10 @@ cd build
 cmake ..
 sudo make install
 
-# Install libfive-cuda
+# Install `mpr`
 cd
-git clone git@github.com:mkeeter/libfive-cuda
-cd libfive-cuda
+git clone git@github.com:mkeeter/mpr
+cd mpr
 git submodule update --init --recursive
 mkdir build
 cd build
@@ -80,8 +80,8 @@ Install [Homebrew](https://brew.sh) and [CUDA](https://docs.nvidia.com/cuda/cuda
 then run something like
 ```
 brew install cmake pkg-config eigen libpng qt guile boost ninja
-git clone git@github.com:mkeeter/libfive-cuda
-cd libfive-cuda
+git clone git@github.com:mkeeter/mpr
+cd mpr
 git submodule update --init --recursive
 mkdir build
 cd build

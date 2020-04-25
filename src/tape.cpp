@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -14,8 +16,7 @@ Copyright (C) 2019-2020  Matt Keeter
 #include "tape.hpp"
 #include "gpu_opcode.hpp"
 
-namespace libfive {
-namespace cuda {
+namespace mpr {
 
 Tape::Tape(const libfive::Tree& tree) {
     // Hold a single cache lock to avoid needing mutex locks everywhere
@@ -226,6 +227,5 @@ Tape::Tape(const libfive::Tree& tree) {
     length = flat.size();
 }
 
-} // namespace cuda
-} // namespace libfive
+} // namespace mpr
 

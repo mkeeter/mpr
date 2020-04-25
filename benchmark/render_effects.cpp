@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -56,9 +58,9 @@ int main(int argc, char** argv)
         }
     }
 
-    auto ctx = libfive::cuda::Context(resolution);
-    auto tape = libfive::cuda::Tape(t);
-    libfive::cuda::Effects effects;
+    auto ctx = mpr::Context(resolution);
+    auto tape = mpr::Tape(t);
+    mpr::Effects effects;
 
     Eigen::Matrix4f T = Eigen::Matrix4f::Identity();
     T(3,2) = 0.3f;

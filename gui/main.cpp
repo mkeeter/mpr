@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -34,7 +36,7 @@ static void glfw_error_callback(int error, const char* description)
 }
 
 struct Shape {
-    libfive::cuda::Tape tape;
+    mpr::Tape tape;
     libfive::Tree tree;
 };
 
@@ -56,9 +58,10 @@ int main(int argc, char** argv)
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
 
     // Create window with graphics context
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "libfive-cuda demo", NULL, NULL);
-    if (window == NULL)
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "demo", NULL, NULL);
+    if (window == NULL) {
         return 1;
+    }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
 
@@ -157,8 +160,8 @@ int main(int argc, char** argv)
     int render_dimension = 3;
     int render_mode = RENDER_MODE_NORMALS;
 
-    libfive::cuda::Context ctx(render_size);
-    libfive::cuda::Effects effects;
+    mpr::Context ctx(render_size);
+    mpr::Effects effects;
 
     while (!glfwWindowShouldClose(window))
     {
@@ -273,7 +276,7 @@ int main(int argc, char** argv)
                 // Create new shapes from the script
                 for (auto& t : interpreter.shapes) {
                     if (shapes.find(t.first) == shapes.end()) {
-                        Shape s = { libfive::cuda::Tape(t.second), t.second };
+                        Shape s = { mpr::Tape(t.second), t.second };
                         shapes.emplace(t.first, std::move(s));
                     }
                 }
@@ -310,7 +313,7 @@ int main(int argc, char** argv)
 
             // Update the render context if size has changed
             if (render_size != ctx.image_size_px) {
-                ctx = libfive::cuda::Context(render_size);
+                ctx = mpr::Context(render_size);
             }
 
             ImGui::Text("Dimension:");

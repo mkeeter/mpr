@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -37,8 +39,7 @@ inline void cudaFreeChecked(void* ptr, const char *file, int line) {
     gpuCheck(cudaFree(ptr), file, line);
 }
 
-namespace libfive {
-namespace cuda {
+namespace mpr {
 
 struct Deleter {
     template <typename T>
@@ -53,5 +54,4 @@ inline constexpr unsigned __host__ __device__ pow(unsigned p, unsigned n) {
     return n ? p * pow(p, n - 1) : 1;
 }
 
-}   // namespace libfive
-}   // namespace cuda
+}   // namespace mpr

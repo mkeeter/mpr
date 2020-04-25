@@ -1,5 +1,7 @@
 /*
-libfive-cuda: a GPU-accelerated renderer for libfive
+Reference implementation for
+"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces"
+(SIGGRAPH 2020)
 
 This Source Code Form is subject to the terms of the Mozilla Public
 License, v. 2.0. If a copy of the MPL was not distributed with this file,
@@ -139,8 +141,8 @@ void copy_shaded_to_surface(int32_t* const __restrict__ image,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void copy_to_texture(const libfive::cuda::Context& ctx,
-                     const libfive::cuda::Effects& effects,
+void copy_to_texture(const mpr::Context& ctx,
+                     const mpr::Effects& effects,
                      cudaGraphicsResource* gl_tex,
                      int texture_size_px,
                      bool append,
