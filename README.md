@@ -3,6 +3,9 @@ This is the reference implementation for
 "Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces",
 a technical paper which will be presented (virtually) at SIGGRAPH 2020.
 
+It builds on [`libfive`](https://libfive.com),
+which is included as a submodule.
+
 ## Major components
 ### `mpr::Tape`
 The `Tape` constructor takes a `libfive::Tree` object,
