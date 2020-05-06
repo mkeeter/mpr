@@ -21,7 +21,7 @@ target_include_directories(demo PRIVATE
     common/inc
     imgui
     imgui-color-text-edit)
-target_link_libraries(demo glfw five-guile five-cuda)
+target_link_libraries(demo glfw five-guile mpr)
 
 if (APPLE)
     target_link_libraries(demo glew)

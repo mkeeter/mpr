@@ -7,7 +7,7 @@ function(benchmark)
         CXX_STANDARD 11
         CUDA_SEPARABLE_COMPILATION ON)
     target_include_directories(${TARGET} PUBLIC ../lib)
-    target_link_libraries(${TARGET} five-cuda)
+    target_link_libraries(${TARGET} mpr)
 
     if(APPLE)
       # Add the rpath to the lib

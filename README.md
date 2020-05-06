@@ -141,6 +141,23 @@ env CUDACXX=/usr/local/cuda/bin/nvcc cmake -GNinja ..
 ninja
 ```
 
+## License
+(c) 2019-2020 Matthew Keeter
+
+This code is licensed with a similar strategy as
+[`libfive` itself](https://github.com/libfive/libfive/#license):
+
+- The `mpr` library is released under the
+  [Mozilla Public License, version 2](https://www.mozilla.org/en-US/MPL/2.0/).
+  This is a weak copyleft license
+  which allows you to use the code in your own work (including commercially)
+  as long as changes to `mpr` itself are released.
+- The demo GUI is licensed under the
+  [GNU General Public License, version 2](https://www.gnu.org/licenses/old-licenses/gpl-2.0-standalone.html)
+  [or later](https://www.gnu.org/licenses/gpl-3.0-standalone.html),
+  because it uses the `libfive-guile` Scheme bindings
+  (which are themselves released under the GPL).
+
 ## Disclaimer
 This is research code,
 without institutional or commercial backing.
