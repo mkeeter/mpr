@@ -1,12 +1,27 @@
 # `mpr`
-This is the reference implementation for
-"Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces",
-a technical paper which will be presented (virtually) at SIGGRAPH 2020.
+This is the **reference implementation** for
+[Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces](https://mattkeeter.com/research/mpr)
+a technical paper which will be presented (virtually) at [SIGGRAPH 2020](s2020.siggraph.org/).
 
-It builds on [`libfive`](https://libfive.com),
-which is included as a submodule.
+[Paper PDF](https://mattkeeter.com/research/mpr/keeter_mpr20.pdf) (preprint, 4.6 MB, no article number)
+
+## Citation
+```
+@article {keeter2020,
+    author  = {Keeter, Matthew J.},
+    title   = {Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces},
+    journal = {{ACM} Transactions on Graphics (Proceedings of SIGGRAPH)},
+    year    = "2020",
+    volume  = "39",
+    number  = "4",
+    month   = "jul",
+}
+```
 
 ## Major components
+This code builds on [`libfive`](https://libfive.com),
+which is included as a submodule.
+
 ### `mpr::Tape`
 The `Tape` constructor takes a `libfive::Tree` object,
 flattens it,
