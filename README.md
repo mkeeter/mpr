@@ -32,7 +32,7 @@ This is described in Section 2 of the paper.
 
 ### `mpr::Context`
 The `Context` class is responsible for actually rendering tapes on the GPU.
-In particular `Context::render2D` implements Alg. 3 from the paper,
+In particular, `Context::render2D` implements Alg. 3 from the paper,
 and `Context::render3D` implements the 3D rendering discussed in Section 4.2
 
 The `eval_tiles_i` kernel in `context.cu`
