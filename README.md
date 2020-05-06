@@ -1,6 +1,6 @@
 # `mpr`
 This is the **reference implementation** for
-[Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces](https://mattkeeter.com/research/mpr)
+[Massively Parallel Rendering of Complex Closed-Form Implicit Surfaces](https://mattkeeter.com/research/mpr),
 a technical paper which will be presented (virtually) at [SIGGRAPH 2020](s2020.siggraph.org/).
 
 [Paper PDF](https://mattkeeter.com/research/mpr/keeter_mpr20.pdf) (preprint, 4.6 MB, no article number)
