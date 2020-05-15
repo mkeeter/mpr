@@ -52,7 +52,9 @@ int main(int argc, char **argv)
             auto X = libfive::Tree::X();
             auto Y = libfive::Tree::Y();
             auto Z = libfive::Tree::Z();
-            auto frac = Z * (i - 30) / 30.0f * M_PI / 2;
+            float f = (i - 30) / 29.0f;
+            f = -(cos(M_PI * f) - 1) / 2 * (M_PI / 4);
+            auto frac = Z * f;
             t = t.remap(
               (cos(frac) * X - sin(frac) * Y),
               (sin(frac) * X + cos(frac) * Y),
