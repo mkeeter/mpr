@@ -26,6 +26,7 @@ benchmark(render_2d_heatmap.cpp)
 benchmark(render_3d_heatmap.cpp)
 benchmark(render_effects.cpp)
 
+benchmark(csg_anim.cpp ../libfive/libfive/test/util/shapes.cpp)
 benchmark(circle.cpp)
 benchmark(print_tape_table.cpp)
 benchmark(dump_tape.cpp)

@@ -19,35 +19,18 @@ Copyright (C) 2019-2020  Matt Keeter
 #include <libfive/tree/archive.hpp>
 #include <libfive/render/discrete/heightmap.hpp>
 
+#include "../libfive/libfive/test/util/shapes.hpp"
+
 #include "context.hpp"
 #include "tape.hpp"
 #include "effects.hpp"
 
 int main(int argc, char **argv)
 {
-    libfive::Tree t = libfive::Tree::X();
-    if (argc >= 2) {
-        std::ifstream ifs;
-        ifs.open(argv[1]);
-        if (ifs.is_open()) {
-            auto a = libfive::Archive::deserialize(ifs);
-            t = a.shapes.front().tree;
-        } else {
-            fprintf(stderr, "Could not open file %s\n", argv[1]);
-            exit(1);
-        }
-    } else {
-        auto X = libfive::Tree::X();
-        auto Y = libfive::Tree::Y();
-        auto Z = libfive::Tree::Z();
-        t = min(sqrt((X + 0.5)*(X + 0.5) + Y*Y + Z*Z) - 0.25,
-                sqrt((X - 0.5)*(X - 0.5) + Y*Y + Z*Z) - 0.25);
-    }
-
     int resolution = 512;
-    if (argc >= 3) {
+    if (argc >= 2) {
         errno = 0;
-        resolution = strtol(argv[2], NULL, 10);
+        resolution = strtol(argv[1], NULL, 10);
         if (errno || resolution == 0) {
             fprintf(stderr, "Could not parse resolution '%s'\n",
                     argv[2]);
@@ -55,17 +38,33 @@ int main(int argc, char **argv)
         }
     }
 
-    auto tape = mpr::Tape(t);
     auto c = mpr::Context(resolution);
     mpr::Effects effects;
 
-    libfive::Heightmap out(resolution, resolution);
+    for (unsigned i=0; i < 60; i++) {
+        libfive::Tree t = box(Eigen::Vector3f(-1, -1, -2),
+                              Eigen::Vector3f(1, 1, 2));
 
-    for (unsigned i=0; i < 180; i++) {
+        // Cut out circle
+        t = max(t, -extrude(circle(0.8), 2.5 - i/30.0 * 5, 2));
+
+        if (i >= 30) {
+            auto X = libfive::Tree::X();
+            auto Y = libfive::Tree::Y();
+            auto Z = libfive::Tree::Z();
+            auto frac = Z * (i - 30) / 30.0f * M_PI / 2;
+            t = t.remap(
+              (cos(frac) * X - sin(frac) * Y),
+              (sin(frac) * X + cos(frac) * Y),
+              Z);
+        }
+
+        auto tape = mpr::Tape(t);
+
         Eigen::Matrix3f T =
-            Eigen::AngleAxisf(2 * i * M_PI/180, Eigen::Vector3f(0, 0, 1)) *
+            Eigen::AngleAxisf(40, Eigen::Vector3f(0, 0, 1)) *
             Eigen::AngleAxisf(60 * M_PI/180, Eigen::Vector3f(1, 0, 0)) *
-            Eigen::Scaling(Eigen::Vector3f(1.2, 1.2, 2.0));
+            Eigen::Scaling(Eigen::Vector3f(3, 3, 3));
         Eigen::Matrix4f T_ = Eigen::Matrix4f::Identity();
         T_.topLeftCorner<3, 3>() = T;
         T_(3, 2) = 0.3f;  // Have some perspective
@@ -75,9 +74,17 @@ int main(int argc, char **argv)
         effects.drawShaded(c);
 
         unsigned j=0;
-        for (int x=0; x < resolution; ++x) {
-            for (int y=0; y < resolution; ++y) {
-                out.depth(x, y) = effects.image[j++];
+        libfive::Heightmap out(resolution, resolution);
+        out.depth = 0;
+        out.norm = 0;
+        for (int x=0; x < c.image_size_px; ++x) {
+            for (int y=0; y < c.image_size_px; ++y) {
+                const auto p = c.stages[3].filled[j];
+                out.depth(x, y) = p;
+                if (p) {
+                    out.norm(x, y) = c.normals[j];
+                }
+                ++j;
             }
         }
         auto s = std::to_string(i);
@@ -85,10 +92,11 @@ int main(int argc, char **argv)
             s = "0" + s;
         }
         std::cout << s << "\n";
-        out.savePNG("frame" + s + ".png");
+        out.saveNormalPNG("frame" + s + ".png");
     }
 
     return 0;
 }
+
 
 
