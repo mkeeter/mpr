@@ -92,6 +92,8 @@ int main(int argc, char **argv)
                 out.depth(x, y) = p;
                 if (p) {
                     out.norm(x, y) = c.normals[j];
+                } else {
+                    out.norm(x, y) = 0xFFFFFFFF;
                 }
                 ++j;
             }

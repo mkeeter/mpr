@@ -71,13 +71,21 @@ int main(int argc, char **argv)
         T_(3, 2) = 0.3f;  // Have some perspective
         T_(2, 3) = 0.25f; // Shift by Z a little
         c.render3D(tape, T_);
-        effects.drawSSAO(c);
-        effects.drawShaded(c);
 
         unsigned j=0;
-        for (int x=0; x < resolution; ++x) {
-            for (int y=0; y < resolution; ++y) {
-                out.depth(x, y) = effects.image[j++];
+        libfive::Heightmap out(resolution, resolution);
+        out.depth = 0;
+        out.norm = 0;
+        for (int x=0; x < c.image_size_px; ++x) {
+            for (int y=0; y < c.image_size_px; ++y) {
+                const auto p = c.stages[3].filled[j];
+                out.depth(x, y) = p;
+                if (p) {
+                    out.norm(x, y) = c.normals[j];
+                } else {
+                    out.norm(x, y) = 0xFFFFFFFF;
+                }
+                ++j;
             }
         }
         auto s = std::to_string(i);
@@ -85,7 +93,7 @@ int main(int argc, char **argv)
             s = "0" + s;
         }
         std::cout << s << "\n";
-        out.savePNG("frame" + s + ".png");
+        out.saveNormalPNG("frame" + s + ".png");
     }
 
     return 0;
