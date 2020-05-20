@@ -46,14 +46,21 @@ int main(int argc, char **argv)
                               Eigen::Vector3f(1, 1, 2));
 
         // Cut out circle
-        t = max(t, -extrude(circle(0.8), 2.5 - i/30.0 * 5, 2));
+        float f = i / 29.0f;
+        if (i < 30) {
+            f = -(cos(M_PI * f) - 1) / 2;
+        } else {
+            f = 1;
+        }
+        auto cutout = -circle(0.8 * f);
+        t = max(t, cutout);
 
         if (i >= 30) {
             auto X = libfive::Tree::X();
             auto Y = libfive::Tree::Y();
             auto Z = libfive::Tree::Z();
             float f = (i - 30) / 29.0f;
-            f = -(cos(M_PI * f) - 1) / 2 * (M_PI / 4);
+            f = -(cos(M_PI * f) - 1) / 2;
             auto frac = Z * f;
             t = t.remap(
               (cos(frac) * X - sin(frac) * Y),
