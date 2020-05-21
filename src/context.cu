@@ -1022,10 +1022,12 @@ void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
                 (mat(i, 0) * fx +
                  mat(i, 1) * fy +
                  mat(i, 2) * fz + mat(i, 3)) / fw_);
+
+            // Load deriv, which is also rotated by the transform matrix
+            slots[((const uint8_t*)tape_data)[i + 1]].v.x = mat(i, 0);
+            slots[((const uint8_t*)tape_data)[i + 1]].v.y = mat(i, 1);
+            slots[((const uint8_t*)tape_data)[i + 1]].v.z = mat(i, 2);
         }
-        slots[((const uint8_t*)tape_data)[1]].v.x = 1.0f;
-        slots[((const uint8_t*)tape_data)[2]].v.y = 1.0f;
-        slots[((const uint8_t*)tape_data)[3]].v.z = 1.0f;
     }
 
 
