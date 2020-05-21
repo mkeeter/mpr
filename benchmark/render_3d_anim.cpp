@@ -94,6 +94,18 @@ int main(int argc, char **argv)
         }
         std::cout << s << "\n";
         out.saveNormalPNG("frame" + s + ".png");
+        out.savePNG("depth" + s + ".png");
+
+        effects.drawSSAO(c);
+        effects.drawShaded(c);
+
+        j=0;
+        for (int x=0; x < resolution; ++x) {
+            for (int y=0; y < resolution; ++y) {
+                out.depth(x, y) = effects.image[j++];
+            }
+        }
+        out.savePNG("shaded" + s + ".png");
     }
 
     return 0;
