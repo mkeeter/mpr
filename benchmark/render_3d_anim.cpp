@@ -376,6 +376,20 @@ int main(int argc, char **argv)
             }
         }
         out.savePNG("shaded" + s + ".png");
+
+        auto heatmap = c.render3D_heatmap(tape, T_);
+        j=0;
+        for (int x=0; x < c.image_size_px; ++x) {
+            for (int y=0; y < c.image_size_px; ++y) {
+                unsigned h = heatmap[j++] * 100000;
+                if (h > 0xFFFFFF) {
+                    std::cerr << "toooo big" << h << "\n";
+                    exit(1);
+                }
+                out.norm(x, y) = 0xFF000000 | h;
+            }
+        }
+        out.saveNormalPNG("heat" + s + ".png");
     }
 
     return 0;
