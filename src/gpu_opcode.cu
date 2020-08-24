@@ -40,6 +40,8 @@ const char* gpu_op_str(uint8_t op) {
         case GPU_OP_MIN_LHS_RHS: return "MIN_LHS_RHS";
         case GPU_OP_MAX_LHS_IMM: return "MAX_LHS_IMM";
         case GPU_OP_MAX_LHS_RHS: return "MAX_LHS_RHS";
+        case GPU_OP_RAD_LHS_IMM: return "RAD_LHS_IMM";
+        case GPU_OP_RAD_LHS_RHS: return "RAD_LHS_RHS";
 
         // Non-commutative opcodes
         case GPU_OP_SUB_LHS_IMM: return "SUB_LHS_IMM";
