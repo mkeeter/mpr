@@ -67,6 +67,14 @@ Tape::Tape(const libfive::Tree& tree) {
             auto t = todo.back();
             todo.pop_back();
 
+            switch (t->op) {
+                case libfive::Opcode::CONSTANT:
+                case libfive::Opcode::VAR_X:
+                case libfive::Opcode::VAR_Y:
+                case libfive::Opcode::VAR_Z: continue;
+                default: break;
+            }
+
             // Check if we've already visited this node
             if (!used.insert(t).second) {
                 continue;
