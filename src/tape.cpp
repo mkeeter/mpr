@@ -9,6 +9,8 @@ You can obtain one at http://mozilla.org/MPL/2.0/.
 
 Copyright (C) 2019-2020  Matt Keeter
 */
+#include <unordered_set>
+
 #include "libfive/tree/tree.hpp"
 #include "libfive/tree/cache.hpp"
 
@@ -25,18 +27,91 @@ Tape::Tape(const libfive::Tree& tree) {
     auto ordered = tree.orderedDfs();
     std::vector<libfive::Tree::Id> ordered_fast;
     ordered_fast.reserve(ordered.size());
-
-    std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
     libfive::Tree::Id axes_used[3] = {nullptr};
+
     for (auto& c : ordered) {
         using namespace libfive::Opcode;
-        // Very simple tracking of active spans, without clause reordering
-        // or any other cleverness.
         switch (c->op) {
             case CONSTANT: continue;
             case VAR_X: axes_used[0] = c.id(); break;
             case VAR_Y: axes_used[1] = c.id(); break;
             case VAR_Z: axes_used[2] = c.id(); break;
+
+            case OP_ADD:
+            case OP_MUL:
+            case OP_MIN:
+            case OP_MAX:
+            case OP_SUB:
+            case OP_DIV:
+            case OP_SQUARE:
+            case OP_SQRT:
+            case OP_NEG:
+            case OP_SIN:
+            case OP_COS:
+            case OP_ASIN:
+            case OP_ACOS:
+            case OP_ATAN:
+            case OP_EXP:
+            case OP_ABS:
+            case OP_LOG: ordered_fast.push_back(c.id());
+                         break;
+            default: std::cerr << "Unsupported opcode " << toScmString(c->op);
+        }
+    }
+
+    std::unordered_set<libfive::Tree::Id> used;
+    std::unordered_set<libfive::Tree::Id> remap_rad;
+    {
+        std::vector<libfive::Tree::Id> todo = {*ordered_fast.rbegin()};
+        while (todo.size()) {
+            auto t = todo.back();
+            todo.pop_back();
+
+            // Check if we've already visited this node
+            if (!used.insert(t).second) {
+                continue;
+            }
+
+            if (t->op == libfive::Opcode::OP_SQRT &&
+                t->lhs->op == libfive::Opcode::OP_ADD &&
+                t->lhs->lhs->op == libfive::Opcode::OP_SQUARE &&
+                t->lhs->rhs->op == libfive::Opcode::OP_SQUARE &&
+                t->lhs->lhs->lhs->op != libfive::Opcode::CONSTANT &&
+                t->lhs->rhs->lhs->op != libfive::Opcode::CONSTANT)
+            {
+                remap_rad.insert(t);
+                todo.push_back(t->lhs->lhs->lhs.get());
+                todo.push_back(t->lhs->rhs->lhs.get());
+            } else {
+                if (t->lhs) {
+                    todo.push_back(t->lhs.get());
+                }
+                if (t->rhs) {
+                    todo.push_back(t->rhs.get());
+                }
+            }
+        }
+    }
+
+    std::map<libfive::Tree::Id, libfive::Tree::Id> last_used;
+    for (auto& c : ordered_fast) {
+        if (!used.count(c)) {
+            continue;
+        }
+        if (remap_rad.count(c)) {
+            last_used[c->lhs->lhs->lhs.get()] = c;
+            last_used[c->lhs->rhs->lhs.get()] = c;
+            continue;
+        }
+
+        using namespace libfive::Opcode;
+        // Very simple tracking of active spans, without clause reordering
+        // or any other cleverness.
+        switch (c->op) {
+            case CONSTANT:
+            case VAR_X:
+            case VAR_Y:
+            case VAR_Z: break;
 
             // Opcodes which take two arguments store their RHS
             case OP_ADD:
@@ -44,7 +119,7 @@ Tape::Tape(const libfive::Tree& tree) {
             case OP_MIN:
             case OP_MAX:
             case OP_SUB:
-            case OP_DIV:    last_used[c.rhs().id()] = c.id();
+            case OP_DIV:    last_used[c->rhs.get()] = c;
                             // FALLTHROUGH
 
             // Unary opcodes (and fallthrough) store their LHS)
@@ -58,8 +133,7 @@ Tape::Tape(const libfive::Tree& tree) {
             case OP_ATAN:
             case OP_EXP:
             case OP_ABS:
-            case OP_LOG:    last_used[c.lhs().id()] = c.id();
-                            ordered_fast.push_back(c.id());
+            case OP_LOG:    last_used[c->lhs.get()] = c;
                             break;
             default:    break;
         }
@@ -110,6 +184,31 @@ Tape::Tape(const libfive::Tree& tree) {
 
     for (auto& c : ordered_fast) {
         uint64_t clause = 0;
+        if (!used.count(c)) {
+            continue;
+        }
+        if (remap_rad.count(c)) {
+            OP(&clause) = GPU_OP_RAD_LHS_RHS;
+            I_LHS(&clause) = get_reg(c->lhs->lhs->lhs);
+            I_RHS(&clause) = get_reg(c->lhs->rhs->lhs);
+
+            // Release slots if this was their last use.  We do this now so
+            // that one of them can be reused for the output slots below.
+            for (auto& h : {c->lhs->lhs->lhs.get(), c->lhs->rhs->lhs.get()}) {
+                if (h != nullptr &&
+                    h->op != libfive::Opcode::CONSTANT &&
+                    last_used[h] == c)
+                {
+                    auto itr = bound_slots.find(h);
+                    free_slots.push_back(itr->second);
+                    bound_slots.erase(itr);
+                }
+            }
+            I_OUT(&clause) = getSlot(c);
+            flat.push_back(clause);
+            continue;
+        }
+
         switch (c->op) {
             using namespace libfive::Opcode;
 

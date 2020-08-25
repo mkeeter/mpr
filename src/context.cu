@@ -266,7 +266,6 @@ void eval_tiles_i(uint64_t* const __restrict__ tape_data,
             case GPU_OP_MAX_LHS_IMM: CHOICE(max, lhs, imm);
             case GPU_OP_MAX_LHS_RHS: CHOICE(max, lhs, rhs);
 
-            case GPU_OP_RAD_LHS_IMM: out = sqrt(square(lhs) + square(imm)); break;
             case GPU_OP_RAD_LHS_RHS: out = sqrt(square(lhs) + square(rhs)); break;
 
             // Non-commutative opcodes
@@ -908,8 +907,6 @@ void eval_voxels_f(const uint64_t* const __restrict__ tape_data,
             case GPU_OP_MIN_LHS_RHS: out = make_float2(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y)); break;
             case GPU_OP_MAX_LHS_IMM: out = make_float2(fmaxf(lhs.x, imm), fmaxf(lhs.y, imm)); break;
             case GPU_OP_MAX_LHS_RHS: out = make_float2(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y)); break;
-            case GPU_OP_RAD_LHS_IMM: out = make_float2(sqrtf(lhs.x * lhs.x + imm * imm),
-                                                       sqrtf(lhs.y * lhs.y + imm * imm)); break;
             case GPU_OP_RAD_LHS_RHS: out = make_float2(sqrtf(lhs.x * lhs.x + rhs.x * rhs.x),
                                                        sqrtf(lhs.y * lhs.y + rhs.y * rhs.y)); break;
 
@@ -1106,7 +1103,6 @@ void eval_pixels_d(const uint64_t* const __restrict__ tape_data,
             case GPU_OP_MIN_LHS_RHS: out = min(lhs, rhs); break;
             case GPU_OP_MAX_LHS_IMM: out = max(lhs, imm); break;
             case GPU_OP_MAX_LHS_RHS: out = max(lhs, rhs); break;
-            case GPU_OP_RAD_LHS_IMM: out = sqrt(square(lhs) + square(imm)); break;
             case GPU_OP_RAD_LHS_RHS: out = sqrt(square(lhs) + square(rhs)); break;
 
 
@@ -1605,7 +1601,6 @@ void eval_tiles_i_heatmap(uint64_t* const __restrict__ tape_data,
             case GPU_OP_MIN_LHS_RHS: CHOICE(min, lhs, rhs);
             case GPU_OP_MAX_LHS_IMM: CHOICE(max, lhs, imm);
             case GPU_OP_MAX_LHS_RHS: CHOICE(max, lhs, rhs);
-            case GPU_OP_RAD_LHS_IMM: out = sqrt(square(lhs) + square(imm)); break;
             case GPU_OP_RAD_LHS_RHS: out = sqrt(square(lhs) + square(rhs)); break;
 
             // Non-commutative opcodes
@@ -1928,8 +1923,6 @@ void eval_voxels_f_heatmap(const uint64_t* const __restrict__ tape_data,
             case GPU_OP_MIN_LHS_RHS: out = make_float2(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y)); break;
             case GPU_OP_MAX_LHS_IMM: out = make_float2(fmaxf(lhs.x, imm), fmaxf(lhs.y, imm)); break;
             case GPU_OP_MAX_LHS_RHS: out = make_float2(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y)); break;
-            case GPU_OP_RAD_LHS_IMM: out = make_float2(sqrtf(lhs.x * lhs.x + imm * imm),
-                                                       sqrtf(lhs.y * lhs.y + imm * imm)); break;
             case GPU_OP_RAD_LHS_RHS: out = make_float2(sqrtf(lhs.x * lhs.x + rhs.x * rhs.x),
                                                        sqrtf(lhs.y * lhs.y + rhs.y * rhs.y)); break;
 

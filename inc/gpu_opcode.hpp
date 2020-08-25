@@ -40,7 +40,6 @@ enum Opcode {
     GPU_OP_MIN_LHS_RHS,
     GPU_OP_MAX_LHS_IMM,
     GPU_OP_MAX_LHS_RHS,
-    GPU_OP_RAD_LHS_IMM,
     GPU_OP_RAD_LHS_RHS,
 
     // Non-commutative opcodes
