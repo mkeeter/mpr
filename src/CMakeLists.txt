@@ -11,8 +11,8 @@ target_include_directories(mpr PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../inc
     libfive/libfive/include
     ${EIGEN_INCLUDE_DIRS})
-target_link_libraries(mpr five)
+target_link_libraries(mpr libfive)
 set_target_properties(mpr PROPERTIES
-    CUDA_STANDARD 11
-    CXX_STANDARD 11
+    CUDA_STANDARD 17
+    CXX_STANDARD 17
     CUDA_SEPARABLE_COMPILATION ON)

@@ -14,8 +14,8 @@ add_executable(demo MACOSX_BUNDLE
     imgui-color-text-edit/TextEditor.cpp)
 
 set_target_properties(demo PROPERTIES
-    CUDA_STANDARD 11
-    CXX_STANDARD 11
+    CUDA_STANDARD 17
+    CXX_STANDARD 17
     CUDA_SEPARABLE_COMPILATION ON)
 target_include_directories(demo PRIVATE
     common/inc
